@@ -120,10 +120,13 @@ async function modifySelected() {
   }
 }
 
-function onModPreviewReceived(base64Img) {
+function onModPreviewReceived(data) {
   hasModImage = true;
-  clearOverlay();
-  previewImg.src = base64Img;
+  // Update region bounds from merged atlas
+  if (data.regions) {
+    modifyRegionBounds = data.regions;
+  }
+  previewImg.src = data.image;
   previewImg.style.display = "block";
   document.getElementById("modify-status-text").innerText =
     "Mod image merged. Ready to save.";
@@ -143,8 +146,8 @@ function onModPreviewReceived(base64Img) {
       const scaleW = containerW / imgW;
       const scaleH = containerH / imgH;
       viewState.scale = Math.min(scaleW, scaleH);
-      applyTransform();
     }
+    applyTransform(); // This also redraws overlay
     previewImg.onload = null;
   };
 }
@@ -328,14 +331,15 @@ function triggerPreviewUpdate() {
 
 function updateModifyPreview(names) {
   // Pure client-side: just redraw overlay canvas
-  if (hasModImage) return; // Don't overlay on merged image
   drawRegionOverlay();
   if (!names || names.length === 0) {
-    document.getElementById("modify-status-text").innerText =
-      "Select regions and click Modify Selected";
+    document.getElementById("modify-status-text").innerText = hasModImage
+      ? "Mod image merged. Ready to save."
+      : "Select regions and click Modify Selected";
   } else {
-    document.getElementById("modify-status-text").innerText =
-      `${names.length} region(s) selected`;
+    document.getElementById("modify-status-text").innerText = hasModImage
+      ? `Merged preview. ${names.length} region(s) selected.`
+      : `${names.length} region(s) selected`;
   }
 }
 
@@ -425,7 +429,7 @@ function resetPreview() {
 function applyTransform() {
   previewImg.style.transform = `translate(calc(-50% + ${viewState.x}px), calc(-50% + ${viewState.y}px)) scale(${viewState.scale})`;
   // Redraw overlay if in modify mode
-  if (currentMode === "modify" && !hasModImage) {
+  if (currentMode === "modify") {
     drawRegionOverlay();
   }
 }
@@ -810,9 +814,9 @@ window.onAtlasLoadedFromPython = async () => {
 };
 
 // Callback called from Python after mod image processed via drag-drop
-window.onModImageProcessed = (base64Img) => {
-  if (base64Img) {
-    onModPreviewReceived(base64Img);
+window.onModImageProcessed = (data) => {
+  if (data) {
+    onModPreviewReceived(data);
     showToast("Mod image loaded via drag & drop.", "success");
   }
 };

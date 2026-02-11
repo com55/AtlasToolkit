@@ -234,7 +234,7 @@ class Api:
         self._clear_modify_state()
         print("DEBUG: Exited modify mode")
 
-    def select_mod_image(self, selected_names: List[str]) -> Optional[str]:
+    def select_mod_image(self, selected_names: List[str]) -> Optional[dict[str, object]]:
         """Open a file dialog to select a mod PNG, then process it."""
         if not self.window or not self.modifier:
             return None
@@ -254,8 +254,8 @@ class Api:
         
         return self.process_mod_image(result[0], selected_names)
 
-    def process_mod_image(self, path_str: str, selected_names: List[str]) -> Optional[str]:
-        """Run merge and return base64 preview of merged image."""
+    def process_mod_image(self, path_str: str, selected_names: List[str]) -> Optional[dict[str, object]]:
+        """Run merge and return dict with base64 preview + updated region bounds."""
         if not self.modifier:
             return None
         
@@ -270,7 +270,17 @@ class Api:
             self.merged_image = merged_image
             self.merged_atlas_text = merged_atlas_text
             
-            return self._image_to_base64(merged_image)
+            # Parse updated bounds from merged atlas text
+            from atlas_modifier import parse_atlas
+            _, _, merged_regions = parse_atlas(merged_atlas_text)
+            region_bounds: dict[str, list[int]] = {}
+            for name, info in merged_regions.items():
+                region_bounds[name] = [*info.bounds, info.rotate]
+            
+            return {
+                "image": self._image_to_base64(merged_image),
+                "regions": region_bounds,
+            }
             
         except Exception as e:
             print(f"ERROR processing mod image: {e}")
