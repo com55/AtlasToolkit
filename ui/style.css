@@ -1,0 +1,374 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Segoe UI", sans-serif;
+  height: 100vh;
+  display: flex;
+  background-color: #2b2b2b;
+  color: #eee;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Layout */
+#left-panel {
+  width: 300px;
+  min-width: 300px;
+  background-color: #1e1e1e;
+  border-right: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+#right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: #333;
+  position: relative;
+}
+
+/* Header */
+.panel-header {
+  padding: 10px;
+  background-color: #252526;
+  font-weight: bold;
+  border-bottom: 1px solid #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+/* --- BUTTON STYLES (Shared) --- */
+button {
+  height: 28px; /* ความสูงเท่ากันทุกปุ่ม */
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.2s;
+}
+
+/* ปุ่ม Open (สีเทา) */
+.btn-open {
+  background-color: #3c3c3c;
+  color: #ccc;
+  border-color: #555;
+}
+.btn-open:hover {
+  background-color: #4c4c4c;
+  color: white;
+  border-color: #666;
+}
+
+/* ปุ่ม Extract (สีฟ้า) */
+.action-btn {
+  background-color: #0e639c;
+  color: white;
+}
+.action-btn:hover {
+  background-color: #1177bb;
+}
+.action-btn:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
+/* Icon Style */
+.btn-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor; /* เปลี่ยนสีตาม text color */
+}
+
+/* List Area */
+#region-list-container {
+  flex: 1;
+  overflow-y: auto;
+}
+#region-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  padding-bottom: 20px;
+}
+.region-item {
+  padding: 6px 15px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid #2a2a2a;
+  user-select: none;
+}
+.region-item:hover {
+  background-color: #2a2d2e;
+}
+
+/* Highlight Styles */
+.region-item.selected {
+  background-color: #094771;
+  color: white;
+}
+
+/* Right Panel Controls */
+#controls {
+  padding: 10px;
+  background-color: #252526;
+  border-bottom: 1px solid #444;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+  z-index: 10;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+/* Preview Area */
+#preview-container {
+  flex: 1;
+  overflow: hidden;
+  background-image: conic-gradient(
+    #222 90deg,
+    #333 90deg 180deg,
+    #222 180deg 270deg,
+    #333 270deg
+  );
+  background-size: 20px 20px;
+  position: relative;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#preview-container:active {
+  cursor: grabbing;
+}
+
+img#preview-img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  max-height: none;
+  border: 1px solid #555;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  display: none;
+  transform-origin: center center;
+  transition: transform 0.05s ease-out;
+  image-rendering: optimizeQuality; /* เหมาะกับ pixel art */
+}
+
+#status-text {
+  margin-right: auto;
+  color: #aaa;
+  font-size: 0.9em;
+}
+
+/* Toast Notification */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+}
+.toast {
+  background-color: #333;
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-left: 4px solid #0e639c; /* Blue accent */
+  font-size: 14px;
+  animation: slideIn 0.3s ease-out forwards;
+  opacity: 0;
+  transform: translateY(20px);
+  max-width: 300px;
+}
+.toast.success {
+  border-left-color: #4caf50;
+}
+.toast.error {
+  border-left-color: #f44336;
+}
+
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background-color: #1e1e1e;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #555;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #666;
+}
+::-webkit-scrollbar-corner {
+  background-color: #1e1e1e;
+}
+
+/* Modal Styling */
+.hidden {
+  display: none !important;
+}
+
+#modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(2px);
+}
+
+#modal-box {
+  background-color: #252526;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  min-width: 320px;
+  max-width: 400px;
+  border: 1px solid #454545;
+  animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes modalPop {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+#modal-title {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #ddd;
+  font-size: 18px;
+}
+
+#modal-message {
+  color: #bbb;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-primary, .btn-secondary {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.btn-primary {
+  background-color: #0e639c;
+  color: white;
+}
+.btn-primary:hover {
+  background-color: #1177bb;
+}
+.btn-primary:active {
+  background-color: #094771;
+}
+
+.btn-secondary {
+  background-color: #3c3c3c;
+  color: #ccc;
+  border: 1px solid #555;
+}
+.btn-secondary:hover {
+  background-color: #4c4c4c;
+  color: white;
+}
+.btn-secondary:active {
+  background-color: #2d2d2d;
+}
+
+/* Drop Overlay Styling */
+#drop-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(14, 99, 156, 0.85); /* semi-transparent blue */
+  z-index: 3000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(8px);
+  pointer-events: none; /* Allow events to pass through initially */
+}
+
+#drop-overlay:not(.hidden) {
+  display: flex !important;
+  pointer-events: auto;
+}
+
+.drop-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  color: white;
+  pointer-events: none;
+}
+
+.drop-message svg {
+  width: 80px;
+  height: 80px;
+  fill: white;
+  animation: bounce 1s infinite alternate;
+}
+
+@keyframes bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-15px); }
+}
+
+.drop-message span {
+  font-size: 24px;
+  font-weight: bold;
+}
