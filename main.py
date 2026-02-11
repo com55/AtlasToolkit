@@ -161,7 +161,7 @@ class Api:
                 directory=default_dir, 
                 save_filename=f"{target_regions[0]}.png"
             )
-            if result: save_path = result
+            if result: save_path = result[0]
         else:
             result = self.window.create_file_dialog(
                 webview.FileDialog.FOLDER, 
