@@ -391,6 +391,39 @@ img#preview-img {
   background-color: #2d2d2d;
 }
 
+/* Context Menu */
+#context-menu {
+  position: fixed;
+  background-color: #2d2d2d;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  z-index: 4000;
+  min-width: 160px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #ccc;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.context-menu-item:hover {
+  background-color: #094771;
+  color: white;
+}
+
+.context-menu-item .btn-icon {
+  width: 14px;
+  height: 14px;
+}
+
 /* Drop Overlay Styling */
 #drop-overlay {
   position: fixed;

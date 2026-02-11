@@ -816,3 +816,60 @@ window.onModImageProcessed = (base64Img) => {
     showToast("Mod image loaded via drag & drop.", "success");
   }
 };
+
+// ==========================================
+//  CONTEXT MENU (Right-click Copy)
+// ==========================================
+const contextMenu = document.getElementById("context-menu");
+
+previewContainer.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+
+  // Only show in extract mode and when there's a visible preview
+  if (currentMode !== "extract") return;
+  if (previewImg.style.display === "none" || !previewImg.src) return;
+
+  contextMenu.style.left = e.clientX + "px";
+  contextMenu.style.top = e.clientY + "px";
+  contextMenu.classList.remove("hidden");
+});
+
+window.addEventListener("click", () => {
+  contextMenu.classList.add("hidden");
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") contextMenu.classList.add("hidden");
+});
+
+async function copyPreviewImage() {
+  contextMenu.classList.add("hidden");
+  try {
+    // Draw the preview img onto an offscreen canvas and copy as PNG
+    const img = previewImg;
+    if (!img.naturalWidth || !img.naturalHeight) {
+      showToast("No image to copy.", "error");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/png"),
+    );
+    if (!blob) {
+      showToast("Failed to copy image.", "error");
+      return;
+    }
+
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    showToast("Image copied to clipboard.", "success");
+  } catch (e) {
+    console.error(e);
+    showToast("Failed to copy image.", "error");
+  }
+}
