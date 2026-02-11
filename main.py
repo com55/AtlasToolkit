@@ -7,16 +7,18 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
 from atlas_extracter import AtlasProcessor
+from atlas_modifier import AtlasModifier
 
 if TYPE_CHECKING:
     from PIL.Image import Image
 
 
-# HTML_TEMPLATE removed. Using ui/index.html instead.
-
 # Suppress noisy pywebview/WebView2 accessibility internal errors
 import logging
 logging.getLogger('pywebview').setLevel(logging.CRITICAL)
+
+
+IMAGE_EXTENSIONS = {'.png'}
 
 
 class Api:
@@ -24,6 +26,10 @@ class Api:
         self.atlas_path: Optional[Path] = None
         self.processor: Optional[AtlasProcessor] = None
         self.window: Optional[webview.Window] = None
+        # Modify mode state
+        self.modifier: Optional[AtlasModifier] = None
+        self.merged_image: Optional[Image] = None
+        self.merged_atlas_text: Optional[str] = None
 
     def set_window(self, window: webview.Window) -> None:
         self.window = window
@@ -65,7 +71,7 @@ class Api:
                 if expected_path.exists():
                     image_loader[page_name] = expected_path
                 else:
-                    self.window.evaluate_js(f"alert('Image \"{page_name}\" not found. Please locate it.')")
+                    self.window.evaluate_js(f"alert('Image \\\"{page_name}\\\" not found. Please locate it.')")
                     file_types = (f'{page_name} ({page_name})', 'PNG Files (*.png)', 'All files (*.*)')
                     result = self.window.create_file_dialog(
                         webview.FileDialog.OPEN, 
@@ -81,12 +87,22 @@ class Api:
 
             self.processor = AtlasProcessor(content, image_loader)
             self.window.set_title(f"Atlas Extracter - {self.atlas_path.name}")
+            
+            # Clear modify state when loading a new atlas
+            self._clear_modify_state()
+            
             return True
             
         except Exception as e:
             if self.window:
                 self.window.evaluate_js(f"alert('Error: {str(e)}')")
             return False
+
+    def _clear_modify_state(self) -> None:
+        """Reset all modify mode state."""
+        self.modifier = None
+        self.merged_image = None
+        self.merged_atlas_text = None
 
     def get_region_names(self) -> List[str]:
         if not self.processor: return []
@@ -97,15 +113,9 @@ class Api:
         if not names: return None
         
         try:
-            # 1. Extract all images and store them with their index/order
-            # User wants: "First in list = Top layer".
-            # Painter's alg: Draw bottom layer first.
-            # So we need to draw reverse of the input list.
-            
             images: List[Image] = []
             max_w, max_h = 0, 0
             
-            # Filter valid names and loading
             valid_names = [n for n in names if n in self.processor.regions]
             
             for name in valid_names:
@@ -118,26 +128,23 @@ class Api:
             if not images:
                 return None
 
-            # 2. Create Canvas
             from PIL import Image
             monitor = Image.new('RGBA', (max_w, max_h), (0, 0, 0, 0))
 
-            # 3. Draw in REVERSE order (Bottom -> Top)
-            # Input `names` is sorted by UI (index 0..N). 
-            # If names[0] is Top, we must draw it LAST.
             for img in reversed(images):
-                # Center the image or align top-left? 
-                # Usually atlas parts have offsets baked in by extract_region.
-                # If they are just loose parts, aligning 0,0 is standard.
                 monitor.paste(img, (0, 0), img)
 
-            buffered = BytesIO()
-            monitor.save(buffered, format="PNG")
-            return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+            return self._image_to_base64(monitor)
             
         except Exception as e:
             print(f"Preview Error: {e}")
         return None
+
+    def _image_to_base64(self, img: Image) -> str:
+        """Convert a PIL Image to a base64 data URI string."""
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
 
     def extract_files(self, region_names: Optional[List[str]]) -> str:
         if not self.processor or not self.atlas_path or not self.window: 
@@ -180,6 +187,119 @@ class Api:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    # ==========================================
+    #  MODIFY MODE API
+    # ==========================================
+
+    def enter_modify_mode(self) -> Optional[dict[str, object]]:
+        """Prepare the AtlasModifier from the current loaded atlas.
+        
+        Returns:
+            Dict with 'image' (base64) and 'regions' ({name: [x,y,w,h]}), or None.
+        """
+        if not self.processor or not self.atlas_path:
+            return None
+        
+        try:
+            atlas_text = self.atlas_path.read_text(encoding='utf-8')
+            
+            # Get the first loaded page image as the base
+            base_image = self.processor.get_page_image()
+            if not base_image:
+                print("ERROR: No loaded images in processor")
+                return None
+            
+            self.modifier = AtlasModifier(atlas_text, self.atlas_path, base_image)
+            self.merged_image = None
+            self.merged_atlas_text = None
+            print("DEBUG: Entered modify mode")
+            
+            # Build region bounds dict for client-side overlay
+            # Each value: [x, y, w, h, rotate]
+            region_bounds: dict[str, list[int]] = {}
+            for name, info in self.modifier.regions.items():
+                region_bounds[name] = [*info.bounds, info.rotate]
+            
+            return {
+                "image": self._image_to_base64(base_image),
+                "regions": region_bounds,
+            }
+            
+        except Exception as e:
+            print(f"ERROR entering modify mode: {e}")
+            return None
+
+    def exit_modify_mode(self) -> None:
+        """Clean up modify mode state."""
+        self._clear_modify_state()
+        print("DEBUG: Exited modify mode")
+
+    def select_mod_image(self, selected_names: List[str]) -> Optional[str]:
+        """Open a file dialog to select a mod PNG, then process it."""
+        if not self.window or not self.modifier:
+            return None
+        
+        file_types = ('PNG Files (*.png)', 'All files (*.*)')
+        default_dir = str(self.atlas_path.parent) if self.atlas_path else ''
+        
+        result = self.window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=file_types,
+            directory=default_dir,
+        )
+        
+        if not result:
+            return None
+        
+        return self.process_mod_image(result[0], selected_names)
+
+    def process_mod_image(self, path_str: str, selected_names: List[str]) -> Optional[str]:
+        """Run merge and return base64 preview of merged image."""
+        if not self.modifier:
+            return None
+        
+        try:
+            mod_path = Path(path_str)
+            print(f"DEBUG: Processing mod image: {mod_path}")
+            
+            merged_image, merged_atlas_text = self.modifier.merge_mod_image(
+                mod_path, selected_names
+            )
+            
+            self.merged_image = merged_image
+            self.merged_atlas_text = merged_atlas_text
+            
+            return self._image_to_base64(merged_image)
+            
+        except Exception as e:
+            print(f"ERROR processing mod image: {e}")
+            if self.window:
+                self.window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
+            return None
+
+    def save_modified(self) -> str:
+        """Open a folder dialog and save the merged atlas files."""
+        if not self.modifier or not self.merged_image or not self.merged_atlas_text or not self.window:
+            return "Error: No merged data to save."
+        
+        default_dir = str(self.atlas_path.parent) if self.atlas_path else ''
+        
+        result = self.window.create_file_dialog(
+            webview.FileDialog.FOLDER,
+            directory=default_dir,
+        )
+        
+        if not result:
+            return "Cancelled"
+        
+        try:
+            output_dir = Path(result[0])
+            self.modifier.save(output_dir, self.merged_image, self.merged_atlas_text)
+            return f"Saved to: {output_dir}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     def debug_log(self, msg: str) -> None:
         print(f"JS_DEBUG: {msg}")
 
@@ -189,30 +309,51 @@ class Api:
             if len(files) > 0:
                 path = files[0].get('pywebviewFullPath')
                 print(f"DEBUG: Dropped file path: {path}")
-                if path and path.lower().endswith('.atlas'):
+                if not path:
+                    return
+                
+                path_lower = path.lower()
+                
+                if path_lower.endswith('.atlas'):
+                    # Always load atlas (switch to extract mode if in modify)
                     if self.load_atlas(path):
                         if self.window:
                             self.window.evaluate_js("onAtlasLoadedFromPython()")
+                
+                elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
+                    # Image dropped — only handle in modify mode
+                    if self.modifier:
+                        # Get currently selected names from JS
+                        if self.window:
+                            self.window.evaluate_js("""
+                                (async () => {
+                                    const names = getSelectedNames();
+                                    if (names.length === 0) {
+                                        showToast('Select at least one region first.', 'error');
+                                        return;
+                                    }
+                                    const result = await pywebview.api.process_mod_image('%s', names);
+                                    window.onModImageProcessed(result);
+                                })();
+                            """ % path.replace('\\', '\\\\').replace("'", "\\'"))
+                    else:
+                        if self.window:
+                            self.window.evaluate_js("showToast('Enter Modify Mode first to drop images.', 'error')")
                 else:
                     if self.window:
-                        self.window.evaluate_js("showToast('Please drop a valid .atlas file.', 'error')")
+                        self.window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
             print(f"Drop Error: {ex}")
 
-def setup_drop(window: webview.Window, api: Api):
-    def on_loaded():
+def setup_drop(window: webview.Window, api: Api) -> None:
+    def on_loaded() -> None:
         print("DEBUG: Window loaded, binding events...")
         try:
             from webview.dom import DOMEventHandler
-            overlay = window.dom.get_element('#drop-overlay')
-            if overlay:
-                print("DEBUG: Found #drop-overlay, binding drop event")
-                overlay.on('drop', DOMEventHandler(api.on_drop, True, True))
-            else:
-                print("ERROR: Could not find #drop-overlay in DOM")
-            
-            # Fallback
+
+            # Bind drop handler on document (events bubble up from #drop-overlay)
             window.dom.document.on('drop', DOMEventHandler(api.on_drop, True, True))
+
             print("DEBUG: Event binding finished")
         except Exception as e:
             print(f"ERROR in on_loaded: {e}")

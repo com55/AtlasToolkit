@@ -159,6 +159,14 @@ class AtlasProcessor:
             except Exception as e:
                 logging.error(f"Failed to load image {page.filename}: {e}")
 
+    def get_page_image(self, page_filename: Optional[str] = None) -> Optional[Image.Image]:
+        """Get a loaded page image by filename, or the first one if not specified."""
+        if page_filename:
+            return self._loaded_images.get(page_filename)
+        if self._loaded_images:
+            return next(iter(self._loaded_images.values()))
+        return None
+
     def extract_region(self, name: str) -> Optional[Image.Image]:
         region = self.regions.get(name)
         if not region: return None

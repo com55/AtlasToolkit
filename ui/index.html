@@ -9,19 +9,57 @@
   <body>
     <div id="left-panel">
       <div class="panel-header">
-        <span>Regions (<span id="count">0</span>)</span>
-        <button class="btn-open" onclick="openFile()">
-          <svg
-            class="btn-icon"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 -960 960 960"
-          >
-            <path
-              d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H447l-80-80H160v480l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Zm84-80h516l72-240H316l-72 240Zm0 0 72-240-72 240Zm-84-400v-80 80Z"
-            />
-          </svg>
-          Open .atlas
-        </button>
+        <!-- Extract Mode Header -->
+        <div id="normal-header">
+          <span>Regions (<span id="count">0</span>)</span>
+          <div class="panel-header-buttons">
+            <button class="btn-open" onclick="openFile()">
+              <svg
+                class="btn-icon"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 -960 960 960"
+              >
+                <path
+                  d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H447l-80-80H160v480l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Zm84-80h516l72-240H316l-72 240Zm0 0 72-240-72 240Zm-84-400v-80 80Z"
+                />
+              </svg>
+              Open
+            </button>
+            <button
+              class="btn-open"
+              id="btn-enter-modify"
+              onclick="enterModifyMode()"
+              disabled
+            >
+              <svg
+                class="btn-icon"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 -960 960 960"
+              >
+                <path
+                  d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"
+                />
+              </svg>
+              Modify
+            </button>
+          </div>
+        </div>
+        <!-- Modify Mode Header -->
+        <div id="modify-header" class="hidden">
+          <span>Modify Mode</span>
+          <button class="btn-open" onclick="exitModifyMode()">
+            <svg
+              class="btn-icon"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 -960 960 960"
+            >
+              <path
+                d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"
+              />
+            </svg>
+            Back
+          </button>
+        </div>
       </div>
       <div id="region-list-container">
         <ul id="region-list"></ul>
@@ -30,21 +68,49 @@
 
     <div id="right-panel">
       <div id="controls">
-        <span id="status-text">Ready</span>
-        <button
-          class="action-btn"
-          id="btn-extract-sel"
-          onclick="extractSelected()"
-          disabled
-        >
-          Extract Selected
-        </button>
-        <button class="action-btn" id="btn-extract-all" onclick="extractAll()">
-          Extract All
-        </button>
+        <!-- Extract Mode Controls -->
+        <div id="extract-controls">
+          <span id="status-text">Ready</span>
+          <button
+            class="action-btn"
+            id="btn-extract-sel"
+            onclick="extractSelected()"
+            disabled
+          >
+            Extract Selected
+          </button>
+          <button
+            class="action-btn"
+            id="btn-extract-all"
+            onclick="extractAll()"
+            disabled
+          >
+            Extract All
+          </button>
+        </div>
+        <!-- Modify Mode Controls -->
+        <div id="modify-controls" class="hidden">
+          <button
+            class="action-btn"
+            id="btn-modify-sel"
+            onclick="modifySelected()"
+          >
+            Modify Selected
+          </button>
+          <span id="modify-status-text">No mod image loaded</span>
+          <button
+            class="action-btn btn-save"
+            id="btn-save-mod"
+            onclick="saveModified()"
+            disabled
+          >
+            Save As...
+          </button>
+        </div>
       </div>
       <div id="preview-container">
         <img id="preview-img" src="" alt="Preview" />
+        <canvas id="region-overlay"></canvas>
       </div>
     </div>
 
@@ -68,7 +134,7 @@
             d="M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"
           />
         </svg>
-        <span>Drop .atlas file here to load</span>
+        <span id="drop-message-text">Drop .atlas file here to load</span>
       </div>
     </div>
 

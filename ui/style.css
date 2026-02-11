@@ -38,13 +38,28 @@ body {
   justify-content: space-between;
   align-items: center;
   z-index: 10;
-  height: 40px;
+  min-height: 40px;
   box-sizing: border-box;
+}
+
+#normal-header,
+#modify-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.panel-header-buttons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* --- BUTTON STYLES (Shared) --- */
 button {
-  height: 28px; /* ความสูงเท่ากันทุกปุ่ม */
+  height: 28px;
   padding: 0 12px;
   display: flex;
   align-items: center;
@@ -60,7 +75,7 @@ button {
   transition: all 0.2s;
 }
 
-/* ปุ่ม Open (สีเทา) */
+/* Open / Back buttons (grey) */
 .btn-open {
   background-color: #3c3c3c;
   color: #ccc;
@@ -71,8 +86,14 @@ button {
   color: white;
   border-color: #666;
 }
+.btn-open:disabled {
+  background-color: #333;
+  color: #666;
+  cursor: not-allowed;
+  border-color: #444;
+}
 
-/* ปุ่ม Extract (สีฟ้า) */
+/* Extract buttons (blue) */
 .action-btn {
   background-color: #0e639c;
   color: white;
@@ -87,11 +108,26 @@ button {
   border-color: #444;
 }
 
+/* Save button (green) */
+.btn-save {
+  background-color: #388e3c;
+  color: white;
+}
+.btn-save:hover {
+  background-color: #4caf50;
+}
+.btn-save:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
 /* Icon Style */
 .btn-icon {
   width: 16px;
   height: 16px;
-  fill: currentColor; /* เปลี่ยนสีตาม text color */
+  fill: currentColor;
 }
 
 /* List Area */
@@ -132,8 +168,16 @@ button {
   gap: 10px;
   align-items: center;
   z-index: 10;
-  height: 40px;
+  min-height: 40px;
   box-sizing: border-box;
+}
+
+#extract-controls,
+#modify-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
 }
 
 /* Preview Area */
@@ -168,13 +212,27 @@ img#preview-img {
   display: none;
   transform-origin: center center;
   transition: transform 0.05s ease-out;
-  image-rendering: optimizeQuality; /* เหมาะกับ pixel art */
+  image-rendering: optimizeQuality;
 }
 
-#status-text {
+#region-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#status-text,
+#modify-status-text {
   margin-right: auto;
   color: #aaa;
   font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Toast Notification */
@@ -268,8 +326,14 @@ img#preview-img {
 }
 
 @keyframes modalPop {
-  from { transform: scale(0.9); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 #modal-title {
@@ -291,7 +355,8 @@ img#preview-img {
   gap: 10px;
 }
 
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   padding: 8px 16px;
   border: none;
   border-radius: 4px;
@@ -333,13 +398,13 @@ img#preview-img {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(14, 99, 156, 0.85); /* semi-transparent blue */
+  background-color: rgba(14, 99, 156, 0.85);
   z-index: 3000;
   display: flex;
   justify-content: center;
   align-items: center;
   backdrop-filter: blur(8px);
-  pointer-events: none; /* Allow events to pass through initially */
+  pointer-events: none;
 }
 
 #drop-overlay:not(.hidden) {
@@ -364,8 +429,12 @@ img#preview-img {
 }
 
 @keyframes bounce {
-  from { transform: translateY(0); }
-  to { transform: translateY(-15px); }
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-15px);
+  }
 }
 
 .drop-message span {

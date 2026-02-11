@@ -4,6 +4,9 @@ let selectedIndices = new Set();
 let lastClickIndex = -1;
 let isDragSelecting = false;
 let dragStartIndex = -1;
+let currentMode = "extract"; // 'extract' | 'modify'
+let modifyRegionBounds = {}; // {name: [x, y, w, h], ...}
+let hasModImage = false;
 let viewState = {
   scale: 1,
   x: 0,
@@ -18,7 +21,153 @@ window.addEventListener("pywebviewready", async function () {
   if (loaded) await loadRegions();
 });
 
-// --- Logic ---
+// ==========================================
+//  MODE SWITCHING
+// ==========================================
+function setMode(mode) {
+  currentMode = mode;
+  const normalHeader = document.getElementById("normal-header");
+  const modifyHeader = document.getElementById("modify-header");
+  const extractControls = document.getElementById("extract-controls");
+  const modifyControls = document.getElementById("modify-controls");
+  const dropMsg = document.getElementById("drop-message-text");
+
+  if (mode === "modify") {
+    normalHeader.classList.add("hidden");
+    modifyHeader.classList.remove("hidden");
+    extractControls.classList.add("hidden");
+    modifyControls.classList.remove("hidden");
+    dropMsg.textContent = "Drop image to modify, or .atlas to load";
+  } else {
+    normalHeader.classList.remove("hidden");
+    modifyHeader.classList.add("hidden");
+    extractControls.classList.remove("hidden");
+    modifyControls.classList.add("hidden");
+    dropMsg.textContent = "Drop .atlas file here to load";
+  }
+}
+
+async function enterModifyMode() {
+  try {
+    const data = await pywebview.api.enter_modify_mode();
+    if (data) {
+      setMode("modify");
+      modifyRegionBounds = data.regions || {};
+      hasModImage = false;
+      document.getElementById("modify-status-text").innerText =
+        "Select regions and click Modify Selected";
+      document.getElementById("btn-save-mod").disabled = true;
+      // Show the original atlas PNG
+      previewImg.src = data.image;
+      previewImg.style.display = "block";
+      previewImg.onload = function () {
+        resetPreview();
+        const containerW = previewContainer.clientWidth - 40;
+        const containerH = previewContainer.clientHeight - 40;
+        const imgW = previewImg.naturalWidth;
+        const imgH = previewImg.naturalHeight;
+        if (imgW > containerW || imgH > containerH) {
+          viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+          applyTransform();
+        }
+        previewImg.onload = null;
+      };
+    } else {
+      showToast("Load an atlas first.", "error");
+    }
+  } catch (e) {
+    console.error(e);
+    showToast("Failed to enter modify mode.", "error");
+  }
+}
+
+async function exitModifyMode() {
+  try {
+    await pywebview.api.exit_modify_mode();
+  } catch (e) {
+    console.error(e);
+  }
+  setMode("extract");
+  modifyRegionBounds = {};
+  hasModImage = false;
+  clearOverlay();
+  // Restore preview from current selection
+  previewImg.style.display = "none";
+  resetPreview();
+  document.getElementById("status-text").innerText = "Ready";
+  updatePreview(getSelectedNames());
+}
+
+async function modifySelected() {
+  if (selectedIndices.size === 0) {
+    showToast("Select at least one region first.", "error");
+    return;
+  }
+  try {
+    document.getElementById("modify-status-text").innerText =
+      "Selecting mod image...";
+    const names = getSelectedNames();
+    const result = await pywebview.api.select_mod_image(names);
+    if (result) {
+      onModPreviewReceived(result);
+    } else {
+      document.getElementById("modify-status-text").innerText =
+        "Cancelled or no image selected.";
+    }
+  } catch (e) {
+    console.error(e);
+    showToast("Error selecting mod image.", "error");
+  }
+}
+
+function onModPreviewReceived(base64Img) {
+  hasModImage = true;
+  clearOverlay();
+  previewImg.src = base64Img;
+  previewImg.style.display = "block";
+  document.getElementById("modify-status-text").innerText =
+    "Mod image merged. Ready to save.";
+  document.getElementById("btn-save-mod").disabled = false;
+
+  previewImg.onload = function () {
+    resetPreview();
+    const containerW = previewContainer.clientWidth - 40;
+    const containerH = previewContainer.clientHeight - 40;
+    const imgW = previewImg.naturalWidth;
+    const imgH = previewImg.naturalHeight;
+
+    document.getElementById("modify-status-text").innerText =
+      `Merged preview (${imgW}x${imgH}). Ready to save.`;
+
+    if (imgW > containerW || imgH > containerH) {
+      const scaleW = containerW / imgW;
+      const scaleH = containerH / imgH;
+      viewState.scale = Math.min(scaleW, scaleH);
+      applyTransform();
+    }
+    previewImg.onload = null;
+  };
+}
+
+async function saveModified() {
+  try {
+    document.getElementById("modify-status-text").innerText = "Saving...";
+    const result = await pywebview.api.save_modified();
+    if (result.startsWith("Error") || result === "Cancelled") {
+      showToast(result, result === "Cancelled" ? "info" : "error");
+    } else {
+      showToast(result, "success");
+    }
+    document.getElementById("modify-status-text").innerText = result;
+  } catch (e) {
+    console.error(e);
+    showToast("Save failed.", "error");
+  }
+}
+
+// ==========================================
+//  CORE LOGIC
+// ==========================================
 async function openFile() {
   try {
     const success = await pywebview.api.choose_file();
@@ -50,8 +199,14 @@ async function loadRegions() {
     li.addEventListener("mouseenter", (e) => onRegionMouseEnter(e, index));
     listEl.appendChild(li);
   });
-  if (regionsData.length > 0)
+  if (regionsData.length > 0) {
     document.getElementById("status-text").innerText = "Atlas loaded.";
+    document.getElementById("btn-enter-modify").disabled = false;
+    document.getElementById("btn-extract-all").disabled = false;
+  } else {
+    document.getElementById("btn-enter-modify").disabled = true;
+    document.getElementById("btn-extract-all").disabled = true;
+  }
 }
 
 function getSelectedNames() {
@@ -63,7 +218,7 @@ function getSelectedNames() {
 // --- Auto-Scroll State ---
 let autoScrollSpeed = 0;
 let autoScrollInterval = null;
-const SCROLL_ZONE_SIZE = 50; // px from edge to trigger scroll
+const SCROLL_ZONE_SIZE = 50;
 const MAX_SCROLL_SPEED = 15;
 let lastMouseX = 0;
 let lastMouseY = 0;
@@ -78,7 +233,6 @@ function onRegionMouseDown(e, index, name) {
   if (e.ctrlKey || e.metaKey) {
     toggleIndex(index);
     lastClickIndex = index;
-    // Ctrl-drag not typically supported for list selection in standard OS, keeping simple
   } else if (e.shiftKey && lastClickIndex !== -1) {
     selectRange(
       Math.min(lastClickIndex, index),
@@ -92,10 +246,8 @@ function onRegionMouseDown(e, index, name) {
   }
 
   renderSelection();
-  triggerPreviewUpdate(); // Uses debounce
-  // updateButtons called inside triggerPreviewUpdate if changed, but safe to call here too
+  triggerPreviewUpdate();
 
-  // Start global tracking
   window.addEventListener("mousemove", onWindowMouseMove);
   startAutoScroll();
 }
@@ -110,20 +262,16 @@ function onWindowMouseMove(e) {
   const container = document.getElementById("region-list-container");
   const rect = container.getBoundingClientRect();
 
-  // 1. Calculate Auto-Scroll Speed
   if (e.clientY < rect.top + SCROLL_ZONE_SIZE) {
-    // Scrolling Up
     const dist = Math.max(0, rect.top + SCROLL_ZONE_SIZE - e.clientY);
     autoScrollSpeed = -(dist / SCROLL_ZONE_SIZE) * MAX_SCROLL_SPEED;
   } else if (e.clientY > rect.bottom - SCROLL_ZONE_SIZE) {
-    // Scrolling Down
     const dist = Math.max(0, e.clientY - (rect.bottom - SCROLL_ZONE_SIZE));
     autoScrollSpeed = (dist / SCROLL_ZONE_SIZE) * MAX_SCROLL_SPEED;
   } else {
     autoScrollSpeed = 0;
   }
 
-  // 2. Resolve target index from mouse position
   updateSelectionFromMouse(e.clientX, e.clientY);
 }
 
@@ -131,10 +279,8 @@ function updateSelectionFromMouse(clientX, clientY) {
   const container = document.getElementById("region-list-container");
   const rect = container.getBoundingClientRect();
 
-  // Clamp Y to container bounds for element detection
-  // checking slightly inside to ensure we hit an element
   let checkY = Math.max(rect.top + 1, Math.min(clientY, rect.bottom - 1));
-  let checkX = rect.left + rect.width / 2; // Check center of list
+  let checkX = rect.left + rect.width / 2;
 
   const el = document.elementFromPoint(checkX, checkY);
   const item = el?.closest(".region-item");
@@ -142,18 +288,14 @@ function updateSelectionFromMouse(clientX, clientY) {
   if (item) {
     const index = parseInt(item.dataset.index);
     if (!isNaN(index)) {
-      // Update Selection Range
       const start = Math.min(dragStartIndex, index);
       const end = Math.max(dragStartIndex, index);
 
-      // If not holding Ctrl, clear previous
-      // (Assuming standard drag behavior is "Set Selection", not "Add to Selection")
       selectedIndices.clear();
       for (let i = start; i <= end; i++) selectedIndices.add(i);
 
       lastClickIndex = index;
       renderSelection();
-      // Use shared trigger for debounce
       triggerPreviewUpdate();
     }
   }
@@ -170,15 +312,30 @@ function triggerPreviewUpdate() {
   if (currentJSON !== lastSelectedJSON) {
     lastSelectedJSON = currentJSON;
 
-    // Clear any pending update
     if (previewTimeout) clearTimeout(previewTimeout);
 
-    // Set new debounce timer (e.g., 50ms)
     previewTimeout = setTimeout(() => {
-      updatePreview(currentNames);
+      if (currentMode === "modify") {
+        updateModifyPreview(currentNames);
+      } else {
+        updatePreview(currentNames);
+      }
     }, 50);
 
-    updateButtons(); // Buttons can update immediately
+    updateButtons();
+  }
+}
+
+function updateModifyPreview(names) {
+  // Pure client-side: just redraw overlay canvas
+  if (hasModImage) return; // Don't overlay on merged image
+  drawRegionOverlay();
+  if (!names || names.length === 0) {
+    document.getElementById("modify-status-text").innerText =
+      "Select regions and click Modify Selected";
+  } else {
+    document.getElementById("modify-status-text").innerText =
+      `${names.length} region(s) selected`;
   }
 }
 
@@ -195,11 +352,9 @@ function startAutoScroll() {
       const container = document.getElementById("region-list-container");
       container.scrollTop += autoScrollSpeed;
 
-      // Update selection based on new scroll position (list moving under stationary mouse)
       updateSelectionFromMouse(lastMouseX, lastMouseY);
     }
 
-    // Check for selection change and update preview (debounced)
     triggerPreviewUpdate();
 
     autoScrollInterval = requestAnimationFrame(scrollLoop);
@@ -215,7 +370,6 @@ function stopAutoScroll() {
   autoScrollSpeed = 0;
 }
 
-// Remove old onRegionMouseEnter as it conflicts/is redundant with global router
 function onRegionMouseEnter(e, index) {
   // Deprecated in favor of global handler
 }
@@ -225,7 +379,11 @@ window.addEventListener("mouseup", () => {
     isDragSelecting = false;
     stopAutoScroll();
     window.removeEventListener("mousemove", onWindowMouseMove);
-    updatePreview(getSelectedNames()); // Final update
+    if (currentMode === "extract") {
+      updatePreview(getSelectedNames());
+    } else {
+      updateModifyPreview(getSelectedNames());
+    }
     updateButtons();
   }
   viewState.isDragging = false;
@@ -266,11 +424,102 @@ function resetPreview() {
 
 function applyTransform() {
   previewImg.style.transform = `translate(calc(-50% + ${viewState.x}px), calc(-50% + ${viewState.y}px)) scale(${viewState.scale})`;
+  // Redraw overlay if in modify mode
+  if (currentMode === "modify" && !hasModImage) {
+    drawRegionOverlay();
+  }
+}
+
+// ==========================================
+//  REGION OVERLAY (Canvas)
+// ==========================================
+function drawRegionOverlay() {
+  const canvas = document.getElementById("region-overlay");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  const dpr = window.devicePixelRatio || 1;
+  const containerW = previewContainer.clientWidth;
+  const containerH = previewContainer.clientHeight;
+  canvas.width = containerW * dpr;
+  canvas.height = containerH * dpr;
+  canvas.style.width = containerW + "px";
+  canvas.style.height = containerH + "px";
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, containerW, containerH);
+
+  if (currentMode !== "modify" || selectedIndices.size === 0) return;
+
+  const imgW = previewImg.naturalWidth;
+  const imgH = previewImg.naturalHeight;
+  if (!imgW || !imgH) return;
+
+  // Compute image position on screen
+  const scale = viewState.scale;
+  const centerX = containerW / 2 + viewState.x;
+  const centerY = containerH / 2 + viewState.y;
+  const displayW = imgW * scale;
+  const displayH = imgH * scale;
+  const topLeftX = centerX - displayW / 2;
+  const topLeftY = centerY - displayH / 2;
+
+  const lineWidth = 3;
+  const names = getSelectedNames();
+
+  for (const name of names) {
+    const bounds = modifyRegionBounds[name];
+    if (!bounds) continue;
+    const [bx, by, bw, bh, rotate] = bounds;
+
+    // Spine atlas stores w/h swapped for 90°/270° rotated regions
+    const isRotated = rotate === 90 || rotate === 270;
+    const drawW = isRotated ? bh : bw;
+    const drawH = isRotated ? bw : bh;
+
+    // Convert to screen coords
+    const rx = topLeftX + bx * scale;
+    const ry = topLeftY + by * scale;
+    const rw = drawW * scale;
+    const rh = drawH * scale;
+
+    // Draw rect — expand outward by lineWidth
+    ctx.strokeStyle = "rgba(255, 60, 60, 0.85)";
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(
+      rx - lineWidth / 2,
+      ry - lineWidth / 2,
+      rw + lineWidth,
+      rh + lineWidth,
+    );
+
+    // Draw label above the box
+    const fontSize = 13;
+    ctx.font = `bold ${fontSize}px "Segoe UI", sans-serif`;
+    const textMetrics = ctx.measureText(name);
+    const textW = textMetrics.width;
+    const labelX = rx;
+    const labelY = ry - lineWidth - 2;
+
+    // Label background
+    ctx.fillStyle = "rgba(255, 60, 60, 0.85)";
+    ctx.fillRect(labelX - 1, labelY - fontSize, textW + 8, fontSize + 4);
+
+    // Label text
+    ctx.fillStyle = "white";
+    ctx.fillText(name, labelX + 3, labelY - 1);
+  }
+}
+
+function clearOverlay() {
+  const canvas = document.getElementById("region-overlay");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 async function updatePreview(names) {
   const status = document.getElementById("status-text");
-  // names is now a list
   if (!names || names.length === 0) {
     previewImg.style.display = "none";
     status.innerText = "No selection";
@@ -287,29 +536,26 @@ async function updatePreview(names) {
       status.innerText = `Previewing: ${names.length} regions`;
     }
 
-    // รอให้รูปโหลดก่อนเพื่อหาขนาดจริง
     previewImg.onload = function () {
       resetPreview();
-      const containerW = previewContainer.clientWidth - 40; // เผื่อ padding
+      const containerW = previewContainer.clientWidth - 40;
       const containerH = previewContainer.clientHeight - 40;
       const imgW = previewImg.naturalWidth;
       const imgH = previewImg.naturalHeight;
 
-      // Update status with size
       if (names.length === 1) {
         status.innerText = `Previewing: ${names[0]} (${imgW}x${imgH})`;
       } else {
         status.innerText = `Previewing: ${names.length} regions (${imgW}x${imgH})`;
       }
 
-      // ถ้าขนาดรูปใหญ่กว่าหน้าต่าง ให้ปรับ Fit
       if (imgW > containerW || imgH > containerH) {
         const scaleW = containerW / imgW;
         const scaleH = containerH / imgH;
         viewState.scale = Math.min(scaleW, scaleH);
         applyTransform();
       }
-      previewImg.onload = null; // ป้องกัน Loop ถ้าเปลี่ยน src เดิม
+      previewImg.onload = null;
     };
   } else {
     previewImg.style.display = "none";
@@ -322,18 +568,15 @@ previewContainer.addEventListener("wheel", (e) => {
   const zoomIntensity = 0.1;
   const direction = -Math.sign(e.deltaY);
   const newScale =
-    viewState.scale + direction * zoomIntensity * viewState.scale; // Zoom proportional to current scale feels better
+    viewState.scale + direction * zoomIntensity * viewState.scale;
 
   if (newScale > 0.1 && newScale < 50) {
-    // Get mouse position relative to container center
     const rect = previewContainer.getBoundingClientRect();
     const cx = rect.width / 2;
     const cy = rect.height / 2;
     const mx = e.clientX - rect.left - cx;
     const my = e.clientY - rect.top - cy;
 
-    // Calculate new position to keep mouse over the same image point
-    // Formula: newPos = mousePos - (mousePos - oldPos) * (newScale / oldScale)
     viewState.x = mx - (mx - viewState.x) * (newScale / viewState.scale);
     viewState.y = my - (my - viewState.y) * (newScale / viewState.scale);
 
@@ -362,6 +605,13 @@ function updateButtons() {
   const btnSel = document.getElementById("btn-extract-sel");
   btnSel.disabled = selectedIndices.size === 0;
   btnSel.innerText = `Extract Selected (${selectedIndices.size})`;
+
+  // Update modify button state too
+  const btnModSel = document.getElementById("btn-modify-sel");
+  if (btnModSel) {
+    btnModSel.disabled = selectedIndices.size === 0;
+    btnModSel.innerText = `Modify Selected (${selectedIndices.size})`;
+  }
 }
 
 async function extractSelected() {
@@ -403,10 +653,8 @@ function showConfirm(message, title = "Confirm") {
     msgEl.innerText = message;
     overlay.classList.remove("hidden");
 
-    // Defocus any existing element to prevent accidental double triggering
     if (document.activeElement) document.activeElement.blur();
 
-    // Focus confirm button for keyboard accessibility
     btnConfirm.focus();
 
     function cleanup() {
@@ -445,18 +693,13 @@ function showToast(message, type = "info") {
 
   container.appendChild(toast);
 
-  // Remove after 3 seconds
   setTimeout(() => {
-    // 1. Lock the visual state from the end of slideIn
-    // (Prevent snapping back to opacity:0 / translateY(20px))
     toast.style.opacity = "1";
     toast.style.transform = "translateY(0)";
 
-    // 2. Clear old animation
     toast.style.animation = "none";
     toast.offsetHeight; /* trigger reflow */
 
-    // 3. Start fadeOut
     toast.style.animation = "fadeOut 0.5s ease-out forwards";
 
     toast.addEventListener("animationend", () => {
@@ -468,11 +711,10 @@ function showToast(message, type = "info") {
 //  KEYBOARD NAVIGATION (Arrow Keys)
 // ==========================================
 window.addEventListener("keydown", (e) => {
-  // ถ้าไม่มีข้อมูล หรือไม่ได้กดปุ่มลูกศร ให้ข้ามไป
   if (regionsData.length === 0) return;
   if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
 
-  e.preventDefault(); // ป้องกันหน้าจอเลื่อนเอง
+  e.preventDefault();
 
   let newIndex = lastClickIndex;
 
@@ -484,13 +726,9 @@ window.addEventListener("keydown", (e) => {
     if (newIndex < 0) newIndex = 0;
   }
 
-  // ถ้าค่า Index ไม่เปลี่ยน (เช่น สุดขอบแล้ว) ไม่ต้องทำอะไร
   if (newIndex === lastClickIndex && selectedIndices.size > 0) return;
 
-  // Logic การเลือก
   if (e.shiftKey) {
-    // Shift: เลือกช่วง (Excel Style)
-    // ต้องหาจุด Anchor เดิม (dragStartIndex) ถ้าไม่มีให้ใช้ตัวปัจจุบัน
     if (dragStartIndex === -1) dragStartIndex = lastClickIndex;
 
     selectedIndices.clear();
@@ -498,26 +736,27 @@ window.addEventListener("keydown", (e) => {
     const end = Math.max(dragStartIndex, newIndex);
     for (let i = start; i <= end; i++) selectedIndices.add(i);
   } else {
-    // Normal: เลือกตัวเดียว
     selectedIndices.clear();
     selectedIndices.add(newIndex);
-    dragStartIndex = newIndex; // Reset anchor
+    dragStartIndex = newIndex;
   }
 
   lastClickIndex = newIndex;
 
-  // Update UI
   renderSelection();
-  updatePreview(getSelectedNames());
+  if (currentMode === "extract") {
+    updatePreview(getSelectedNames());
+  } else {
+    updateModifyPreview(getSelectedNames());
+  }
   updateButtons();
 
-  // Scroll ไปหาตัวที่เลือก
   const item = document.querySelector(`.region-item[data-index="${newIndex}"]`);
   if (item) item.scrollIntoView({ block: "nearest" });
 });
 
 // ==========================================
-//  DRAG AND DROP SUPPORT (.atlas files)
+//  DRAG AND DROP SUPPORT
 // ==========================================
 const dropOverlay = document.getElementById("drop-overlay");
 
@@ -542,7 +781,6 @@ dropOverlay.addEventListener("dragover", (e) => {
 
 dropOverlay.addEventListener("dragleave", (e) => {
   e.preventDefault();
-  // Only hide if we actually leave the overlay area
   if (e.relatedTarget === null || !dropOverlay.contains(e.relatedTarget)) {
     dropOverlay.classList.add("hidden");
     dropOverlay.style.pointerEvents = "none";
@@ -550,7 +788,7 @@ dropOverlay.addEventListener("dragleave", (e) => {
 });
 
 dropOverlay.addEventListener("drop", (e) => {
-  e.preventDefault(); // CRITICAL: Stop browser from opening file
+  e.preventDefault();
   dropOverlay.classList.add("hidden");
   dropOverlay.style.pointerEvents = "none";
   // Python handler (DOMEventHandler) will continue to process the file
@@ -558,6 +796,10 @@ dropOverlay.addEventListener("drop", (e) => {
 
 // Callback called from Python after successful drop loading
 window.onAtlasLoadedFromPython = async () => {
+  // If we were in modify mode, switch back
+  if (currentMode === "modify") {
+    setMode("extract");
+  }
   selectedIndices.clear();
   lastClickIndex = -1;
   document.getElementById("preview-img").style.display = "none";
@@ -565,4 +807,12 @@ window.onAtlasLoadedFromPython = async () => {
   updateButtons();
   await loadRegions();
   showToast("Atlas loaded via drag & drop.", "success");
+};
+
+// Callback called from Python after mod image processed via drag-drop
+window.onModImageProcessed = (base64Img) => {
+  if (base64Img) {
+    onModPreviewReceived(base64Img);
+    showToast("Mod image loaded via drag & drop.", "success");
+  }
 };
