@@ -2,7 +2,9 @@
 Atlas Mod Merger Module
 
 Merges modified mod images back into the original atlas PNG,
-expanding the canvas horizontally and updating region bounds in the atlas file.
+expanding the canvas (right or below, with optional 90° rotation)
+and updating region bounds in the atlas file.
+The placement strategy that yields the smallest total pixel area is chosen.
 """
 
 from __future__ import annotations
@@ -124,10 +126,17 @@ def parse_atlas(atlas_text: str) -> Tuple[Dict[str, str], List[str], Dict[str, R
     return page_info, region_names, regions
 
 
+# Type alias for updated region data: (bounds, offsets, rotate)
+UpdatedRegionData = Dict[
+    str,
+    Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]], int],
+]
+
+
 def update_atlas_text(
     atlas_text: str,
     new_size: Tuple[int, int],
-    updated_regions: Dict[str, Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]]]],
+    updated_regions: UpdatedRegionData,
 ) -> str:
     """
     Reconstructs the atlas text with updated bounds/offsets for specific regions.
@@ -158,24 +167,42 @@ def update_atlas_text(
             continue
 
         if current_region in updated_regions:
-            new_bounds, new_offsets = updated_regions[current_region]
+            new_bounds, new_offsets, rotate_val = updated_regions[current_region]
 
             if stripped.startswith("bounds:"):
-                result.append(f"  bounds: {new_bounds[0]}, {new_bounds[1]}, {new_bounds[2]}, {new_bounds[3]}")
+                result.append(
+                    f"  bounds: {new_bounds[0]}, {new_bounds[1]}, "
+                    f"{new_bounds[2]}, {new_bounds[3]}"
+                )
                 continue
 
             if stripped.startswith("offsets:"):
                 if new_offsets:
-                    result.append(f"  offsets: {new_offsets[0]}, {new_offsets[1]}, {new_offsets[2]}, {new_offsets[3]}")
+                    result.append(
+                        f"  offsets: {new_offsets[0]}, {new_offsets[1]}, "
+                        f"{new_offsets[2]}, {new_offsets[3]}"
+                    )
                 continue
 
             if stripped.startswith("rotate:"):
-                result.append("  rotate: false")
+                rotate_str = "true" if rotate_val == 90 else "false"
+                result.append(f"  rotate: {rotate_str}")
                 continue
 
         result.append(line)
 
     return "\n".join(result)
+
+
+class _PlacementOption(NamedTuple):
+    """A candidate placement for the mod image."""
+
+    label: str
+    canvas_w: int
+    canvas_h: int
+    paste_x: int
+    paste_y: int
+    rotated: bool  # True = mod image rotated 90° CW before pasting
 
 
 class AtlasModifier:
@@ -188,11 +215,85 @@ class AtlasModifier:
 
         _, self.region_names, self.regions = parse_atlas(atlas_text)
 
+    # ------------------------------------------------------------------ #
+    #  Placement strategy                                                  #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _find_best_placement(
+        base_w: int, base_h: int, mod_w: int, mod_h: int
+    ) -> _PlacementOption:
+        """
+        Evaluate 4 placement strategies and return the one with the
+        smallest total canvas area (width × height).
+
+        Strategies:
+          1. right           — mod appended to the right
+          2. right + rotate  — mod rotated 90° CW then appended to the right
+          3. below           — mod appended below
+          4. below + rotate  — mod rotated 90° CW then appended below
+        """
+        # After 90° CW rotation, width/height swap.
+        rot_w, rot_h = mod_h, mod_w
+
+        candidates: List[_PlacementOption] = [
+            _PlacementOption(
+                label="right",
+                canvas_w=base_w + mod_w,
+                canvas_h=max(base_h, mod_h),
+                paste_x=base_w,
+                paste_y=0,
+                rotated=False,
+            ),
+            _PlacementOption(
+                label="right+rotated",
+                canvas_w=base_w + rot_w,
+                canvas_h=max(base_h, rot_h),
+                paste_x=base_w,
+                paste_y=0,
+                rotated=True,
+            ),
+            _PlacementOption(
+                label="below",
+                canvas_w=max(base_w, mod_w),
+                canvas_h=base_h + mod_h,
+                paste_x=0,
+                paste_y=base_h,
+                rotated=False,
+            ),
+            _PlacementOption(
+                label="below+rotated",
+                canvas_w=max(base_w, rot_w),
+                canvas_h=base_h + rot_h,
+                paste_x=0,
+                paste_y=base_h,
+                rotated=True,
+            ),
+        ]
+
+        best = min(candidates, key=lambda c: c.canvas_w * c.canvas_h)
+
+        for c in candidates:
+            area = c.canvas_w * c.canvas_h
+            tag = " ← best" if c is best else ""
+            logging.info(
+                f"  {c.label:20s}  {c.canvas_w}x{c.canvas_h} = {area:,} px²{tag}"
+            )
+
+        return best
+
+    # ------------------------------------------------------------------ #
+    #  Merge                                                               #
+    # ------------------------------------------------------------------ #
+
     def merge_mod_image(
         self, mod_image_path: Path, selected_regions: List[str]
     ) -> Tuple[Image.Image, str]:
         """
         Merges a mod image onto the base atlas canvas for the selected regions.
+
+        The placement strategy (right / below, with optional 90° rotation)
+        that yields the smallest total canvas area is chosen automatically.
 
         Returns:
             Tuple of (merged PIL Image, new atlas text).
@@ -214,29 +315,65 @@ class AtlasModifier:
 
         # Pad mod image to original canvas size if needed
         if mod_w != orig_canvas_w or mod_h != orig_canvas_h:
-            logging.info(f"Padding mod image to original canvas: {orig_canvas_w}x{orig_canvas_h}")
-            padded_mod = Image.new("RGBA", (orig_canvas_w, orig_canvas_h), (0, 0, 0, 0))
+            logging.info(
+                f"Padding mod image to original canvas: "
+                f"{orig_canvas_w}x{orig_canvas_h}"
+            )
+            padded_mod = Image.new(
+                "RGBA", (orig_canvas_w, orig_canvas_h), (0, 0, 0, 0)
+            )
             padded_mod.paste(mod_img, (0, orig_canvas_h - mod_h))
             mod_img = padded_mod
             mod_w, mod_h = orig_canvas_w, orig_canvas_h
 
+        # --- Find the best placement ---
+        best = self._find_best_placement(base_w, base_h, mod_w, mod_h)
+        logging.info(f"Chosen placement: {best.label}")
+
+        # Rotate the mod image if the best strategy requires it
+        if best.rotated:
+            # ROTATE_270 in Pillow == 90° clockwise
+            mod_img = mod_img.transpose(Image.Transpose.ROTATE_270)
+            mod_w, mod_h = mod_h, mod_w  # swap after rotation
+
         # Create new combined Atlas Image
-        new_w = base_w + mod_w
-        new_h = max(base_h, mod_h)
-
-        merged = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
+        merged = Image.new(
+            "RGBA", (best.canvas_w, best.canvas_h), (0, 0, 0, 0)
+        )
         merged.paste(self.base_image, (0, 0))
-        merged.paste(mod_img, (base_w, 0))
+        merged.paste(mod_img, (best.paste_x, best.paste_y))
 
-        # Prepare data for text update
-        updated_regions_data: Dict[str, Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]]]] = {}
+        # --- Prepare data for atlas text update ---
+        #
+        # In Spine Atlas format when rotate is true (90° CW),
+        # bounds are written as (x, y, height, width).
+        rotate_val = 90 if best.rotated else 0
+
+        if best.rotated:
+            # bounds: (x, y, h_original, w_original) — Spine convention
+            atlas_bounds_w = mod_h  # original height before rotation
+            atlas_bounds_h = mod_w  # original width before rotation
+        else:
+            atlas_bounds_w = mod_w
+            atlas_bounds_h = mod_h
+
+        updated_regions_data: UpdatedRegionData = {}
 
         for name in selected_regions:
-            new_bounds = (base_w, 0, mod_w, mod_h)
-            new_offsets = (0, 0, mod_w, mod_h)
-            updated_regions_data[name] = (new_bounds, new_offsets)
+            new_bounds = (
+                best.paste_x,
+                best.paste_y,
+                atlas_bounds_w,
+                atlas_bounds_h,
+            )
+            new_offsets = (0, 0, atlas_bounds_w, atlas_bounds_h)
+            updated_regions_data[name] = (new_bounds, new_offsets, rotate_val)
 
-        new_atlas_text = update_atlas_text(self.atlas_text, (new_w, new_h), updated_regions_data)
+        new_atlas_text = update_atlas_text(
+            self.atlas_text,
+            (best.canvas_w, best.canvas_h),
+            updated_regions_data,
+        )
 
         return merged, new_atlas_text
 
