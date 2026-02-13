@@ -499,7 +499,9 @@ function drawRegionOverlay() {
     if (!bounds) continue;
     const [bx, by, bw, bh, rotate] = bounds;
 
-    // Spine atlas stores w/h swapped for 90°/270° rotated regions
+    // Bounds store ORIGINAL dimensions (before rotation)
+    // Overlay needs to show STORED dimensions (after rotation)
+    // So swap w/h when rotated
     const isRotated = rotate === 90 || rotate === 270;
     const drawW = isRotated ? bh : bw;
     const drawH = isRotated ? bw : bh;

@@ -186,7 +186,14 @@ def update_atlas_text(
                 continue
 
             if stripped.startswith("rotate:"):
-                rotate_str = "true" if rotate_val == 90 else "false"
+                if rotate_val == 90:
+                    rotate_str = "true"
+                elif rotate_val == 180:
+                    rotate_str = "180"
+                elif rotate_val == 270:
+                    rotate_str = "270"
+                else:
+                    rotate_str = "false"
                 result.append(f"  rotate: {rotate_str}")
                 continue
 
@@ -229,7 +236,14 @@ def rebuild_atlas_text(
             continue
         bounds, offsets, rotate_val = region_data[name]
         lines.append(name)
-        rotate_str = "true" if rotate_val == 90 else "false"
+        if rotate_val == 90:
+            rotate_str = "true"
+        elif rotate_val == 180:
+            rotate_str = "180"
+        elif rotate_val == 270:
+            rotate_str = "270"
+        else:
+            rotate_str = "false"
         lines.append(f"  rotate: {rotate_str}")
         lines.append(
             f"  bounds: {bounds[0]}, {bounds[1]}, {bounds[2]}, {bounds[3]}"
@@ -386,8 +400,8 @@ class AtlasModifier:
 
         # Rotate the mod image if the best strategy requires it
         if best.rotated:
-            # ROTATE_270 in Pillow == 90° clockwise
-            mod_img = mod_img.transpose(Image.Transpose.ROTATE_270)
+            # ROTATE_90 in Pillow == 90° counter-clockwise
+            mod_img = mod_img.transpose(Image.Transpose.ROTATE_90)
             mod_w, mod_h = mod_h, mod_w  # swap after rotation
 
         # Create new combined Atlas Image
@@ -399,17 +413,15 @@ class AtlasModifier:
 
         # --- Prepare data for atlas text update ---
         #
-        # In Spine Atlas format when rotate is true (90° CW),
-        # bounds are written as (x, y, height, width).
+        # PIL ROTATE_90 = 90° counter-clockwise
+        # In Spine Atlas format:
+        #   bounds always store ORIGINAL dimensions (before rotation)
+        #   Extractor will swap w/h when cropping if rotated
         rotate_val = 90 if best.rotated else 0
 
-        if best.rotated:
-            # bounds: (x, y, h_original, w_original) — Spine convention
-            atlas_bounds_w = mod_h  # original height before rotation
-            atlas_bounds_h = mod_w  # original width before rotation
-        else:
-            atlas_bounds_w = mod_w
-            atlas_bounds_h = mod_h
+        # Bounds use ORIGINAL dimensions - no swap!
+        atlas_bounds_w = mod_w
+        atlas_bounds_h = mod_h
 
         updated_regions_data: UpdatedRegionData = {}
 
@@ -680,7 +692,7 @@ class AtlasModifier:
             px, py, pw, ph, rotated = placement_map[name]
             sprite = sprites[name]
             if rotated:
-                sprite = sprite.transpose(Image.Transpose.ROTATE_270)
+                sprite = sprite.transpose(Image.Transpose.ROTATE_90)
             canvas.paste(sprite, (px, py))
 
         # ---- 6. Build region data for atlas text ----
@@ -694,16 +706,14 @@ class AtlasModifier:
                 continue
             canonical = canonical_map[name]
             px, py, pw, ph, rotated = placement_map[canonical]
+            # PIL ROTATE_90 = 90° CCW
             rotate_val = 90 if rotated else 0
 
             orig_sprite = sprites[name]
             orig_w, orig_h = orig_sprite.width, orig_sprite.height
 
-            if rotated:
-                # Spine convention: bounds = (x, y, h, w) when rotated
-                bounds = (px, py, orig_h, orig_w)
-            else:
-                bounds = (px, py, orig_w, orig_h)
+            # Bounds always use ORIGINAL dimensions - no swap!
+            bounds = (px, py, orig_w, orig_h)
 
             offsets: Optional[Tuple[int, int, int, int]] = (
                 0, 0, bounds[2], bounds[3]
