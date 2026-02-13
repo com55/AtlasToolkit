@@ -30,6 +30,9 @@ class Api:
         self.modifier: Optional[AtlasModifier] = None
         self.merged_image: Optional[Image] = None
         self.merged_atlas_text: Optional[str] = None
+        # Pre-repack state (merge output before repack was applied)
+        self.pre_repack_image: Optional[Image] = None
+        self.pre_repack_text: Optional[str] = None
 
     def set_window(self, window: webview.Window) -> None:
         self.window = window
@@ -103,6 +106,8 @@ class Api:
         self.modifier = None
         self.merged_image = None
         self.merged_atlas_text = None
+        self.pre_repack_image = None
+        self.pre_repack_text = None
 
     def get_region_names(self) -> List[str]:
         if not self.processor: return []
@@ -234,7 +239,7 @@ class Api:
         self._clear_modify_state()
         print("DEBUG: Exited modify mode")
 
-    def select_mod_image(self, selected_names: List[str]) -> Optional[dict[str, object]]:
+    def select_mod_image(self, selected_names: List[str], repack: bool = False) -> Optional[dict[str, object]]:
         """Open a file dialog to select a mod PNG, then process it."""
         if not self.window or not self.modifier:
             return None
@@ -252,10 +257,10 @@ class Api:
         if not result:
             return None
         
-        return self.process_mod_image(result[0], selected_names)
+        return self.process_mod_image(result[0], selected_names, repack)
 
-    def process_mod_image(self, path_str: str, selected_names: List[str]) -> Optional[dict[str, object]]:
-        """Run merge and return dict with base64 preview + updated region bounds."""
+    def process_mod_image(self, path_str: str, selected_names: List[str], repack: bool = False) -> Optional[dict[str, object]]:
+        """Run merge (and optional repack) and return dict with base64 preview + updated region bounds."""
         if not self.modifier:
             return None
         
@@ -266,6 +271,17 @@ class Api:
             merged_image, merged_atlas_text = self.modifier.merge_mod_image(
                 mod_path, selected_names
             )
+            
+            # Store pre-repack state so toggle can revert
+            self.pre_repack_image = merged_image
+            self.pre_repack_text = merged_atlas_text
+            
+            # Repack as the final step of the merge process
+            if repack:
+                print("DEBUG: Running repack...")
+                merged_image, merged_atlas_text = self.modifier.repack(
+                    merged_image, merged_atlas_text
+                )
             
             self.merged_image = merged_image
             self.merged_atlas_text = merged_atlas_text
@@ -310,6 +326,39 @@ class Api:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    def toggle_repack(self, repack: bool) -> Optional[dict[str, object]]:
+        """Re-apply or remove repack on the existing merge result."""
+        if not self.modifier or not self.pre_repack_image or not self.pre_repack_text:
+            return None
+
+        try:
+            if repack:
+                print("DEBUG: Applying repack...")
+                image, text = self.modifier.repack(
+                    self.pre_repack_image, self.pre_repack_text
+                )
+            else:
+                print("DEBUG: Reverting to pre-repack merge result")
+                image = self.pre_repack_image
+                text = self.pre_repack_text
+
+            self.merged_image = image
+            self.merged_atlas_text = text
+
+            from atlas_modifier import parse_atlas
+            _, _, merged_regions = parse_atlas(text)
+            region_bounds: dict[str, list[int]] = {}
+            for name, info in merged_regions.items():
+                region_bounds[name] = [*info.bounds, info.rotate]
+
+            return {
+                "image": self._image_to_base64(image),
+                "regions": region_bounds,
+            }
+        except Exception as e:
+            print(f"ERROR toggle_repack: {e}")
+            return None
+
     def debug_log(self, msg: str) -> None:
         print(f"JS_DEBUG: {msg}")
 
@@ -342,7 +391,8 @@ class Api:
                                         showToast('Select at least one region first.', 'error');
                                         return;
                                     }
-                                    const result = await pywebview.api.process_mod_image('%s', names);
+                                    const repack = document.getElementById('chk-repack').checked;
+                                    const result = await pywebview.api.process_mod_image('%s', names, repack);
                                     window.onModImageProcessed(result);
                                 })();
                             """ % path.replace('\\', '\\\\').replace("'", "\\'"))

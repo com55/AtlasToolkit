@@ -30,6 +30,7 @@ function setMode(mode) {
   const modifyHeader = document.getElementById("modify-header");
   const extractControls = document.getElementById("extract-controls");
   const modifyControls = document.getElementById("modify-controls");
+  const repackOptions = document.getElementById("repack-options");
   const dropMsg = document.getElementById("drop-message-text");
 
   if (mode === "modify") {
@@ -37,12 +38,14 @@ function setMode(mode) {
     modifyHeader.classList.remove("hidden");
     extractControls.classList.add("hidden");
     modifyControls.classList.remove("hidden");
+    repackOptions.classList.remove("hidden");
     dropMsg.textContent = "Drop image to modify, or .atlas to load";
   } else {
     normalHeader.classList.remove("hidden");
     modifyHeader.classList.add("hidden");
     extractControls.classList.remove("hidden");
     modifyControls.classList.add("hidden");
+    repackOptions.classList.add("hidden");
     dropMsg.textContent = "Drop .atlas file here to load";
   }
 }
@@ -99,15 +102,16 @@ async function exitModifyMode() {
 }
 
 async function modifySelected() {
-  if (selectedIndices.size === 0) {
-    showToast("Select at least one region first.", "error");
+  const names = getSelectedNames();
+  if (names.length === 0) {
+    showToast("Select at least one region to modify.", "error");
     return;
   }
   try {
     document.getElementById("modify-status-text").innerText =
       "Selecting mod image...";
-    const names = getSelectedNames();
-    const result = await pywebview.api.select_mod_image(names);
+    const repack = document.getElementById("chk-repack").checked;
+    const result = await pywebview.api.select_mod_image(names, repack);
     if (result) {
       onModPreviewReceived(result);
     } else {
@@ -167,6 +171,25 @@ async function saveModified() {
     showToast("Save failed.", "error");
   }
 }
+
+document.getElementById("chk-repack").addEventListener("change", async (e) => {
+  if (!hasModImage) return;
+  const statusEl = document.getElementById("modify-status-text");
+  statusEl.innerText = e.target.checked
+    ? "Applying repack..."
+    : "Reverting repack...";
+  try {
+    const result = await pywebview.api.toggle_repack(e.target.checked);
+    if (result) {
+      onModPreviewReceived(result);
+    } else {
+      showToast("No merged data to repack.", "error");
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Repack toggle failed.", "error");
+  }
+});
 
 // ==========================================
 //  CORE LOGIC

@@ -9,6 +9,7 @@ The placement strategy that yields the smallest total pixel area is chosen.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 from pathlib import Path
@@ -192,6 +193,59 @@ def update_atlas_text(
         result.append(line)
 
     return "\n".join(result)
+
+
+
+def rebuild_atlas_text(
+    page_info: Dict[str, str],
+    new_size: Tuple[int, int],
+    region_names: List[str],
+    region_data: Dict[str, Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]], int]],
+) -> str:
+    """
+    Build a complete atlas text from scratch.
+
+    Args:
+        page_info: Original page metadata (must contain 'page').
+        new_size: (width, height) of the new canvas.
+        region_names: Ordered list of region names.
+        region_data: Mapping of name → (bounds, offsets, rotate).
+    """
+    lines: List[str] = []
+
+    # Blank line before page header (Spine convention)
+    lines.append("")
+    lines.append(page_info.get("page", "atlas.png"))
+    lines.append(f"size: {new_size[0]},{new_size[1]}")
+
+    # Reproduce other page-level keys (filter, format, repeat, etc.)
+    for key, value in page_info.items():
+        if key in ("page", "size"):
+            continue
+        lines.append(f"{key}: {value}")
+
+    for name in region_names:
+        if name not in region_data:
+            continue
+        bounds, offsets, rotate_val = region_data[name]
+        lines.append(name)
+        rotate_str = "true" if rotate_val == 90 else "false"
+        lines.append(f"  rotate: {rotate_str}")
+        lines.append(
+            f"  bounds: {bounds[0]}, {bounds[1]}, {bounds[2]}, {bounds[3]}"
+        )
+        if offsets:
+            lines.append(
+                f"  offsets: {offsets[0]}, {offsets[1]}, "
+                f"{offsets[2]}, {offsets[3]}"
+            )
+        else:
+            lines.append(
+                f"  offsets: 0, 0, {bounds[2]}, {bounds[3]}"
+            )
+        lines.append(f"  index: -1")
+
+    return "\n".join(lines)
 
 
 class _PlacementOption(NamedTuple):
@@ -403,3 +457,261 @@ class AtlasModifier:
 
         logging.info(f"Saved merged files to: {output_dir}")
         return output_dir
+
+    # ------------------------------------------------------------------ #
+    #  Repack                                                              #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _extract_raw_sprite(
+        image: Image.Image, region: RegionInfo
+    ) -> Image.Image:
+        """
+        Crop the raw sprite from *image* according to *region* bounds/rotate.
+
+        Returns the sprite in its **unrotated** orientation (the visual pixel
+        data the artist intended), without any offset padding.
+        """
+        x, y, raw_w, raw_h = region.bounds
+        rot = region.rotate
+
+        # When rotated 90/270, the atlas stores w/h swapped
+        crop_w = raw_h if rot in (90, 270) else raw_w
+        crop_h = raw_w if rot in (90, 270) else raw_h
+
+        sprite = image.crop((x, y, x + crop_w, y + crop_h))
+
+        # Undo atlas rotation to get the original orientation
+        if rot == 90:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_270)
+        elif rot == 270:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_90)
+        elif rot == 180:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_180)
+
+        return sprite
+
+    @staticmethod
+    def _shelf_pack(
+        items: List[Tuple[str, int, int]],
+    ) -> Tuple[int, int, List[Tuple[str, int, int, int, int, bool]]]:
+        """
+        Pack rectangles using Shelf Next-Fit Decreasing Height with
+        automatic strip-width optimisation.
+
+        Tries multiple candidate strip widths and picks the layout that
+        yields the smallest bounding-box area.
+
+        Args:
+            items: list of (name, width, height).
+
+        Returns:
+            (canvas_w, canvas_h, placements)
+            where each placement is (name, x, y, placed_w, placed_h, rotated).
+        """
+        import math
+
+        if not items:
+            return 0, 0, []
+
+        def _pack_with_width(
+            rects: List[Tuple[str, int, int]],
+            strip_w: int,
+            allow_rotate: bool,
+        ) -> Tuple[int, int, List[Tuple[str, int, int, int, int, bool]]]:
+            """Pack *rects* into shelves limited to *strip_w* pixels wide."""
+            # Sort by height descending — tall items first for better shelves
+            sorted_rects = sorted(
+                rects, key=lambda r: max(r[1], r[2]), reverse=True
+            )
+
+            placements: List[Tuple[str, int, int, int, int, bool]] = []
+            shelf_y = 0
+            shelf_h = 0
+            cursor_x = 0
+            used_w = 0
+
+            for name, w, h in sorted_rects:
+                pw, ph, rotated = w, h, False
+
+                if allow_rotate:
+                    # Pick the orientation that better fits the shelf height.
+                    # If the shelf already has a height, prefer the orientation
+                    # whose height is closer to shelf_h (to waste less).
+                    if shelf_h > 0:
+                        # Option A: as-is
+                        waste_a = max(0, h - shelf_h) if h <= shelf_h else h - shelf_h
+                        # Option B: rotated
+                        waste_b = max(0, w - shelf_h) if w <= shelf_h else w - shelf_h
+                        if waste_b < waste_a:
+                            pw, ph, rotated = h, w, True
+                    else:
+                        # No shelf yet — prefer landscape (shorter height)
+                        if h > w:
+                            pw, ph, rotated = h, w, True
+
+                # Does it fit in current shelf?
+                if cursor_x + pw > strip_w and cursor_x > 0:
+                    # Start a new shelf
+                    shelf_y += shelf_h
+                    cursor_x = 0
+                    shelf_h = 0
+
+                placements.append(
+                    (name, cursor_x, shelf_y, pw, ph, rotated)
+                )
+                cursor_x += pw
+                used_w = max(used_w, cursor_x)
+                shelf_h = max(shelf_h, ph)
+
+            canvas_h = shelf_y + shelf_h
+            return used_w, canvas_h, placements
+
+        # --- Determine candidate strip widths to try ---
+        max_single = max(max(w, h) for _, w, h in items)
+        total_w = sum(max(w, h) for _, w, h in items)
+        total_area = sum(w * h for _, w, h in items)
+        sqrt_area = int(math.isqrt(total_area))
+
+        # Build a set of candidate widths between the widest item and total
+        candidates: set[int] = set()
+        candidates.add(max_single)
+        candidates.add(total_w)
+        candidates.add(max(max_single, sqrt_area))
+        candidates.add(max(max_single, int(sqrt_area * 0.8)))
+        candidates.add(max(max_single, int(sqrt_area * 1.2)))
+        candidates.add(max(max_single, int(sqrt_area * 1.5)))
+        candidates.add(max(max_single, int(sqrt_area * 2.0)))
+
+        # Also add widths based on multiples of the widest item
+        for mult in range(1, 6):
+            candidates.add(max_single * mult)
+
+        best_result: Optional[
+            Tuple[int, int, List[Tuple[str, int, int, int, int, bool]]]
+        ] = None
+        best_area = float("inf")
+
+        for strip_w in sorted(candidates):
+            for allow_rot in (False, True):
+                cw, ch, placements = _pack_with_width(
+                    items, strip_w, allow_rot
+                )
+                area = cw * ch
+                if area < best_area:
+                    best_area = area
+                    best_result = (cw, ch, placements)
+
+        assert best_result is not None
+        cw, ch, _ = best_result
+        logging.info(
+            f"  Shelf pack: best {cw}x{ch} = {cw * ch:,} px²  "
+            f"(tried {len(candidates)} widths × 2 rotate modes)"
+        )
+        return best_result
+
+    def repack(
+        self,
+        merged_image: Image.Image,
+        atlas_text: str,
+    ) -> Tuple[Image.Image, str]:
+        """
+        Repack all regions from *merged_image* into a new optimally-sized
+        canvas, deduplicating regions that share identical pixel data.
+
+        Args:
+            merged_image: The image output from ``merge_mod_image``.
+            atlas_text: The atlas text output from ``merge_mod_image``.
+
+        Returns:
+            Tuple of (repacked PIL Image, new atlas text).
+        """
+        page_info, region_names, regions = parse_atlas(atlas_text)
+
+        # ---- 1. Extract raw sprites ----
+        sprites: Dict[str, Image.Image] = {}
+        for name, info in regions.items():
+            sprites[name] = self._extract_raw_sprite(merged_image, info)
+
+        logging.info(f"Repack: extracted {len(sprites)} sprites")
+
+        # ---- 2. Deduplicate by pixel hash ----
+        hash_to_canonical: Dict[str, str] = {}  # hash → first name
+        canonical_map: Dict[str, str] = {}      # name → canonical name
+
+        for name in region_names:
+            if name not in sprites:
+                continue
+            pixel_hash = hashlib.md5(
+                sprites[name].tobytes(), usedforsecurity=False
+            ).hexdigest()
+
+            if pixel_hash in hash_to_canonical:
+                canonical = hash_to_canonical[pixel_hash]
+                canonical_map[name] = canonical
+                logging.info(f"  dedup: '{name}' == '{canonical}'")
+            else:
+                hash_to_canonical[pixel_hash] = name
+                canonical_map[name] = name
+
+        unique_names = list(hash_to_canonical.values())
+        logging.info(
+            f"Repack: {len(sprites)} regions → {len(unique_names)} unique"
+        )
+
+        # ---- 3. Bin-pack unique sprites ----
+        pack_items: List[Tuple[str, int, int]] = [
+            (n, sprites[n].width, sprites[n].height) for n in unique_names
+        ]
+        canvas_w, canvas_h, placements = self._shelf_pack(pack_items)
+
+        logging.info(f"Repack: canvas {canvas_w}x{canvas_h}")
+
+        # ---- 4. Build placement lookup ----
+        #  name → (x, y, placed_w, placed_h, rotated)
+        placement_map: Dict[str, Tuple[int, int, int, int, bool]] = {}
+        for name, px, py, pw, ph, rotated in placements:
+            placement_map[name] = (px, py, pw, ph, rotated)
+
+        # ---- 5. Paste sprites onto new canvas ----
+        canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+
+        for name in unique_names:
+            px, py, pw, ph, rotated = placement_map[name]
+            sprite = sprites[name]
+            if rotated:
+                sprite = sprite.transpose(Image.Transpose.ROTATE_270)
+            canvas.paste(sprite, (px, py))
+
+        # ---- 6. Build region data for atlas text ----
+        region_data: Dict[
+            str,
+            Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]], int],
+        ] = {}
+
+        for name in region_names:
+            if name not in canonical_map:
+                continue
+            canonical = canonical_map[name]
+            px, py, pw, ph, rotated = placement_map[canonical]
+            rotate_val = 90 if rotated else 0
+
+            orig_sprite = sprites[name]
+            orig_w, orig_h = orig_sprite.width, orig_sprite.height
+
+            if rotated:
+                # Spine convention: bounds = (x, y, h, w) when rotated
+                bounds = (px, py, orig_h, orig_w)
+            else:
+                bounds = (px, py, orig_w, orig_h)
+
+            offsets: Optional[Tuple[int, int, int, int]] = (
+                0, 0, bounds[2], bounds[3]
+            )
+            region_data[name] = (bounds, offsets, rotate_val)
+
+        new_atlas_text = rebuild_atlas_text(
+            page_info, (canvas_w, canvas_h), region_names, region_data
+        )
+
+        return canvas, new_atlas_text
