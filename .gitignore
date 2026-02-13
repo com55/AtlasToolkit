@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.vscode
+.claude
 test*
-/.vscode
-/.claude
+uv.lock

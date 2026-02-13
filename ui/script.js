@@ -47,6 +47,7 @@ function setMode(mode) {
     modifyControls.classList.add("hidden");
     repackOptions.classList.add("hidden");
     dropMsg.textContent = "Drop .atlas file here to load";
+    clearOverlay(); // Clear region overlay when exiting modify mode
   }
 }
 
@@ -828,11 +829,14 @@ window.onAtlasLoadedFromPython = async () => {
   // If we were in modify mode, switch back
   if (currentMode === "modify") {
     setMode("extract");
+    modifyRegionBounds = {}; // Clear modify state
+    hasModImage = false;
   }
   selectedIndices.clear();
   lastClickIndex = -1;
   document.getElementById("preview-img").style.display = "none";
   resetPreview();
+  clearOverlay(); // Ensure overlay is cleared
   updateButtons();
   await loadRegions();
   showToast("Atlas loaded via drag & drop.", "success");
