@@ -36,9 +36,17 @@ jobs:
           nuitka-version: main
           script-name: main.py
           mode: onefile
-          windows-console-mode: disable
+          windows-console-mode: attach
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
+          include-package-data: webview
+          nofollow-import-to: |
+            PyQt5
+            PyQt6
+            PySide2
+            PySide6
+            tkinter
+            gi
           output-dir: dist
           output-file: AtlasToolkit.exe
           onefile-tempdir-spec: "{TEMP}/AtlasToolkit"
