@@ -1,7 +1,7 @@
 [project]
-name = "atlasmanager"
+name = "AtlasToolkit"
 version = "0.1.0"
-description = "Add your description here"
+description = "Spine Atlas Toolkit - Extract, modify, and repack atlas sprites."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

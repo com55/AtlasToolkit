@@ -1,0 +1,89 @@
+name: Build and Release
+
+on:
+  # Auto release trigger (from auto_tag.yml)
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  # Manual trigger (tag push)
+  push:
+    tags:
+      - "v*"
+  # Manual trigger (workflow_dispatch)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') }}
+  TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install Dependencies
+        run: uv export --no-hashes -o requirements.txt && pip install -r requirements.txt
+
+      - name: Build with Nuitka 🏗️
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: standalone
+          windows-console-mode: disable
+          windows-icon-from-ico: ui/icon.ico
+          include-data-dir: ui=ui
+          output-dir: dist
+          output-file: AtlasToolkit.exe
+
+      - name: Prepare Assets for Upload 📦
+        shell: powershell
+        id: prepare_assets
+        run: |
+          $distPath = "dist\*.dist\*"
+          # Release (from workflow_call or tag push)
+          if ("${{ env.IS_RELEASE }}" -eq 'true') {
+            Compress-Archive -Path $distPath -DestinationPath "AtlasToolkit-Windows-x64.zip"
+            echo "ARTIFACT_PATH=AtlasToolkit-Windows-x64.zip" >> $env:GITHUB_OUTPUT
+          }
+          # Manual (workflow_dispatch)
+          else {
+            $artifactName = "AtlasToolkit-Windows-x64"
+            $distDir = Get-ChildItem -Path "dist" -Filter "*.dist" | Select-Object -First 1
+            Rename-Item -Path $distDir.FullName -NewName $artifactName
+            $artifactPath = "dist\$artifactName"
+            echo "ARTIFACT_NAME=$artifactName" >> $env:GITHUB_OUTPUT
+            echo "ARTIFACT_PATH=$artifactPath" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Upload Artifact (Testing) 💾
+        uses: actions/upload-artifact@v4
+        if: ${{ steps.prepare_assets.outputs.ARTIFACT_NAME != '' }}
+        with:
+          name: ${{ steps.prepare_assets.outputs.ARTIFACT_NAME }}
+          path: ${{ steps.prepare_assets.outputs.ARTIFACT_PATH }}
+
+      - name: Upload Release Asset 📤
+        if: ${{ env.IS_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          files: AtlasToolkit-Windows-x64.zip
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
