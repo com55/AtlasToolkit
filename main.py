@@ -13,8 +13,15 @@ if TYPE_CHECKING:
     from PIL.Image import Image
 
 
-# Suppress noisy pywebview/WebView2 accessibility internal errors
+# Logging setup
 import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(levelname)s: %(message)s',
+)
+log = logging.getLogger(__name__)
+
+# Suppress noisy pywebview/WebView2 accessibility internal errors
 logging.getLogger('pywebview').setLevel(logging.CRITICAL)
 
 
@@ -55,7 +62,7 @@ class Api:
         return False
 
     def load_atlas(self, path_str: str) -> bool:
-        print(f"DEBUG: load_atlas received path: {repr(path_str)}")
+        log.debug("load_atlas received path: %r", path_str)
         try:
             self.atlas_path = Path(path_str)
             atlas_dir = self.atlas_path.parent
@@ -142,7 +149,7 @@ class Api:
             return self._image_to_base64(monitor)
             
         except Exception as e:
-            print(f"Preview Error: {e}")
+            log.error("Preview error: %s", e)
         return None
 
     def _image_to_base64(self, img: Image) -> str:
@@ -211,13 +218,13 @@ class Api:
             # Get the first loaded page image as the base
             base_image = self.processor.get_page_image()
             if not base_image:
-                print("ERROR: No loaded images in processor")
+                log.error("No loaded images in processor")
                 return None
             
             self.modifier = AtlasModifier(atlas_text, self.atlas_path, base_image)
             self.merged_image = None
             self.merged_atlas_text = None
-            print("DEBUG: Entered modify mode")
+            log.debug("Entered modify mode")
             
             # Build region bounds dict for client-side overlay
             # Each value: [x, y, w, h, rotate]
@@ -231,13 +238,13 @@ class Api:
             }
             
         except Exception as e:
-            print(f"ERROR entering modify mode: {e}")
+            log.error("Entering modify mode: %s", e)
             return None
 
     def exit_modify_mode(self) -> None:
         """Clean up modify mode state."""
         self._clear_modify_state()
-        print("DEBUG: Exited modify mode")
+        log.debug("Exited modify mode")
 
     def select_mod_image(self, selected_names: List[str], repack: bool = False) -> Optional[dict[str, object]]:
         """Open a file dialog to select a mod PNG, then process it."""
@@ -266,7 +273,7 @@ class Api:
         
         try:
             mod_path = Path(path_str)
-            print(f"DEBUG: Processing mod image: {mod_path}")
+            log.debug("Processing mod image: %s", mod_path)
             
             merged_image, merged_atlas_text = self.modifier.merge_mod_image(
                 mod_path, selected_names
@@ -278,7 +285,7 @@ class Api:
             
             # Repack as the final step of the merge process
             if repack:
-                print("DEBUG: Running repack...")
+                log.debug("Running repack...")
                 merged_image, merged_atlas_text = self.modifier.repack(
                     merged_image, merged_atlas_text
                 )
@@ -299,7 +306,7 @@ class Api:
             }
             
         except Exception as e:
-            print(f"ERROR processing mod image: {e}")
+            log.error("Processing mod image: %s", e)
             if self.window:
                 self.window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
             return None
@@ -333,12 +340,12 @@ class Api:
 
         try:
             if repack:
-                print("DEBUG: Applying repack...")
+                log.debug("Applying repack...")
                 image, text = self.modifier.repack(
                     self.pre_repack_image, self.pre_repack_text
                 )
             else:
-                print("DEBUG: Reverting to pre-repack merge result")
+                log.debug("Reverting to pre-repack merge result")
                 image = self.pre_repack_image
                 text = self.pre_repack_text
 
@@ -356,18 +363,18 @@ class Api:
                 "regions": region_bounds,
             }
         except Exception as e:
-            print(f"ERROR toggle_repack: {e}")
+            log.error("toggle_repack: %s", e)
             return None
 
     def debug_log(self, msg: str) -> None:
-        print(f"JS_DEBUG: {msg}")
+        log.debug("JS: %s", msg)
 
     def on_drop(self, e: Any) -> None:
         try:
             files = e['dataTransfer']['files']
             if len(files) > 0:
                 path = files[0].get('pywebviewFullPath')
-                print(f"DEBUG: Dropped file path: {path}")
+                log.debug("Dropped file path: %s", path)
                 if not path:
                     return
                 
@@ -403,23 +410,23 @@ class Api:
                     if self.window:
                         self.window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
-            print(f"Drop Error: {ex}")
+            log.error("Drop error: %s", ex)
 
 def setup_drop(window: webview.Window, api: Api) -> None:
-    def on_loaded() -> None:
-        print("DEBUG: Window loaded, binding events...")
-        try:
-            from webview.dom import DOMEventHandler
+    """Bind drag-and-drop events. Runs in a background thread via webview.start()."""
+    from webview.dom import DOMEventHandler
 
-            # Bind drop handler on document (events bubble up from #drop-overlay)
-            window.dom.document.on('drop', DOMEventHandler(api.on_drop, True, True))
+    def _no_op(e: Any) -> None:
+        pass
 
-            print("DEBUG: Event binding finished")
-        except Exception as e:
-            print(f"ERROR in on_loaded: {e}")
-
-    window.events.loaded += on_loaded
-    print("DEBUG: setup_drop: Registered on_loaded callback")
+    # window.dom access implicitly waits for DOM readiness — no on_loaded needed.
+    # Binding in on_loaded can deadlock because the callback runs on the UI thread
+    # while DOM access also requires the UI thread.
+    log.debug("Binding drop events...")
+    window.dom.document.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
+    window.dom.document.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
+    window.dom.document.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
+    log.debug("Drop events bound.")
 
 if __name__ == '__main__':
     api = Api()
@@ -438,6 +445,7 @@ if __name__ == '__main__':
         'Atlas Extracter GUI', 
         url=str(GUI_PATH.absolute().as_uri()),
         width=window_width, height=window_height,
+        min_size=(800, 500),
         x=center_x, y=center_y,
         resizable=True,
         js_api=api,
@@ -447,6 +455,6 @@ if __name__ == '__main__':
     if window:
         api.set_window(window)
     else:
-        sys.exit(1) 
+        sys.exit(1)
     
     webview.start(setup_drop, (window, api))

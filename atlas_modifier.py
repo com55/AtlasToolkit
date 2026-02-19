@@ -201,8 +201,6 @@ def update_atlas_text(
 
     return "\n".join(result)
 
-
-
 def rebuild_atlas_text(
     page_info: Dict[str, str],
     new_size: Tuple[int, int],
@@ -714,11 +712,10 @@ class AtlasModifier:
 
             # Bounds always use ORIGINAL dimensions - no swap!
             bounds = (px, py, orig_w, orig_h)
-
-            offsets: Optional[Tuple[int, int, int, int]] = (
-                0, 0, bounds[2], bounds[3]
-            )
-            region_data[name] = (bounds, offsets, rotate_val)
+            
+            orig_offsets = regions[name].offsets
+            
+            region_data[name] = (bounds, orig_offsets, rotate_val)
 
         new_atlas_text = rebuild_atlas_text(
             page_info, (canvas_w, canvas_h), region_names, region_data

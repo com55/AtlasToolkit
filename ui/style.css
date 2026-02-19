@@ -22,6 +22,7 @@ body {
 }
 #right-panel {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background-color: #333;
@@ -97,6 +98,8 @@ button {
 .action-btn {
   background-color: #0e639c;
   color: white;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .action-btn:hover {
   background-color: #1177bb;
@@ -179,6 +182,7 @@ button {
   align-items: center;
   gap: 10px;
   width: 100%;
+  overflow: hidden;
 }
 
 /* Repack Options Row */
@@ -295,7 +299,8 @@ img#preview-img {
 
 #status-text,
 #modify-status-text {
-  margin-right: auto;
+  flex: 1;
+  min-width: 0;
   color: #aaa;
   font-size: 0.9em;
   white-space: nowrap;
