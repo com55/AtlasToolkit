@@ -448,6 +448,7 @@ def setup_drop(window: webview.Window, api: Api) -> None:
 
 if __name__ == '__main__':
     api = Api()
+    print("[1] Api created", flush=True)
     
     # Calculate Center Position
     import ctypes
@@ -457,11 +458,26 @@ if __name__ == '__main__':
     
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
+    print("[2] Screen metrics calculated", flush=True)
 
     GUI_PATH = get_resource_path("ui/index.html")
+    print(f"[3] GUI_PATH = {GUI_PATH}", flush=True)
+    print(f"[3] GUI_PATH exists = {GUI_PATH.exists()}", flush=True)
+    print(f"[3] __file__ = {__file__}", flush=True)
+    print(f"[3] Parent dir contents = {list(Path(__file__).parent.iterdir())}", flush=True)
+
+    ui_dir = get_resource_path("ui")
+    if ui_dir.exists():
+        print(f"[3] ui/ contents = {list(ui_dir.iterdir())}", flush=True)
+    else:
+        print(f"[3] ui/ directory NOT FOUND!", flush=True)
+
+    url = str(GUI_PATH.absolute().as_uri())
+    print(f"[4] URL = {url}", flush=True)
+
     window = webview.create_window(
         'Atlas Extracter GUI', 
-        url=str(GUI_PATH.absolute().as_uri()),
+        url=url,
         width=window_width, height=window_height,
         min_size=(800, 500),
         x=center_x, y=center_y,
@@ -469,10 +485,12 @@ if __name__ == '__main__':
         js_api=api,
         background_color='#2b2b2b'
     )
+    print("[5] Window created", flush=True)
     
     if window:
         api.set_window(window)
     else:
         sys.exit(1)
     
+    print("[6] Starting webview...", flush=True)
     webview.start(setup_drop, (window, api))
