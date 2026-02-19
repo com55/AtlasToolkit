@@ -45,31 +45,28 @@ jobs:
         with:
           nuitka-version: main
           script-name: main.py
-          mode: standalone
+          mode: onefile
           windows-console-mode: disable
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
           output-dir: dist
           output-file: AtlasToolkit.exe
+          onefile-tempdir-spec: "{TEMP}/AtlasToolkit/{VERSION}"
 
       - name: Prepare Assets for Upload 📦
         shell: powershell
         id: prepare_assets
         run: |
-          $distPath = "dist\*.dist\*"
+          $exePath = "dist/AtlasToolkit.exe"
           # Release (from workflow_call or tag push)
           if ("${{ env.IS_RELEASE }}" -eq 'true') {
-            Compress-Archive -Path $distPath -DestinationPath "AtlasToolkit-Windows-x64.zip"
+            Compress-Archive -Path $exePath -DestinationPath "AtlasToolkit-Windows-x64.zip"
             echo "ARTIFACT_PATH=AtlasToolkit-Windows-x64.zip" >> $env:GITHUB_OUTPUT
           }
           # Manual (workflow_dispatch)
           else {
-            $artifactName = "AtlasToolkit-Windows-x64"
-            $distDir = Get-ChildItem -Path "dist" -Filter "*.dist" | Select-Object -First 1
-            Rename-Item -Path $distDir.FullName -NewName $artifactName
-            $artifactPath = "dist\$artifactName"
-            echo "ARTIFACT_NAME=$artifactName" >> $env:GITHUB_OUTPUT
-            echo "ARTIFACT_PATH=$artifactPath" >> $env:GITHUB_OUTPUT
+            echo "ARTIFACT_NAME=AtlasToolkit-Windows-x64" >> $env:GITHUB_OUTPUT
+            echo "ARTIFACT_PATH=$exePath" >> $env:GITHUB_OUTPUT
           }
 
       - name: Upload Artifact (Testing) 💾

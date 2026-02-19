@@ -25,6 +25,16 @@ log = logging.getLogger(__name__)
 logging.getLogger('pywebview').setLevel(logging.CRITICAL)
 
 
+
+def get_resource_path(path: str) -> Path:
+    """Get path to a resource file embedded in the executable.
+
+    In Nuitka onefile mode, ``__file__`` resolves to the temporary directory
+    where embedded resources are unpacked.
+    """
+    return Path(__file__).parent / path
+
+
 IMAGE_EXTENSIONS = {'.png'}
 
 
@@ -414,19 +424,22 @@ class Api:
 
 def setup_drop(window: webview.Window, api: Api) -> None:
     """Bind drag-and-drop events. Runs in a background thread via webview.start()."""
-    from webview.dom import DOMEventHandler
+    try:
+        from webview.dom import DOMEventHandler
 
-    def _no_op(e: Any) -> None:
-        pass
+        def _no_op(e: Any) -> None:
+            pass
 
-    # window.dom access implicitly waits for DOM readiness — no on_loaded needed.
-    # Binding in on_loaded can deadlock because the callback runs on the UI thread
-    # while DOM access also requires the UI thread.
-    log.debug("Binding drop events...")
-    window.dom.document.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
-    window.dom.document.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
-    window.dom.document.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
-    log.debug("Drop events bound.")
+        # window.dom access implicitly waits for DOM readiness — no on_loaded needed.
+        # Binding in on_loaded can deadlock because the callback runs on the UI thread
+        # while DOM access also requires the UI thread.
+        log.debug("Binding drop events...")
+        window.dom.document.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
+        window.dom.document.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
+        window.dom.document.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
+        log.debug("Drop events bound.")
+    except Exception as e:
+        log.error("Failed to setup drop events: %s", e)
 
 if __name__ == '__main__':
     api = Api()
@@ -440,7 +453,7 @@ if __name__ == '__main__':
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
 
-    GUI_PATH = Path(__file__).parent / "ui" / "index.html"
+    GUI_PATH = get_resource_path("ui/index.html")
     window = webview.create_window(
         'Atlas Extracter GUI', 
         url=str(GUI_PATH.absolute().as_uri()),
