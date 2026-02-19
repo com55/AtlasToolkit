@@ -13,18 +13,23 @@ if TYPE_CHECKING:
     from PIL.Image import Image
 
 
+
+# Reconfigure stdout/stderr for immediate output (Nuitka console mode compatibility)
+if sys.stdout:
+    sys.stdout.reconfigure(encoding='utf-8')  # type: ignore
+if sys.stderr:
+    sys.stderr.reconfigure(encoding='utf-8')  # type: ignore
+
 # Logging setup
 import logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(levelname)s: %(message)s',
+    stream=sys.stdout,  # Ensure logs go to stdout where we can see them
 )
 log = logging.getLogger(__name__)
 
-# Suppress noisy pywebview/WebView2 accessibility internal errors
-logging.getLogger('pywebview').setLevel(logging.CRITICAL)
-
-
+print("App starting...", flush=True)
 
 def get_resource_path(path: str) -> Path:
     """Get path to a resource file embedded in the executable.

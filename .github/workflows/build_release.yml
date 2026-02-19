@@ -12,6 +12,8 @@ permissions:
 env:
   IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
   TAG_NAME: ${{ github.ref_name }}
+  # Force console for manual builds (debugging), disable for releases
+  CONSOLE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'attach' || 'disable' }}
 
 jobs:
   build-windows:
@@ -36,7 +38,7 @@ jobs:
           nuitka-version: main
           script-name: main.py
           mode: onefile
-          windows-console-mode: attach
+          windows-console-mode: ${{ env.CONSOLE_MODE }}
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
           include-package-data: webview
