@@ -41,7 +41,7 @@ jobs:
           include-data-dir: ui=ui
           output-dir: dist
           output-file: AtlasToolkit.exe
-          onefile-tempdir-spec: "{TEMP}/AtlasToolkit/{VERSION}"
+          onefile-tempdir-spec: "{TEMP}/AtlasToolkit"
 
       - name: Prepare Assets for Upload 📦
         shell: powershell
