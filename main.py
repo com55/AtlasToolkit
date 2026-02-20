@@ -29,8 +29,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-print("App starting...", flush=True)
-
 def get_resource_path(path: str) -> Path:
     """Get path to a resource file embedded in the executable.
 
@@ -45,19 +43,19 @@ IMAGE_EXTENSIONS = {'.png'}
 
 class Api:
     def __init__(self) -> None:
-        self.atlas_path: Optional[Path] = None
-        self.processor: Optional[AtlasProcessor] = None
-        self.window: Optional[webview.Window] = None
+        self._atlas_path: Optional[Path] = None
+        self._processor: Optional[AtlasProcessor] = None
+        self._window: Optional[webview.Window] = None
         # Modify mode state
-        self.modifier: Optional[AtlasModifier] = None
-        self.merged_image: Optional[Image] = None
-        self.merged_atlas_text: Optional[str] = None
+        self._modifier: Optional[AtlasModifier] = None
+        self._merged_image: Optional[Image] = None
+        self._merged_atlas_text: Optional[str] = None
         # Pre-repack state (merge output before repack was applied)
-        self.pre_repack_image: Optional[Image] = None
-        self.pre_repack_text: Optional[str] = None
+        self._pre_repack_image: Optional[Image] = None
+        self._pre_repack_text: Optional[str] = None
 
     def set_window(self, window: webview.Window) -> None:
-        self.window = window
+        self._window = window
 
     def startup_check(self) -> bool:
         """Called by JS when pywebview is ready"""
@@ -68,10 +66,10 @@ class Api:
             return False
 
     def choose_file(self) -> bool:
-        if not self.window:
+        if not self._window:
             return False
         file_types = ('Atlas Files (*.atlas)', 'All files (*.*)')
-        result = self.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=False, file_types=file_types)
+        result = self._window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=False, file_types=file_types)
         if result:
             return self.load_atlas(result[0])
         return False
@@ -79,16 +77,16 @@ class Api:
     def load_atlas(self, path_str: str) -> bool:
         log.debug("load_atlas received path: %r", path_str)
         try:
-            self.atlas_path = Path(path_str)
-            atlas_dir = self.atlas_path.parent
+            self._atlas_path = Path(path_str)
+            atlas_dir = self._atlas_path.parent
             
-            with open(self.atlas_path, 'r', encoding='utf-8') as f:
+            with open(self._atlas_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
             required_pages = [line.strip() for line in content.splitlines() if line.strip().endswith('.png')]
             image_loader = {}
             
-            if not self.window:
+            if not self._window:
                 return False
 
             for page_name in required_pages:
@@ -96,9 +94,9 @@ class Api:
                 if expected_path.exists():
                     image_loader[page_name] = expected_path
                 else:
-                    self.window.evaluate_js(f"alert('Image \\\"{page_name}\\\" not found. Please locate it.')")
+                    self._window.evaluate_js(f"alert('Image \\\"{page_name}\\\" not found. Please locate it.')")
                     file_types = (f'{page_name} ({page_name})', 'PNG Files (*.png)', 'All files (*.*)')
-                    result = self.window.create_file_dialog(
+                    result = self._window.create_file_dialog(
                         webview.FileDialog.OPEN, 
                         allow_multiple=False, 
                         file_types=file_types,
@@ -107,11 +105,11 @@ class Api:
                     if result:
                         image_loader[page_name] = Path(result[0])
                     else:
-                        self.window.evaluate_js("alert('Load cancelled.')")
+                        self._window.evaluate_js("alert('Load cancelled.')")
                         return False
 
-            self.processor = AtlasProcessor(content, image_loader)
-            self.window.set_title(f"Atlas Extracter - {self.atlas_path.name}")
+            self._processor = AtlasProcessor(content, image_loader)
+            self._window.set_title(f"Atlas Extracter - {self._atlas_path.name}")
             
             # Clear modify state when loading a new atlas
             self._clear_modify_state()
@@ -119,34 +117,34 @@ class Api:
             return True
             
         except Exception as e:
-            if self.window:
-                self.window.evaluate_js(f"alert('Error: {str(e)}')")
+            if self._window:
+                self._window.evaluate_js(f"alert('Error: {str(e)}')")
             return False
 
     def _clear_modify_state(self) -> None:
         """Reset all modify mode state."""
-        self.modifier = None
-        self.merged_image = None
-        self.merged_atlas_text = None
-        self.pre_repack_image = None
-        self.pre_repack_text = None
+        self._modifier = None
+        self._merged_image = None
+        self._merged_atlas_text = None
+        self._pre_repack_image = None
+        self._pre_repack_text = None
 
     def get_region_names(self) -> List[str]:
-        if not self.processor: return []
-        return list(self.processor.regions.keys())
+        if not self._processor: return []
+        return list(self._processor.regions.keys())
 
     def get_preview(self, names: List[str]) -> Optional[str]:
-        if not self.processor: return None
+        if not self._processor: return None
         if not names: return None
         
         try:
             images: List[Image] = []
             max_w, max_h = 0, 0
             
-            valid_names = [n for n in names if n in self.processor.regions]
+            valid_names = [n for n in names if n in self._processor.regions]
             
             for name in valid_names:
-                img = self.processor.extract_region(name)
+                img = self._processor.extract_region(name)
                 if img:
                     images.append(img)
                     max_w = max(max_w, img.width)
@@ -174,23 +172,23 @@ class Api:
         return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
 
     def extract_files(self, region_names: Optional[List[str]]) -> str:
-        if not self.processor or not self.atlas_path or not self.window: 
+        if not self._processor or not self._atlas_path or not self._window: 
             return "No atlas loaded or window not ready."
         
-        target_regions = region_names if region_names else list(self.processor.regions.keys())
+        target_regions = region_names if region_names else list(self._processor.regions.keys())
         is_single = len(target_regions) == 1
-        default_dir = str(self.atlas_path.parent)
+        default_dir = str(self._atlas_path.parent)
         save_path: Any = None
         
         if is_single:
-            result = self.window.create_file_dialog(
+            result = self._window.create_file_dialog(
                 webview.FileDialog.SAVE, 
                 directory=default_dir, 
                 save_filename=f"{target_regions[0]}.png"
             )
             if result: save_path = result[0]
         else:
-            result = self.window.create_file_dialog(
+            result = self._window.create_file_dialog(
                 webview.FileDialog.FOLDER, 
                 directory=default_dir
             )
@@ -201,7 +199,7 @@ class Api:
         success_count = 0
         try:
             for name in target_regions:
-                img = self.processor.extract_region(name)
+                img = self._processor.extract_region(name)
                 if img:
                     if is_single:
                         dest = Path(save_path)
@@ -224,27 +222,27 @@ class Api:
         Returns:
             Dict with 'image' (base64) and 'regions' ({name: [x,y,w,h]}), or None.
         """
-        if not self.processor or not self.atlas_path:
+        if not self._processor or not self._atlas_path:
             return None
         
         try:
-            atlas_text = self.atlas_path.read_text(encoding='utf-8')
+            atlas_text = self._atlas_path.read_text(encoding='utf-8')
             
             # Get the first loaded page image as the base
-            base_image = self.processor.get_page_image()
+            base_image = self._processor.get_page_image()
             if not base_image:
                 log.error("No loaded images in processor")
                 return None
             
-            self.modifier = AtlasModifier(atlas_text, self.atlas_path, base_image)
-            self.merged_image = None
-            self.merged_atlas_text = None
+            self._modifier = AtlasModifier(atlas_text, self._atlas_path, base_image)
+            self._merged_image = None
+            self._merged_atlas_text = None
             log.debug("Entered modify mode")
             
             # Build region bounds dict for client-side overlay
             # Each value: [x, y, w, h, rotate]
             region_bounds: dict[str, list[int]] = {}
-            for name, info in self.modifier.regions.items():
+            for name, info in self._modifier.regions.items():
                 region_bounds[name] = [*info.bounds, info.rotate]
             
             return {
@@ -263,13 +261,13 @@ class Api:
 
     def select_mod_image(self, selected_names: List[str], repack: bool = False) -> Optional[dict[str, object]]:
         """Open a file dialog to select a mod PNG, then process it."""
-        if not self.window or not self.modifier:
+        if not self._window or not self._modifier:
             return None
         
         file_types = ('PNG Files (*.png)', 'All files (*.*)')
-        default_dir = str(self.atlas_path.parent) if self.atlas_path else ''
+        default_dir = str(self._atlas_path.parent) if self._atlas_path else ''
         
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.FileDialog.OPEN,
             allow_multiple=False,
             file_types=file_types,
@@ -283,30 +281,30 @@ class Api:
 
     def process_mod_image(self, path_str: str, selected_names: List[str], repack: bool = False) -> Optional[dict[str, object]]:
         """Run merge (and optional repack) and return dict with base64 preview + updated region bounds."""
-        if not self.modifier:
+        if not self._modifier:
             return None
         
         try:
             mod_path = Path(path_str)
             log.debug("Processing mod image: %s", mod_path)
             
-            merged_image, merged_atlas_text = self.modifier.merge_mod_image(
+            merged_image, merged_atlas_text = self._modifier.merge_mod_image(
                 mod_path, selected_names
             )
             
             # Store pre-repack state so toggle can revert
-            self.pre_repack_image = merged_image
-            self.pre_repack_text = merged_atlas_text
+            self._pre_repack_image = merged_image
+            self._pre_repack_text = merged_atlas_text
             
             # Repack as the final step of the merge process
             if repack:
                 log.debug("Running repack...")
-                merged_image, merged_atlas_text = self.modifier.repack(
+                merged_image, merged_atlas_text = self._modifier.repack(
                     merged_image, merged_atlas_text
                 )
             
-            self.merged_image = merged_image
-            self.merged_atlas_text = merged_atlas_text
+            self._merged_image = merged_image
+            self._merged_atlas_text = merged_atlas_text
             
             # Parse updated bounds from merged atlas text
             from atlas_modifier import parse_atlas
@@ -322,18 +320,18 @@ class Api:
             
         except Exception as e:
             log.error("Processing mod image: %s", e)
-            if self.window:
-                self.window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
+            if self._window:
+                self._window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
             return None
 
     def save_modified(self) -> str:
         """Open a folder dialog and save the merged atlas files."""
-        if not self.modifier or not self.merged_image or not self.merged_atlas_text or not self.window:
+        if not self._modifier or not self._merged_image or not self._merged_atlas_text or not self._window:
             return "Error: No merged data to save."
         
-        default_dir = str(self.atlas_path.parent) if self.atlas_path else ''
+        default_dir = str(self._atlas_path.parent) if self._atlas_path else ''
         
-        result = self.window.create_file_dialog(
+        result = self._window.create_file_dialog(
             webview.FileDialog.FOLDER,
             directory=default_dir,
         )
@@ -343,29 +341,29 @@ class Api:
         
         try:
             output_dir = Path(result[0])
-            self.modifier.save(output_dir, self.merged_image, self.merged_atlas_text)
+            self._modifier.save(output_dir, self._merged_image, self._merged_atlas_text)
             return f"Saved to: {output_dir}"
         except Exception as e:
             return f"Error: {str(e)}"
 
     def toggle_repack(self, repack: bool) -> Optional[dict[str, object]]:
         """Re-apply or remove repack on the existing merge result."""
-        if not self.modifier or not self.pre_repack_image or not self.pre_repack_text:
+        if not self._modifier or not self._pre_repack_image or not self._pre_repack_text:
             return None
 
         try:
             if repack:
                 log.debug("Applying repack...")
-                image, text = self.modifier.repack(
-                    self.pre_repack_image, self.pre_repack_text
+                image, text = self._modifier.repack(
+                    self._pre_repack_image, self._pre_repack_text
                 )
             else:
                 log.debug("Reverting to pre-repack merge result")
-                image = self.pre_repack_image
-                text = self.pre_repack_text
+                image = self._pre_repack_image
+                text = self._pre_repack_text
 
-            self.merged_image = image
-            self.merged_atlas_text = text
+            self._merged_image = image
+            self._merged_atlas_text = text
 
             from atlas_modifier import parse_atlas
             _, _, merged_regions = parse_atlas(text)
@@ -398,15 +396,15 @@ class Api:
                 if path_lower.endswith('.atlas'):
                     # Always load atlas (switch to extract mode if in modify)
                     if self.load_atlas(path):
-                        if self.window:
-                            self.window.evaluate_js("onAtlasLoadedFromPython()")
+                        if self._window:
+                            self._window.evaluate_js("onAtlasLoadedFromPython()")
                 
                 elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                     # Image dropped — only handle in modify mode
-                    if self.modifier:
+                    if self._modifier:
                         # Get currently selected names from JS
-                        if self.window:
-                            self.window.evaluate_js("""
+                        if self._window:
+                            self._window.evaluate_js("""
                                 (async () => {
                                     const names = getSelectedNames();
                                     if (names.length === 0) {
@@ -419,57 +417,33 @@ class Api:
                                 })();
                             """ % path.replace('\\', '\\\\').replace("'", "\\'"))
                     else:
-                        if self.window:
-                            self.window.evaluate_js("showToast('Enter Modify Mode first to drop images.', 'error')")
+                        if self._window:
+                            self._window.evaluate_js("showToast('Enter Modify Mode first to drop images.', 'error')")
                 else:
-                    if self.window:
-                        self.window.evaluate_js("showToast('Unsupported file type.', 'error')")
+                    if self._window:
+                        self._window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
             log.error("Drop error: %s", ex)
 
 def setup_drop(window: webview.Window, api: Api) -> None:
     """Bind drag-and-drop events. Runs in a background thread via webview.start()."""
-    import faulthandler
-    faulthandler.enable()
-
-    # Log webview package data for debugging
-    webview_dir = get_resource_path("webview")
-    if webview_dir.exists():
-        print(f"[drop] webview/ contents: {list(webview_dir.rglob('*'))}", flush=True)
-    else:
-        print("[drop] webview/ directory NOT FOUND in bundle", flush=True)
-
-    # Give WebView2 extra time to fully initialize in onefile mode
-    print("[drop] Waiting 3s for WebView2 initialization...", flush=True)
-    time.sleep(3)
-
     try:
         from webview.dom import DOMEventHandler
 
         def _no_op(e: Any) -> None:
             pass
 
-        print("[drop] Accessing window.dom.document...", flush=True)
+        log.debug("Binding drop events...")
         doc = window.dom.document
-        print(f"[drop] Got document: {doc}", flush=True)
-
-        print("[drop] Binding dragenter...", flush=True)
         doc.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
-
-        print("[drop] Binding dragover...", flush=True)
         doc.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
-
-        print("[drop] Binding drop...", flush=True)
         doc.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
-
-        print("[drop] All drop events bound successfully.", flush=True)
+        log.debug("Drop events bound.")
     except Exception as e:
-        print(f"[drop] Failed to setup drop events: {e}", flush=True)
         log.error("Failed to setup drop events: %s", e)
 
 if __name__ == '__main__':
     api = Api()
-    print("[1] Api created", flush=True)
     
     # Calculate Center Position
     import ctypes
@@ -479,26 +453,11 @@ if __name__ == '__main__':
     
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
-    print("[2] Screen metrics calculated", flush=True)
 
     GUI_PATH = get_resource_path("ui/index.html")
-    print(f"[3] GUI_PATH = {GUI_PATH}", flush=True)
-    print(f"[3] GUI_PATH exists = {GUI_PATH.exists()}", flush=True)
-    print(f"[3] __file__ = {__file__}", flush=True)
-    print(f"[3] Parent dir contents = {list(Path(__file__).parent.iterdir())}", flush=True)
-
-    ui_dir = get_resource_path("ui")
-    if ui_dir.exists():
-        print(f"[3] ui/ contents = {list(ui_dir.iterdir())}", flush=True)
-    else:
-        print(f"[3] ui/ directory NOT FOUND!", flush=True)
-
-    url = str(GUI_PATH.absolute().as_uri())
-    print(f"[4] URL = {url}", flush=True)
-
     window = webview.create_window(
         'Atlas Extracter GUI', 
-        url=url,
+        url=str(GUI_PATH.absolute().as_uri()),
         width=window_width, height=window_height,
         min_size=(800, 500),
         x=center_x, y=center_y,
@@ -506,12 +465,10 @@ if __name__ == '__main__':
         js_api=api,
         background_color='#2b2b2b'
     )
-    print("[5] Window created", flush=True)
     
     if window:
         api.set_window(window)
     else:
         sys.exit(1)
     
-    print("[6] Starting webview...", flush=True)
     webview.start(setup_drop, (window, api))
