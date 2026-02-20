@@ -429,21 +429,42 @@ class Api:
 
 def setup_drop(window: webview.Window, api: Api) -> None:
     """Bind drag-and-drop events. Runs in a background thread via webview.start()."""
+    import faulthandler
+    faulthandler.enable()
+
+    # Log webview package data for debugging
+    webview_dir = get_resource_path("webview")
+    if webview_dir.exists():
+        print(f"[drop] webview/ contents: {list(webview_dir.rglob('*'))}", flush=True)
+    else:
+        print("[drop] webview/ directory NOT FOUND in bundle", flush=True)
+
+    # Give WebView2 extra time to fully initialize in onefile mode
+    print("[drop] Waiting 3s for WebView2 initialization...", flush=True)
+    time.sleep(3)
+
     try:
         from webview.dom import DOMEventHandler
 
         def _no_op(e: Any) -> None:
             pass
 
-        # window.dom access implicitly waits for DOM readiness — no on_loaded needed.
-        # Binding in on_loaded can deadlock because the callback runs on the UI thread
-        # while DOM access also requires the UI thread.
-        log.debug("Binding drop events...")
-        window.dom.document.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
-        window.dom.document.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
-        window.dom.document.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
-        log.debug("Drop events bound.")
+        print("[drop] Accessing window.dom.document...", flush=True)
+        doc = window.dom.document
+        print(f"[drop] Got document: {doc}", flush=True)
+
+        print("[drop] Binding dragenter...", flush=True)
+        doc.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
+
+        print("[drop] Binding dragover...", flush=True)
+        doc.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
+
+        print("[drop] Binding drop...", flush=True)
+        doc.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
+
+        print("[drop] All drop events bound successfully.", flush=True)
     except Exception as e:
+        print(f"[drop] Failed to setup drop events: {e}", flush=True)
         log.error("Failed to setup drop events: %s", e)
 
 if __name__ == '__main__':
