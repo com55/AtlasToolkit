@@ -1,17 +1,26 @@
 name: Build and Release
 
 on:
+  # 1. AUTO RELEASE TRIGGER (from auto_tag.yml)
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  # 2. MANUAL TRIGGER (with tag push)
   push:
     tags:
       - "v*"
+  # 3. MANUAL TRIGGER (workflow_dispatch)
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
-  TAG_NAME: ${{ github.ref_name }}
+  # Determine if this is a release (from workflow_call OR tag push)
+  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') }}
+  TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
   # Force console for manual builds (debugging), disable for releases
   CONSOLE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'attach' || 'disable' }}
 
@@ -20,6 +29,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
