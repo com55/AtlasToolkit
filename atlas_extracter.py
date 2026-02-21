@@ -41,7 +41,8 @@ class AtlasProcessor:
         self._cache: Dict[str, Image.Image] = {} # Cache for extracted regions
         
         self._parse_atlas()
-        self._load_images(image_loader)
+        if image_loader:
+            self._load_images(image_loader)
 
     def _parse_atlas(self) -> None:
         lines = [line.strip() for line in self.atlas_content.splitlines()]
@@ -108,11 +109,14 @@ class AtlasProcessor:
                         current_region.index = int(values[0])
 
                 elif current_page:
-                    # Page Properties
                     if key == 'size':
                         current_page.size = (int(values[0]), int(values[1]))
                     elif key == 'format':
                         current_page.format = values[0]
+                    elif key == 'filter':
+                        current_page.filter = (values[0], values[1])
+                    elif key == 'repeat':
+                        current_page.repeat = values[0]
 
             else:
                 # 3. If no colon and not .png -> It's a Region Name
@@ -127,13 +131,13 @@ class AtlasProcessor:
         for page in self.pages:
             source = loader.get(page.filename)
             if source is None:
-                 for key, val in loader.items():
-                     if page.filename in str(key):
-                         source = val
-                         break
+                for key, val in loader.items():
+                    if page.filename in str(key):
+                        source = val
+                        break
             
             if source is None:
-                logging.error(f"❌ Image NOT FOUND for page: {page.filename}")
+                logging.debug(f"❌ Image NOT FOUND for page: {page.filename}, skipping...")
                 continue
 
             try:
@@ -144,7 +148,7 @@ class AtlasProcessor:
                 else:
                     img = source.convert('RGBA')
                 
-                # Auto Scale Check (Resize if mismatch, like 1atlas_processor copy.py)
+                # Auto Scale Check (Resize if mismatch)
                 if page.size != (0, 0):
                     atlas_w, atlas_h = page.size
                     real_w, real_h = img.size
