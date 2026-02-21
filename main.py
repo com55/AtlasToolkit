@@ -445,12 +445,15 @@ def setup_drop(window: webview.Window, api: Api) -> None:
 if __name__ == '__main__':
     api = Api()
     
-    # Calculate Center Position
-    import ctypes
-    user32 = ctypes.windll.user32
-    screen_width, screen_height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    # Calculate center position for primary monitor
     window_width, window_height = 900, 600
-    
+    if sys.platform == 'win32':
+        import ctypes
+        screen_width = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
+        screen_height = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
+    else:
+        _scr = webview.screens[0]
+        screen_width, screen_height = _scr.width, _scr.height
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
 
@@ -471,4 +474,8 @@ if __name__ == '__main__':
     else:
         sys.exit(1)
     
-    webview.start(setup_drop, (window, api))
+    webview.start(
+        func=setup_drop, 
+        args=(window, api), 
+        # debug=True
+    )
