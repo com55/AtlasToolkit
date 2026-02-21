@@ -8,7 +8,7 @@ View atlas regions, extract individual sprites, replace sprites with other image
 ## Usage
 
 - You can use the pre-built executables from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
-- Or, clone the repository and run from source:
+- Or, clone the repository and run from source (in-development / unstable):
 
   ```bash
   git clone https://github.com/com55/AtlasToolkit.git
@@ -33,7 +33,7 @@ View atlas regions, extract individual sprites, replace sprites with other image
 - **Sprite Modification** — Replace sprites with mod images, auto-expanding the canvas as needed
 - **Smart Repack** — Repack all regions into an optimally-sized atlas after modification
 - **Drag & Drop** — Load `.atlas` files by drag-and-drop
-- **Save Modified Atlas** — Export updated `.atlas`, `.png`, and `.skel` files
+- **Save Modified Atlas** — Export updated `.atlas`, `.png`, and also copy `.skel` file if available.
 
 ## Acknowledgments
 
