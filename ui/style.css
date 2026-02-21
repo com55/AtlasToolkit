@@ -52,6 +52,14 @@ body {
   gap: 8px;
 }
 
+#normal-header > span {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .panel-header-buttons {
   display: flex;
   gap: 6px;
