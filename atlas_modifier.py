@@ -32,100 +32,29 @@ class RegionInfo(NamedTuple):
 
 
 def parse_atlas(atlas_text: str) -> Tuple[Dict[str, str], List[str], Dict[str, RegionInfo]]:
-    """
-    Parse atlas file and return page info, order of regions, and region data.
-
-    Args:
-        atlas_text: Content of the atlas file.
-
-    Returns:
-        Tuple containing:
-        - page_info: dict of page metadata
-        - region_names: list of names in order
-        - regions: dict mapping name to RegionInfo
-    """
-    page_info: Dict[str, str] = {}
-    region_names: List[str] = []
-    regions: Dict[str, RegionInfo] = {}
-
-    current_region: Optional[str] = None
-    current_bounds: Optional[Tuple[int, int, int, int]] = None
-    current_offsets: Optional[Tuple[int, int, int, int]] = None
-    current_rotate: int = 0
-    page_name: Optional[str] = None
-
-    lines = atlas_text.splitlines()
-
-    for line in lines:
-        line = line.strip()
-
-        if not line:
-            if current_region and current_bounds:
-                regions[current_region] = RegionInfo(
-                    name=current_region,
-                    bounds=current_bounds,
-                    offsets=current_offsets,
-                    rotate=current_rotate,
-                )
-            current_region = None
-            current_bounds = None
-            current_offsets = None
-            current_rotate = 0
-            continue
-
-        if line.endswith(".png"):
-            page_name = line
-            page_info["page"] = page_name
-            continue
-
-        if ":" in line and page_name and not region_names:
-            key, value = line.split(":", 1)
-            page_info[key.strip()] = value.strip()
-            continue
-
-        if ":" not in line:
-            if current_region and current_bounds:
-                regions[current_region] = RegionInfo(
-                    name=current_region,
-                    bounds=current_bounds,
-                    offsets=current_offsets,
-                    rotate=current_rotate,
-                )
-            current_region = line
-            region_names.append(line)
-            current_bounds = None
-            current_offsets = None
-            current_rotate = 0
-            continue
-
-        if ":" in line and current_region:
-            key, value = line.split(":", 1)
-            key = key.strip().lower()
-            vals = [v.strip() for v in value.split(",")]
-
-            if key == "bounds":
-                current_bounds = tuple(map(int, vals))  # type: ignore[assignment]
-            elif key == "offsets":
-                current_offsets = tuple(map(int, vals))  # type: ignore[assignment]
-            elif key == "rotate":
-                v0 = vals[0].lower()
-                if v0 == "true":
-                    current_rotate = 90
-                elif v0 == "false":
-                    current_rotate = 0
-                elif v0.isdigit():
-                    current_rotate = int(v0)
-
-    if current_region and current_bounds:
-        regions[current_region] = RegionInfo(
-            name=current_region,
-            bounds=current_bounds,
-            offsets=current_offsets,
-            rotate=current_rotate,
+    from atlas_extracter import AtlasProcessor
+    processor = AtlasProcessor(atlas_text, {})
+    
+    page_info = {}
+    if processor.pages:
+        p = processor.pages[0]
+        page_info["page"] = p.filename
+        page_info["size"] = f"{p.size[0]},{p.size[1]}"
+        page_info["format"] = p.format
+        page_info["filter"] = f"{p.filter[0]}, {p.filter[1]}"
+        page_info["repeat"] = p.repeat
+    
+    region_names = list(processor.regions.keys())
+    regions = {}
+    for name, r in processor.regions.items():
+        regions[name] = RegionInfo(
+            name=name,
+            bounds=(r.x, r.y, r.w, r.h),
+            offsets=r.offsets,
+            rotate=r.rotate,
         )
-
+    
     return page_info, region_names, regions
-
 
 # Type alias for updated region data: (bounds, offsets, rotate)
 UpdatedRegionData = Dict[
