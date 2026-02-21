@@ -7,14 +7,15 @@ View atlas regions, extract individual sprites, replace sprites with other image
 
 ## Usage
 
-- You can use the pre-built executables from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
+- You can use the pre-built executables or download stable version source code from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
 - Or, clone the repository and run from source (in-development / unstable):
-
   ```bash
   git clone https://github.com/com55/AtlasToolkit.git
   cd AtlasToolkit
   ```
 
+## Setup & Run (If run from source)
+Once you are inside the project directory, choose your preferred method:
   - **Using [uv](https://github.com/astral-sh/uv#installation) (Recommended)**
     ```bash
     uv sync
