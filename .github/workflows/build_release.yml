@@ -81,8 +81,18 @@ jobs:
           output-file: AtlasToolkit.exe
           onefile-tempdir-spec: "{TEMP}/AtlasToolkit"
 
+      - name: Check signing secrets
+        id: check_secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.CERT_BASE64 }}" ] && [ -n "${{ secrets.CERT_PASSWORD }}" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Sign Executable
-        if: env.CERT_DATA != '' && env.CERT_PASS != ''
+        if: steps.check_secrets.outputs.available == 'true'
         shell: pwsh
         env:
           CERT_DATA: ${{ secrets.CERT_BASE64 }}
