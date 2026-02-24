@@ -17,6 +17,10 @@ let viewState = {
 };
 
 window.addEventListener("pywebviewready", async function () {
+  // Restore saved preferences
+  const repackPref = await pywebview.api.get_pref("repack", false);
+  document.getElementById("chk-repack").checked = repackPref;
+
   const loaded = await pywebview.api.startup_check();
   if (loaded) await loadRegions();
 });
@@ -174,6 +178,7 @@ async function saveModified() {
 }
 
 document.getElementById("chk-repack").addEventListener("change", async (e) => {
+  pywebview.api.set_pref("repack", e.target.checked);
   if (!hasModImage) return;
   const statusEl = document.getElementById("modify-status-text");
   statusEl.innerText = e.target.checked
