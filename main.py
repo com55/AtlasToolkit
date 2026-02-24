@@ -1,6 +1,8 @@
 from __future__ import annotations
 import sys
+import os
 import base64
+import json
 import webview
 import time
 import threading
@@ -43,6 +45,18 @@ def get_resource_path(path: str) -> Path:
 
 IMAGE_EXTENSIONS = {'.png'}
 
+def _get_config_dir() -> Path:
+    """Return a persistent config directory for the app."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    d = base / "AtlasToolkit"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+CONFIG_PATH = _get_config_dir() / "config.json"
+
 
 class Api:
     def __init__(self) -> None:
@@ -56,9 +70,36 @@ class Api:
         # Pre-repack state (merge output before repack was applied)
         self._pre_repack_image: Optional[Image] = None
         self._pre_repack_text: Optional[str] = None
+        # Persistent config
+        self._config: dict[str, Any] = self._load_config()
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
+
+    # --- Config persistence ---
+    @staticmethod
+    def _load_config() -> dict[str, Any]:
+        try:
+            if CONFIG_PATH.exists():
+                return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+        except Exception:
+            pass
+        return {}
+
+    def _save_config(self) -> None:
+        try:
+            CONFIG_PATH.write_text(json.dumps(self._config), encoding="utf-8")
+        except Exception as e:
+            log.warning("Failed to save config: %s", e)
+
+    def get_pref(self, key: str, default: Any = None) -> Any:
+        """Get a persistent preference value."""
+        return self._config.get(key, default)
+
+    def set_pref(self, key: str, value: Any) -> None:
+        """Set and persist a preference value."""
+        self._config[key] = value
+        self._save_config()
 
     def startup_check(self) -> bool:
         """Called by JS when pywebview is ready"""

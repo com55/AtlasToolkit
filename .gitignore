@@ -11,4 +11,3 @@ wheels/
 .vscode
 .claude
 test*
-uv.lock
