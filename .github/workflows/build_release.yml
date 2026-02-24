@@ -43,12 +43,19 @@ jobs:
       - name: Install Dependencies
         run: uv export --no-hashes -o requirements.txt && pip install -r requirements.txt
 
-      - name: Write VERSION file
+      - name: Get version for build
+        id: build_version
         shell: powershell
         run: |
-          $tag = "${{ env.TAG_NAME }}"
-          $version = $tag.TrimStart("v")
+          if ("${{ github.ref }}" -match "refs/tags/v(.+)") {
+            $version = $matches[1]
+          } elseif ("${{ inputs.tag_name }}" -ne "") {
+            $version = "${{ inputs.tag_name }}".TrimStart("v")
+          } else {
+            $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
+          }
           if (-not $version) { $version = "0.0.0" }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
           $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
           echo "Building version: $version"
 
