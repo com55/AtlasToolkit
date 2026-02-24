@@ -170,8 +170,9 @@ def rebuild_atlas_text(
         elif rotate_val == 270:
             rotate_str = "270"
         else:
-            rotate_str = "false"
-        lines.append(f"  rotate: {rotate_str}")
+            rotate_str = None
+        if rotate_str:
+            lines.append(f"  rotate: {rotate_str}")
         lines.append(
             f"  bounds: {bounds[0]}, {bounds[1]}, {bounds[2]}, {bounds[3]}"
         )
@@ -184,7 +185,6 @@ def rebuild_atlas_text(
             lines.append(
                 f"  offsets: 0, 0, {bounds[2]}, {bounds[3]}"
             )
-        lines.append(f"  index: -1")
 
     return "\n".join(lines)
 
