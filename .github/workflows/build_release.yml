@@ -43,6 +43,15 @@ jobs:
       - name: Install Dependencies
         run: uv export --no-hashes -o requirements.txt && pip install -r requirements.txt
 
+      - name: Write VERSION file
+        shell: powershell
+        run: |
+          $tag = "${{ env.TAG_NAME }}"
+          $version = $tag.TrimStart("v")
+          if (-not $version) { $version = "0.0.0" }
+          $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
+          echo "Building version: $version"
+
       - name: Build with Nuitka 🏗️
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -52,6 +61,7 @@ jobs:
           windows-console-mode: ${{ env.CONSOLE_MODE }}
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
+          include-data-files: VERSION=VERSION
           include-package-data: webview
           nofollow-import-to: |
             PyQt5
@@ -63,6 +73,42 @@ jobs:
           output-dir: dist
           output-file: AtlasToolkit.exe
           onefile-tempdir-spec: "{TEMP}/AtlasToolkit"
+
+      - name: Sign Executable
+        if: env.CERT_DATA != '' && env.CERT_PASS != ''
+        shell: pwsh
+        env:
+          CERT_DATA: ${{ secrets.CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          $exePath = "dist/AtlasToolkit.exe"
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse | 
+                      Where-Object { $_.FullName -match "x64" } | 
+                      Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+          try {
+              $cleanBase64 = $env:CERT_DATA -replace '\s',''
+              $certBytes = [System.Convert]::FromBase64String($cleanBase64)
+              [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+
+              Write-Host "Verifying PFX and Password..."
+              certutil -p $env:CERT_PASS -dump $certPath | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Incorrect password or corrupted PFX file." }
+
+              Write-Host "Signing executable..."
+              & $signtool sign /f $certPath /p "$env:CERT_PASS" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /v $exePath
+              
+              if ($LASTEXITCODE -ne 0) { throw "SignTool failed with code: $LASTEXITCODE" }
+          }
+          catch {
+              Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
+          finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+          }
 
       - name: Prepare Assets for Upload 📦
         shell: powershell

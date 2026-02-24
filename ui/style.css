@@ -555,3 +555,90 @@ img#preview-img {
   font-size: 24px;
   font-weight: bold;
 }
+
+
+/* ==========================================
+   UPDATE NOTIFICATION BAR (Bottom of right panel)
+   ========================================== */
+
+.toast-update {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: #1e2a38;
+  border-top: 1px solid #2d6a9f;
+  font-size: 12px;
+  animation: slideUpBar 0.25s ease-out forwards;
+  flex-shrink: 0;
+}
+
+@keyframes slideUpBar {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-update-icon {
+  width: 16px;
+  height: 16px;
+  fill: #4fc3f7;
+  flex-shrink: 0;
+}
+
+.toast-update-title {
+  font-weight: 600;
+  color: #e0f0ff;
+  white-space: nowrap;
+}
+
+.toast-update-sub {
+  color: #7bafd4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.toast-update-btn-go {
+  background-color: #0e639c;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 0 10px;
+  height: 22px;
+  font-size: 11px;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.toast-update-btn-go:hover {
+  background-color: #1177bb;
+}
+
+.toast-update-btn-close {
+  background: transparent;
+  color: #ff6464;
+  border: 1px solid #ff6464;
+  padding: 0 6px;
+  height: 22px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.15s, background-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.toast-update-btn-close:hover {
+  color: #e0f0ff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
