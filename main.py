@@ -6,6 +6,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
+from atlas_converter import auto_convert_atlas
 from atlas_extracter import AtlasProcessor
 from atlas_modifier import AtlasModifier
 
@@ -108,7 +109,7 @@ class Api:
                         self._window.evaluate_js("alert('Load cancelled.')")
                         return False
 
-            self._processor = AtlasProcessor(content, image_loader)
+            self._processor = AtlasProcessor(auto_convert_atlas(content), image_loader)
             self._window.set_title(f"Atlas Extracter - {self._atlas_path.name}")
             
             # Clear modify state when loading a new atlas
@@ -234,7 +235,7 @@ class Api:
                 log.error("No loaded images in processor")
                 return None
             
-            self._modifier = AtlasModifier(atlas_text, self._atlas_path, base_image)
+            self._modifier = AtlasModifier(auto_convert_atlas(atlas_text), self._atlas_path, base_image)
             self._merged_image = None
             self._merged_atlas_text = None
             log.debug("Entered modify mode")
