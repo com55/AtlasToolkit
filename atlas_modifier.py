@@ -204,11 +204,45 @@ class AtlasModifier:
     """Handles merging mod images into an atlas and saving the result."""
 
     def __init__(self, atlas_text: str, atlas_path: Path, base_image: Image.Image) -> None:
-        self.atlas_text = atlas_text
         self.atlas_path = atlas_path
         self.base_image = base_image.convert("RGBA")
 
-        _, self.region_names, self.regions = parse_atlas(atlas_text)
+        # Scale atlas coordinates to match real image size (if mismatched)
+        self.atlas_text = self._scale_atlas_text(atlas_text)
+        _, self.region_names, self.regions = parse_atlas(self.atlas_text)
+
+    def _scale_atlas_text(self, atlas_text: str) -> str:
+        """If image size differs from atlas page size, return atlas text
+        with all coordinates scaled to match the real image."""
+        page_info, _, regions = parse_atlas(atlas_text)
+        size_str = page_info.get("size")
+        if not size_str:
+            return atlas_text
+
+        atlas_w, atlas_h = (int(v.strip()) for v in size_str.split(","))
+        real_w, real_h = self.base_image.size
+
+        if real_w == atlas_w and real_h == atlas_h:
+            return atlas_text
+
+        sx = real_w / atlas_w
+        sy = real_h / atlas_h
+        logging.info(
+            f"Modifier: scaling atlas coords "
+            f"(Atlas={atlas_w}x{atlas_h} → Image={real_w}x{real_h})"
+        )
+
+        updated: UpdatedRegionData = {}
+        for name, info in regions.items():
+            x, y, w, h = info.bounds
+            new_bounds = (round(x * sx), round(y * sy), round(w * sx), round(h * sy))
+            new_offsets: Optional[Tuple[int, int, int, int]] = None
+            if info.offsets:
+                ox, oy, ow, oh = info.offsets
+                new_offsets = (round(ox * sx), round(oy * sy), round(ow * sx), round(oh * sy))
+            updated[name] = (new_bounds, new_offsets, info.rotate)
+
+        return update_atlas_text(atlas_text, (real_w, real_h), updated)
 
     # ------------------------------------------------------------------ #
     #  Placement strategy                                                  #
@@ -308,10 +342,28 @@ class AtlasModifier:
             orig_canvas_w = first_region.offsets[2]
             orig_canvas_h = first_region.offsets[3]
 
-        # Pad mod image to original canvas size if needed
+        # Detect proportional scale (e.g. mod is 2x the expected canvas)
+        if (
+            orig_canvas_w > 0
+            and orig_canvas_h > 0
+            and (mod_w != orig_canvas_w or mod_h != orig_canvas_h)
+        ):
+            ratio_w = mod_w / orig_canvas_w
+            ratio_h = mod_h / orig_canvas_h
+            # Uniform scale and not ~1:1 → scale canvas target to match mod
+            if abs(ratio_w - ratio_h) < 0.05 and not (0.95 < ratio_w < 1.05):
+                mod_scale = (ratio_w + ratio_h) / 2
+                orig_canvas_w = round(orig_canvas_w * mod_scale)
+                orig_canvas_h = round(orig_canvas_h * mod_scale)
+                logging.info(
+                    f"Mod image scale: {mod_scale:.3f}x "
+                    f"(canvas → {orig_canvas_w}x{orig_canvas_h})"
+                )
+
+        # Pad mod image to (possibly scaled) canvas size if needed
         if mod_w != orig_canvas_w or mod_h != orig_canvas_h:
             logging.info(
-                f"Padding mod image to original canvas: "
+                f"Padding mod image to canvas: "
                 f"{orig_canvas_w}x{orig_canvas_h}"
             )
             padded_mod = Image.new(
@@ -411,24 +463,10 @@ class AtlasModifier:
         Returns the sprite in its **unrotated** orientation (the visual pixel
         data the artist intended), without any offset padding.
         """
-        x, y, raw_w, raw_h = region.bounds
-        rot = region.rotate
+        from atlas_extracter import AtlasProcessor
 
-        # When rotated 90/270, the atlas stores w/h swapped
-        crop_w = raw_h if rot in (90, 270) else raw_w
-        crop_h = raw_w if rot in (90, 270) else raw_h
-
-        sprite = image.crop((x, y, x + crop_w, y + crop_h))
-
-        # Undo atlas rotation to get the original orientation
-        if rot == 90:
-            sprite = sprite.transpose(Image.Transpose.ROTATE_270)
-        elif rot == 270:
-            sprite = sprite.transpose(Image.Transpose.ROTATE_90)
-        elif rot == 180:
-            sprite = sprite.transpose(Image.Transpose.ROTATE_180)
-
-        return sprite
+        x, y, w, h = region.bounds
+        return AtlasProcessor.crop_and_rotate(image, x, y, w, h, region.rotate)
 
     @staticmethod
     def _shelf_pack(

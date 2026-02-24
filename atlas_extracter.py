@@ -148,20 +148,55 @@ class AtlasProcessor:
                 else:
                     img = source.convert('RGBA')
                 
-                # Auto Scale Check (Resize if mismatch)
+                # Auto Scale Check (scale atlas coords to match real image)
                 if page.size != (0, 0):
                     atlas_w, atlas_h = page.size
                     real_w, real_h = img.size
                     
                     if real_w != atlas_w or real_h != atlas_h:
-                        logging.warning(f"⚠️ Scale Mismatch: Atlas={atlas_w}x{atlas_h}, Real={real_w}x{real_h}. Resizing...")
-                        img = img.resize((atlas_w, atlas_h), Image.Resampling.LANCZOS)
+                        page.scale_x = real_w / atlas_w
+                        page.scale_y = real_h / atlas_h
+                        logging.warning(
+                            f"⚠️ Scale Mismatch: Atlas={atlas_w}x{atlas_h}, "
+                            f"Real={real_w}x{real_h}. "
+                            f"Scaling atlas coords (x{page.scale_x:.3f}, x{page.scale_y:.3f})"
+                        )
                 
                 self._loaded_images[page.filename] = img
                 logging.info(f"✅ Loaded {page.filename} ({img.size})")
                 
             except Exception as e:
                 logging.error(f"Failed to load image {page.filename}: {e}")
+
+    @staticmethod
+    def crop_and_rotate(
+        image: Image.Image, x: int, y: int, w: int, h: int, rotate: int,
+    ) -> Image.Image:
+        """Crop a region from *image* and undo atlas rotation.
+
+        Args:
+            image: Source atlas image.
+            x, y: Top-left position of the region in the atlas.
+            w, h: Region dimensions (before atlas rotation is applied).
+            rotate: Atlas rotation value (0, 90, 180, 270).
+
+        Returns:
+            The cropped sprite in its original (unrotated) orientation.
+        """
+        # When rotated 90/270, the atlas stores w/h swapped
+        crop_w = h if rotate in (90, 270) else w
+        crop_h = w if rotate in (90, 270) else h
+
+        sprite = image.crop((x, y, x + crop_w, y + crop_h))
+
+        if rotate == 90:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_270)
+        elif rotate == 270:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_90)
+        elif rotate == 180:
+            sprite = sprite.transpose(Image.Transpose.ROTATE_180)
+
+        return sprite
 
     def get_page_image(self, page_filename: Optional[str] = None) -> Optional[Image.Image]:
         """Get a loaded page image by filename, or the first one if not specified."""
@@ -178,44 +213,37 @@ class AtlasProcessor:
         base_img = self._loaded_images.get(region.page_filename)
         if not base_img: return None
 
-        # Logic from 1atlas_processor copy.py
         x, y, raw_w, raw_h = region.x, region.y, region.w, region.h
         rot = region.rotate
 
-        # Crop packed sprite
-        # If rotated (90/270), dimensions in atlas are swapped
-        crop_w = raw_h if rot in (90, 270) else raw_w
-        crop_h = raw_w if rot in (90, 270) else raw_h
+        # Apply page scale factors (atlas coords → real image coords)
+        page = self._page_map.get(region.page_filename)
+        if page and (page.scale_x != 1.0 or page.scale_y != 1.0):
+            sx, sy = page.scale_x, page.scale_y
+            x = round(x * sx)
+            y = round(y * sy)
+            raw_w = round(raw_w * sx)
+            raw_h = round(raw_h * sy)
 
-        # Use base_img size for safety check only (optional, strict crop)
-        sprite = base_img.crop((x, y, x + crop_w, y + crop_h))
-
-        # Rotate
-        if rot:
-            if rot == 90:
-                sprite = sprite.transpose(Image.Transpose.ROTATE_270)
-            elif rot == 270:
-                sprite = sprite.transpose(Image.Transpose.ROTATE_90)
-            elif rot == 180:
-                sprite = sprite.transpose(Image.Transpose.ROTATE_180)
-            
-            # Update dimensions after rotation (should match raw_w, raw_h if 90/270 ??? No, wait)
-            # 1atlas_processor logic: w, h = sprite.size (after rotation)
-
+        sprite = self.crop_and_rotate(base_img, x, y, raw_w, raw_h, rot)
         current_w, current_h = sprite.size
 
         # Offsets
         if region.offsets:
             off_x, off_y, orig_w, orig_h = region.offsets
-            
-            # 1atlas_processor copy.py Logic:
-            # paste_x = off_x
-            # paste_y = orig_h - off_y - h (where h is current sprite height)
-            
+
+            # Scale offsets to match real image
+            if page and (page.scale_x != 1.0 or page.scale_y != 1.0):
+                sx, sy = page.scale_x, page.scale_y
+                off_x = round(off_x * sx)
+                off_y = round(off_y * sy)
+                orig_w = round(orig_w * sx)
+                orig_h = round(orig_h * sy)
+
             canvas = Image.new('RGBA', (orig_w, orig_h), (0, 0, 0, 0))
             paste_x = off_x
             paste_y = orig_h - off_y - current_h
-            
+
             canvas.paste(sprite, (paste_x, paste_y))
             self._cache[name] = canvas
             return canvas
