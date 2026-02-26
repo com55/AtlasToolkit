@@ -63,6 +63,36 @@ UpdatedRegionData = Dict[
 ]
 
 
+def _format_rotate(rotate_val: int) -> Optional[str]:
+    """Convert a rotation degree value to its atlas text representation.
+
+    Returns None if rotation is 0 (meaning the line should be omitted).
+    """
+    if rotate_val == 90:
+        return "true"
+    if rotate_val == 180:
+        return "180"
+    if rotate_val == 270:
+        return "270"
+    return None
+
+
+def _flush_pending_rotate(
+    result: List[str],
+    region: Optional[str],
+    updated_regions: UpdatedRegionData,
+    rotate_written: bool,
+) -> None:
+    """Insert a ``rotate:`` line if the region needs one but hasn't got it yet."""
+    if region is None or region not in updated_regions or rotate_written:
+        return
+    _, _, rotate_val = updated_regions[region]
+    rotate_str = _format_rotate(rotate_val)
+    if rotate_str is not None:
+        result.append(f"  rotate: {rotate_str}")
+        logging.info(f"Inserted rotate for {region}: {rotate_val}")
+
+
 def update_atlas_text(
     atlas_text: str,
     new_size: Tuple[int, int],
@@ -75,13 +105,19 @@ def update_atlas_text(
     result: List[str] = []
     current_region: Optional[str] = None
     in_page_header = False
+    rotate_written = False
 
     for line in lines:
         stripped = line.strip()
 
         if stripped.endswith(".png"):
+            _flush_pending_rotate(
+                result, current_region, updated_regions, rotate_written
+            )
             result.append(line)
             in_page_header = True
+            current_region = None
+            rotate_written = False
             continue
 
         if in_page_header:
@@ -92,7 +128,11 @@ def update_atlas_text(
                 in_page_header = False
 
         if ":" not in stripped and stripped and not stripped.endswith(".png"):
+            _flush_pending_rotate(
+                result, current_region, updated_regions, rotate_written
+            )
             current_region = stripped
+            rotate_written = False
             result.append(line)
             continue
 
@@ -115,18 +155,17 @@ def update_atlas_text(
                 continue
 
             if stripped.startswith("rotate:"):
-                if rotate_val == 90:
-                    rotate_str = "true"
-                elif rotate_val == 180:
-                    rotate_str = "180"
-                elif rotate_val == 270:
-                    rotate_str = "270"
+                rotate_str = _format_rotate(rotate_val)
+                if rotate_str is not None:
+                    result.append(f"  rotate: {rotate_str}")
                 else:
-                    rotate_str = "false"
-                result.append(f"  rotate: {rotate_str}")
+                    result.append("  rotate: false")
+                rotate_written = True
                 continue
 
         result.append(line)
+
+    _flush_pending_rotate(result, current_region, updated_regions, rotate_written)
 
     return "\n".join(result)
 
@@ -381,7 +420,6 @@ class AtlasModifier:
         if best.rotated:
             # ROTATE_90 in Pillow == 90° counter-clockwise
             mod_img = mod_img.transpose(Image.Transpose.ROTATE_90)
-            mod_w, mod_h = mod_h, mod_w  # swap after rotation
 
         # Create new combined Atlas Image
         merged = Image.new(
