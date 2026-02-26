@@ -4,7 +4,7 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "atlastoolkit"
-version = "0.1.2"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pillow" },
@@ -14,9 +14,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pillow", specifier = ">=12.1.1" },
-    { name = "pywebview", specifier = ">=6.1" },
-    { name = "requests", specifier = ">=2.32.5" },
+    { name = "pillow", specifier = "==12.1.1" },
+    { name = "pywebview", specifier = "==6.1" },
+    { name = "requests", specifier = "==2.32.5" },
 ]
 
 [[package]]
