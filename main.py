@@ -142,7 +142,7 @@ class Api:
                     image_loader[page_name] = expected_path
                 else:
                     self._window.evaluate_js(f"alert('Image \\\"{page_name}\\\" not found. Please locate it.')")
-                    file_types = (f'{page_name} ({page_name})', 'PNG Files (*.png)', 'All files (*.*)')
+                    file_types = (f'{Path(page_name).stem} (*{Path(page_name).suffix})', 'All files (*.*)')
                     result = self._window.create_file_dialog(
                         webview.FileDialog.OPEN, 
                         allow_multiple=False, 
@@ -200,11 +200,17 @@ class Api:
             if not images:
                 return None
 
+            if len(images) == 1:
+                return self._image_to_base64(images[0])
+
             from PIL import Image
             monitor = Image.new('RGBA', (max_w, max_h), (0, 0, 0, 0))
 
             for img in reversed(images):
-                monitor.paste(img, (0, 0), img)
+                # Pad to monitor size so alpha_composite works (requires same size)
+                layer = Image.new('RGBA', monitor.size, (0, 0, 0, 0))
+                layer.paste(img, (0, 0))
+                monitor = Image.alpha_composite(monitor, layer)
 
             return self._image_to_base64(monitor)
             
@@ -449,20 +455,7 @@ class Api:
                 elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                     # Image dropped — only handle in modify mode
                     if self._modifier:
-                        # Get currently selected names from JS
-                        if self._window:
-                            self._window.evaluate_js("""
-                                (async () => {
-                                    const names = getSelectedNames();
-                                    if (names.length === 0) {
-                                        showToast('Select at least one region first.', 'error');
-                                        return;
-                                    }
-                                    const repack = document.getElementById('chk-repack').checked;
-                                    const result = await pywebview.api.process_mod_image('%s', names, repack);
-                                    window.onModImageProcessed(result);
-                                })();
-                            """ % path.replace('\\', '\\\\').replace("'", "\\'"))
+                        self._handle_image_drop(path)
                     else:
                         if self._window:
                             self._window.evaluate_js("showToast('Enter Modify Mode first to drop images.', 'error')")
@@ -471,6 +464,33 @@ class Api:
                         self._window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
             log.error("Drop error: %s", ex)
+
+    def _handle_image_drop(self, path: str) -> None:
+        """Process a dropped image in modify mode directly, avoiding JS round-trip."""
+        if not self._window:
+            return
+
+        # Get selected names and repack flag from JS (synchronous eval)
+        selected_json = self._window.evaluate_js("JSON.stringify(getSelectedNames())")
+        if not selected_json:
+            self._window.evaluate_js("showToast('Select at least one region first.', 'error')")
+            return
+
+        names: list[str] = json.loads(selected_json)
+        if len(names) == 0:
+            self._window.evaluate_js("showToast('Select at least one region first.', 'error')")
+            return
+
+        repack_val = self._window.evaluate_js("document.getElementById('chk-repack').checked")
+        repack = bool(repack_val)
+
+        # Process directly in Python — no JS→Python→JS→Python round-trip
+        result = self.process_mod_image(path, names, repack)
+        if result:
+            result_json = json.dumps(result)
+            self._window.evaluate_js(f"window.onModImageProcessed({result_json})")
+        else:
+            self._window.evaluate_js("showToast('Failed to process mod image.', 'error')")
     
     def _run_update_check(self) -> None:
         """Run update check in background thread, push result to JS when done."""
@@ -496,7 +516,6 @@ def setup_drop(window: webview.Window, api: Api) -> None:
 
         log.debug("Binding drop events...")
         doc = window.dom.document
-        doc.events.dragenter += DOMEventHandler(_no_op, True, True)  # type: ignore[operator]
         doc.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
         doc.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
         log.debug("Drop events bound.")
