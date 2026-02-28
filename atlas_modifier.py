@@ -90,7 +90,7 @@ def _flush_pending_rotate(
     rotate_str = _format_rotate(rotate_val)
     if rotate_str is not None:
         result.append(f"  rotate: {rotate_str}")
-        logging.info(f"Inserted rotate for {region}: {rotate_val}")
+        logging.debug(f"Inserted rotate for {region}: {rotate_val}")
 
 
 def update_atlas_text(
@@ -144,6 +144,7 @@ def update_atlas_text(
                     f"  bounds: {new_bounds[0]}, {new_bounds[1]}, "
                     f"{new_bounds[2]}, {new_bounds[3]}"
                 )
+                logging.debug(f"Updated bounds for {current_region}: {new_bounds}")
                 continue
 
             if stripped.startswith("offsets:"):
@@ -152,6 +153,7 @@ def update_atlas_text(
                         f"  offsets: {new_offsets[0]}, {new_offsets[1]}, "
                         f"{new_offsets[2]}, {new_offsets[3]}"
                     )
+                logging.debug(f"Updated offsets for {current_region}: {new_offsets}")
                 continue
 
             if stripped.startswith("rotate:"):
@@ -161,6 +163,7 @@ def update_atlas_text(
                 else:
                     result.append("  rotate: false")
                 rotate_written = True
+                logging.debug(f"Updated rotate for {current_region}: {rotate_val}")
                 continue
 
         result.append(line)
