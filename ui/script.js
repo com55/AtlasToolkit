@@ -934,19 +934,51 @@ window.showUpdateNotification = function (
   const toast = document.createElement("div");
   toast.id = "update-toast";
   toast.className = "toast-update";
-  toast.innerHTML = `
-    <svg class="toast-update-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
-      <path d="M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/>
-    </svg>
-    <span class="toast-update-title">Update available — ${latestVersion}</span>
-    <span class="toast-update-sub">${releaseName}</span>
-    <button class="toast-update-btn-go" onclick="window.open('${releaseUrl}')">
-      View Release
-    </button>
-    <button class="toast-update-btn-close" onclick="document.getElementById('update-toast').remove()">
-      ✕
-    </button>
-  `;
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "toast-update-icon");
+  icon.setAttribute("viewBox", "0 -960 960 960");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute(
+    "d",
+    "M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z",
+  );
+  icon.appendChild(path);
+
+  const title = document.createElement("span");
+  title.className = "toast-update-title";
+  title.textContent = `Update available - ${latestVersion}`;
+
+  const sub = document.createElement("span");
+  sub.className = "toast-update-sub";
+  sub.textContent = releaseName;
+
+  const goBtn = document.createElement("button");
+  goBtn.className = "toast-update-btn-go";
+  goBtn.textContent = "View Release";
+  goBtn.addEventListener("click", () => {
+    try {
+      const url = new URL(String(releaseUrl));
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        window.open(url.toString());
+      } else {
+        showToast("Invalid release URL.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Invalid release URL.", "error");
+    }
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "toast-update-btn-close";
+  closeBtn.textContent = "x";
+  closeBtn.addEventListener("click", () => toast.remove());
+
+  toast.appendChild(icon);
+  toast.appendChild(title);
+  toast.appendChild(sub);
+  toast.appendChild(goBtn);
+  toast.appendChild(closeBtn);
 
   document.getElementById("right-panel").appendChild(toast);
 };

@@ -93,6 +93,25 @@ def _flush_pending_rotate(
         logging.debug(f"Inserted rotate for {region}: {rotate_val}")
 
 
+def _flush_pending_offsets(
+    result: List[str],
+    region: Optional[str],
+    updated_regions: UpdatedRegionData,
+    offsets_written: bool,
+) -> None:
+    """Insert an ``offsets:`` line if one is required but missing."""
+    if region is None or region not in updated_regions or offsets_written:
+        return
+    _, new_offsets, _ = updated_regions[region]
+    if new_offsets is None:
+        return
+    result.append(
+        f"  offsets: {new_offsets[0]}, {new_offsets[1]}, "
+        f"{new_offsets[2]}, {new_offsets[3]}"
+    )
+    logging.debug(f"Inserted offsets for {region}: {new_offsets}")
+
+
 def update_atlas_text(
     atlas_text: str,
     new_size: Tuple[int, int],
@@ -106,11 +125,15 @@ def update_atlas_text(
     current_region: Optional[str] = None
     in_page_header = False
     rotate_written = False
+    offsets_written = False
 
     for line in lines:
         stripped = line.strip()
 
         if stripped.endswith(".png"):
+            _flush_pending_offsets(
+                result, current_region, updated_regions, offsets_written
+            )
             _flush_pending_rotate(
                 result, current_region, updated_regions, rotate_written
             )
@@ -118,6 +141,7 @@ def update_atlas_text(
             in_page_header = True
             current_region = None
             rotate_written = False
+            offsets_written = False
             continue
 
         if in_page_header:
@@ -128,11 +152,15 @@ def update_atlas_text(
                 in_page_header = False
 
         if ":" not in stripped and stripped and not stripped.endswith(".png"):
+            _flush_pending_offsets(
+                result, current_region, updated_regions, offsets_written
+            )
             _flush_pending_rotate(
                 result, current_region, updated_regions, rotate_written
             )
             current_region = stripped
             rotate_written = False
+            offsets_written = False
             result.append(line)
             continue
 
@@ -153,6 +181,9 @@ def update_atlas_text(
                         f"  offsets: {new_offsets[0]}, {new_offsets[1]}, "
                         f"{new_offsets[2]}, {new_offsets[3]}"
                     )
+                else:
+                    result.append(line)
+                offsets_written = True
                 logging.debug(f"Updated offsets for {current_region}: {new_offsets}")
                 continue
 
@@ -168,6 +199,7 @@ def update_atlas_text(
 
         result.append(line)
 
+    _flush_pending_offsets(result, current_region, updated_regions, offsets_written)
     _flush_pending_rotate(result, current_region, updated_regions, rotate_written)
 
     return "\n".join(result)
@@ -369,6 +401,9 @@ class AtlasModifier:
         Returns:
             Tuple of (merged PIL Image, new atlas text).
         """
+        if not selected_regions:
+            raise ValueError("No regions selected for modification")
+
         mod_img = Image.open(mod_image_path).convert("RGBA")
 
         base_w, base_h = self.base_image.size

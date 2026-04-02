@@ -44,6 +44,37 @@ def get_resource_path(path: str) -> Path:
 
 
 IMAGE_EXTENSIONS = {'.png'}
+PAGE_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'}
+PAGE_HEADER_KEYS = {'size', 'format', 'filter', 'repeat', 'pma'}
+
+
+def _extract_required_pages(atlas_text: str) -> list[str]:
+    """Extract atlas page image names from page headers only."""
+    lines = atlas_text.splitlines()
+    pages: list[str] = []
+
+    for i, raw in enumerate(lines):
+        candidate = raw.strip()
+        if not candidate or ':' in candidate:
+            continue
+
+        suffix = Path(candidate).suffix.lower()
+        if suffix not in PAGE_IMAGE_EXTENSIONS:
+            continue
+
+        next_key: Optional[str] = None
+        for j in range(i + 1, len(lines)):
+            nxt = lines[j].strip()
+            if not nxt:
+                continue
+            if ':' in nxt:
+                next_key = nxt.split(':', 1)[0].strip().lower()
+            break
+
+        if next_key in PAGE_HEADER_KEYS and candidate not in pages:
+            pages.append(candidate)
+
+    return pages
 
 def _get_config_dir() -> Path:
     """Return a persistent config directory for the app."""
@@ -130,7 +161,7 @@ class Api:
             with open(self._atlas_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            required_pages = [line.strip() for line in content.splitlines() if line.strip().endswith('.png')]
+            required_pages = _extract_required_pages(content)
             image_loader = {}
             
             if not self._window:
@@ -497,11 +528,11 @@ class Api:
         try:
             info = check_for_updates()
             if info and self._window:
-                safe_name = info.release_name.replace("'", "\\'")
-                safe_url  = info.release_url.replace("'", "\\'")
+                args_json = json.dumps(
+                    [info.latest_version, info.release_name, info.release_url]
+                )
                 self._window.evaluate_js(
-                    f"window.showUpdateNotification("
-                    f"'{info.latest_version}', '{safe_name}', '{safe_url}')"
+                    f"(function(a){{window.showUpdateNotification(a[0], a[1], a[2]);}})({args_json});"
                 )
         except Exception as e:
             log.warning("Update check failed: %s", e)
