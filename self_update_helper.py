@@ -308,10 +308,22 @@ def safe_cleanup(
     shutil.rmtree(extract_dir, ignore_errors=True)
 
     if remove_backup and backup_path and backup_path.exists():
-        try:
-            backup_path.unlink()
-        except Exception:
-            pass
+        removed = False
+        for attempt in range(1, 13):
+            try:
+                backup_path.unlink()
+                log.info("Removed backup executable: %s", backup_path)
+                removed = True
+                break
+            except PermissionError:
+                # Antivirus or indexing can briefly lock new/old executables.
+                time.sleep(0.25)
+            except Exception as e:
+                log.warning("Failed to remove backup executable %s: %s", backup_path, e)
+                break
+
+        if not removed and backup_path.exists():
+            log.warning("Backup executable still exists after cleanup: %s", backup_path)
 
 
 def _pick_relaunch_target(target_exe: Path, backup_path: Path | None) -> Path:
