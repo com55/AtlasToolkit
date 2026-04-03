@@ -179,9 +179,72 @@ def _get_update_dir() -> Path:
     return d
 
 
+def _get_nuitka_onefile_parent_exe_path() -> Optional[Path]:
+    """Return outer onefile launcher path when running in Nuitka child process."""
+    if os.name != "nt":
+        return None
+
+    raw_pid = os.environ.get("NUITKA_ONEFILE_PARENT", "").strip()
+    if not raw_pid:
+        return None
+
+    try:
+        pid = int(raw_pid)
+    except Exception:
+        return None
+
+    if pid <= 0:
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+
+        process_handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not process_handle:
+            return None
+
+        try:
+            size = wintypes.DWORD(32768)
+            buf = ctypes.create_unicode_buffer(size.value)
+            ok = kernel32.QueryFullProcessImageNameW(
+                process_handle,
+                0,
+                buf,
+                ctypes.byref(size),
+            )
+            if not ok:
+                return None
+
+            p = Path(buf.value)
+            if p.exists() and p.is_file():
+                return p
+            return None
+        finally:
+            kernel32.CloseHandle(process_handle)
+    except Exception:
+        return None
+
+
 def _get_running_executable_path() -> Path:
     """Return the best on-disk executable path for relaunch/update flow."""
+    # Nuitka onefile should expose the outer launcher as sys.argv[0].
+    if sys.argv and sys.argv[0]:
+        try:
+            argv0_path = Path(os.path.abspath(sys.argv[0]))
+            if argv0_path.exists() and argv0_path.is_file():
+                return argv0_path.resolve()
+        except Exception:
+            pass
+
     candidates: list[Path] = []
+
+    onefile_parent = _get_nuitka_onefile_parent_exe_path()
+    if onefile_parent is not None:
+        candidates.append(onefile_parent)
 
     for raw in ([sys.argv[0]] if sys.argv else []) + [sys.executable]:
         if not raw:
