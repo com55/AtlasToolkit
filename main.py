@@ -41,9 +41,6 @@ def _resolve_helper_launch() -> tuple[Optional[Path], list[str]]:
         return None, []
 
     arg1 = sys.argv[1]
-    if arg1 == "--run-self-update-helper":
-        return get_resource_path("self_update_helper.py"), sys.argv[2:]
-
     if Path(arg1).name == "self_update_helper.py":
         candidate = Path(arg1)
         if not candidate.is_absolute():
