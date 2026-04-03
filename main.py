@@ -26,13 +26,40 @@ from updater import (
 )
 
 
-if len(sys.argv) > 1 and sys.argv[1] == "--run-self-update-helper":
-    helper_path = Path(__file__).parent / "self_update_helper.py"
-    if not helper_path.exists():
-        raise SystemExit(f"Update helper script not found: {helper_path}")
+def get_resource_path(path: str) -> Path:
+    """Get path to a resource file embedded in the executable.
 
-    sys.argv = [str(helper_path), *sys.argv[2:]]
-    runpy.run_path(str(helper_path), run_name="__main__")
+    In Nuitka onefile mode, ``__file__`` resolves to the temporary directory
+    where embedded resources are unpacked.
+    """
+    return Path(__file__).parent / path
+
+
+def _resolve_helper_launch() -> tuple[Optional[Path], list[str]]:
+    """Resolve helper script path and passthrough args for helper bootstrap."""
+    if len(sys.argv) <= 1:
+        return None, []
+
+    arg1 = sys.argv[1]
+    if arg1 == "--run-self-update-helper":
+        return get_resource_path("self_update_helper.py"), sys.argv[2:]
+
+    if Path(arg1).name == "self_update_helper.py":
+        candidate = Path(arg1)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        return candidate, sys.argv[2:]
+
+    return None, []
+
+
+_helper_path, _helper_args = _resolve_helper_launch()
+if _helper_path is not None:
+    if not _helper_path.exists():
+        raise SystemExit(f"Update helper script not found: {_helper_path}")
+
+    sys.argv = [str(_helper_path), *_helper_args]
+    runpy.run_path(str(_helper_path), run_name="__main__")
     raise SystemExit(0)
 
 
@@ -101,14 +128,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-def get_resource_path(path: str) -> Path:
-    """Get path to a resource file embedded in the executable.
-
-    In Nuitka onefile mode, ``__file__`` resolves to the temporary directory
-    where embedded resources are unpacked.
-    """
-    return Path(__file__).parent / path
-
 
 IMAGE_EXTENSIONS = {'.png'}
 PAGE_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'}
@@ -161,6 +180,38 @@ def _get_update_dir() -> Path:
     d = _get_config_dir() / "update"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _get_running_executable_path() -> Path:
+    """Return the best on-disk executable path for relaunch/update flow."""
+    candidates: list[Path] = []
+
+    for raw in ([sys.argv[0]] if sys.argv else []) + [sys.executable]:
+        if not raw:
+            continue
+        try:
+            p = Path(raw).expanduser()
+        except Exception:
+            continue
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        candidates.append(p)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved.exists() and resolved.is_file():
+            return resolved
+
+    if candidates:
+        try:
+            return candidates[0].resolve()
+        except Exception:
+            return candidates[0]
+
+    return Path(sys.executable).resolve()
 
 
 class Api:
@@ -713,9 +764,11 @@ class Api:
                 progress_cb=_progress,
             )
 
+            target_exe = _get_running_executable_path()
+
             metadata = {
                 "zip_path": str(target_zip_path),
-                "target_exe_path": str(Path(sys.executable).resolve()),
+                "target_exe_path": str(target_exe),
                 "relaunch_args": sys.argv[1:],
                 "version": latest.latest_version,
                 "release_url": latest.release_url,
@@ -775,15 +828,29 @@ class Api:
                 "error": "Downloaded update zip is missing or invalid.",
             }
 
-        target_exe = Path(sys.executable).resolve()
+        helper_path = get_resource_path("self_update_helper.py")
+        if not helper_path.exists():
+            return {
+                "ok": False,
+                "error": f"Update helper script not found: {helper_path}",
+            }
+
+        target_exe = _get_running_executable_path()
+        launcher_exe = target_exe
+        if not launcher_exe.exists() or not launcher_exe.is_file():
+            return {
+                "ok": False,
+                "error": f"Cannot locate executable for updater launch: {launcher_exe}",
+            }
+
         relaunch_args_b64 = base64.b64encode(
             json.dumps(sys.argv[1:], ensure_ascii=True).encode("utf-8")
         ).decode("ascii")
         release_url = self._update_release_url or ""
 
         cmd = [
-            sys.executable,
-            "--run-self-update-helper",
+            str(launcher_exe),
+            str(helper_path),
             "--zip",
             str(zip_path),
             "--target-exe",
@@ -800,7 +867,7 @@ class Api:
 
         try:
             popen_kwargs: dict[str, Any] = {
-                "cwd": str(target_exe.parent),
+                "cwd": str(launcher_exe.parent),
                 "close_fds": True,
             }
 
