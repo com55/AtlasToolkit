@@ -166,16 +166,35 @@ def replace_exe(new_exe: Path, target_exe: Path) -> Path | None:
 
 
 def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> None:
-    cmd = [str(exe_path), *[str(a) for a in relaunch_args]]
+    full_cmd = [str(exe_path), *[str(a) for a in relaunch_args]]
+    bare_cmd = [str(exe_path)]
     cwd = str(work_dir)
 
     if os.name == "nt":
         attempts = [
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            subprocess.CREATE_NEW_PROCESS_GROUP,
+            (
+                "with-args detached",
+                full_cmd,
+                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            ),
+            (
+                "with-args new-process-group",
+                full_cmd,
+                subprocess.CREATE_NEW_PROCESS_GROUP,
+            ),
+            (
+                "no-args detached",
+                bare_cmd,
+                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            ),
+            (
+                "no-args new-process-group",
+                bare_cmd,
+                subprocess.CREATE_NEW_PROCESS_GROUP,
+            ),
         ]
 
-        for idx, creationflags in enumerate(attempts, start=1):
+        for idx, (label, cmd, creationflags) in enumerate(attempts, start=1):
             proc = subprocess.Popen(
                 cmd,
                 cwd=cwd,
@@ -183,10 +202,12 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
                 creationflags=creationflags,
             )
             log.info(
-                "Relaunch attempt %s started pid=%s flags=0x%X",
+                "Relaunch attempt %s (%s) started pid=%s flags=0x%X cmd=%s",
                 idx,
+                label,
                 proc.pid,
                 creationflags,
+                cmd,
             )
 
             # If process exits immediately, try a different launch strategy.
@@ -196,8 +217,9 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
                 return
 
             log.warning(
-                "Relaunch attempt %s exited immediately with code %s",
+                "Relaunch attempt %s (%s) exited immediately with code %s",
                 idx,
+                label,
                 rc,
             )
 
@@ -209,7 +231,6 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
             "start",
             "",
             str(exe_path),
-            *[str(a) for a in relaunch_args],
         ]
         subprocess.Popen(
             fallback_cmd,
@@ -217,7 +238,7 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
             close_fds=True,
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-        log.info("Relaunch fallback via cmd/start triggered")
+        log.info("Relaunch fallback via cmd/start triggered cmd=%s", fallback_cmd)
         return
     else:
         proc = subprocess.Popen(
