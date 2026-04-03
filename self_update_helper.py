@@ -165,12 +165,47 @@ def replace_exe(new_exe: Path, target_exe: Path) -> Path | None:
     return backup_path if backup_created else None
 
 
+def _build_relaunch_env() -> dict[str, str]:
+    env = os.environ.copy()
+    removed = [k for k in list(env.keys()) if k.startswith("NUITKA_ONEFILE")]
+    for key in removed:
+        env.pop(key, None)
+    if removed:
+        log.info("Relaunch env stripped keys: %s", removed)
+    return env
+
+
 def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> None:
     full_cmd = [str(exe_path), *[str(a) for a in relaunch_args]]
     bare_cmd = [str(exe_path)]
     cwd = str(work_dir)
+    relaunch_env = _build_relaunch_env()
 
     if os.name == "nt":
+        cmd_exe = relaunch_env.get("COMSPEC") or "cmd"
+        primary_cmd = [
+            cmd_exe,
+            "/c",
+            "start",
+            "",
+            str(exe_path),
+            *[str(a) for a in relaunch_args],
+        ]
+
+        try:
+            proc = subprocess.Popen(
+                primary_cmd,
+                cwd=cwd,
+                close_fds=True,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                env=relaunch_env,
+            )
+            log.info("Relaunch primary via cmd/start started pid=%s cmd=%s", proc.pid, primary_cmd)
+            return
+        except Exception as e:
+            log.warning("Relaunch primary cmd/start failed: %s", e)
+
+        # Fallback to direct executable launch strategies.
         attempts = [
             (
                 "with-args detached",
@@ -200,6 +235,7 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
                 cwd=cwd,
                 close_fds=True,
                 creationflags=creationflags,
+                env=relaunch_env,
             )
             log.info(
                 "Relaunch attempt %s (%s) started pid=%s flags=0x%X cmd=%s",
@@ -223,29 +259,14 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
                 rc,
             )
 
-        # Final fallback: invoke through cmd/start which can be more tolerant
-        # on some Windows setups after executable replacement.
-        fallback_cmd = [
-            "cmd",
-            "/c",
-            "start",
-            "",
-            str(exe_path),
-        ]
-        subprocess.Popen(
-            fallback_cmd,
-            cwd=cwd,
-            close_fds=True,
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
-        log.info("Relaunch fallback via cmd/start triggered cmd=%s", fallback_cmd)
-        return
+        raise RuntimeError("All Windows relaunch attempts failed")
     else:
         proc = subprocess.Popen(
-            cmd,
+            full_cmd,
             cwd=cwd,
             close_fds=True,
             start_new_session=True,
+            env=relaunch_env,
         )
         log.info("Relaunch started pid=%s", proc.pid)
 
