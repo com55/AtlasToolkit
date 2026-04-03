@@ -175,7 +175,62 @@ def _build_relaunch_env() -> dict[str, str]:
     return env
 
 
-def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> None:
+def _write_windows_relaunch_script(
+    exe_path: Path,
+    work_dir: Path,
+    relaunch_args: Sequence[str],
+    backup_path: Path | None,
+    cleanup_zip_path: Path | None,
+    cleanup_extract_dir: Path | None,
+) -> Path:
+    update_dir = _get_update_dir()
+    script_path = update_dir / f"relaunch_{int(time.time() * 1000)}_{os.getpid()}.cmd"
+    launch_cmd = subprocess.list2cmdline([str(exe_path), *[str(a) for a in relaunch_args]])
+
+    lines = [
+        "@echo off",
+        "setlocal",
+        f'pushd "{str(work_dir)}" >nul 2>nul',
+        f"start \"\" {launch_cmd}",
+    ]
+
+    if backup_path is not None:
+        backup_text = str(backup_path)
+        lines.extend(
+            [
+                f'if not exist "{backup_text}" goto :after_cleanup',
+                "for /L %%I in (1,1,20) do (",
+                f'    if not exist "{backup_text}" goto :after_cleanup',
+                f'    del /f /q "{backup_text}" >nul 2>nul',
+                "    timeout /t 1 /nobreak >nul",
+                ")",
+                ":after_cleanup",
+            ]
+        )
+
+    if cleanup_zip_path is not None:
+        lines.append(f'del /f /q "{str(cleanup_zip_path)}" >nul 2>nul')
+
+    if cleanup_extract_dir is not None:
+        lines.append(f'rmdir /s /q "{str(cleanup_extract_dir)}" >nul 2>nul')
+
+    lines.extend([
+        'del /f /q "%~f0" >nul 2>nul',
+        "endlocal",
+    ])
+
+    script_path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    return script_path
+
+
+def relaunch(
+    exe_path: Path,
+    work_dir: Path,
+    relaunch_args: Sequence[str],
+    backup_path: Path | None = None,
+    cleanup_zip_path: Path | None = None,
+    cleanup_extract_dir: Path | None = None,
+) -> bool:
     full_cmd = [str(exe_path), *[str(a) for a in relaunch_args]]
     bare_cmd = [str(exe_path)]
     cwd = str(work_dir)
@@ -183,16 +238,17 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
 
     if os.name == "nt":
         cmd_exe = relaunch_env.get("COMSPEC") or "cmd"
-        primary_cmd = [
-            cmd_exe,
-            "/c",
-            "start",
-            "",
-            str(exe_path),
-            *[str(a) for a in relaunch_args],
-        ]
 
         try:
+            script_path = _write_windows_relaunch_script(
+                exe_path,
+                work_dir,
+                relaunch_args,
+                backup_path,
+                cleanup_zip_path,
+                cleanup_extract_dir,
+            )
+            primary_cmd = [cmd_exe, "/d", "/c", str(script_path)]
             proc = subprocess.Popen(
                 primary_cmd,
                 cwd=cwd,
@@ -200,10 +256,15 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 env=relaunch_env,
             )
-            log.info("Relaunch primary via cmd/start started pid=%s cmd=%s", proc.pid, primary_cmd)
-            return
+            log.info(
+                "Relaunch primary via cmd script started pid=%s cmd=%s script=%s",
+                proc.pid,
+                primary_cmd,
+                script_path,
+            )
+            return True
         except Exception as e:
-            log.warning("Relaunch primary cmd/start failed: %s", e)
+            log.warning("Relaunch primary cmd script failed: %s", e)
 
         # Fallback to direct executable launch strategies.
         attempts = [
@@ -250,7 +311,7 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
             time.sleep(1.0)
             rc = proc.poll()
             if rc is None:
-                return
+                return False
 
             log.warning(
                 "Relaunch attempt %s (%s) exited immediately with code %s",
@@ -269,6 +330,7 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
             env=relaunch_env,
         )
         log.info("Relaunch started pid=%s", proc.pid)
+        return False
 
 
 def relaunch_with_failure_notice(
@@ -308,22 +370,28 @@ def safe_cleanup(
     shutil.rmtree(extract_dir, ignore_errors=True)
 
     if remove_backup and backup_path and backup_path.exists():
-        removed = False
-        for attempt in range(1, 13):
-            try:
-                backup_path.unlink()
-                log.info("Removed backup executable: %s", backup_path)
-                removed = True
-                break
-            except PermissionError:
-                # Antivirus or indexing can briefly lock new/old executables.
-                time.sleep(0.25)
-            except Exception as e:
-                log.warning("Failed to remove backup executable %s: %s", backup_path, e)
-                break
-
-        if not removed and backup_path.exists():
-            log.warning("Backup executable still exists after cleanup: %s", backup_path)
+        try:
+            backup_path.unlink()
+            log.info("Removed backup executable: %s", backup_path)
+        except PermissionError:
+            if os.name == "nt":
+                cmd_exe = os.environ.get("COMSPEC") or "cmd"
+                delayed_delete = (
+                    f'timeout /t 3 /nobreak >nul & del /f /q "{str(backup_path)}"'
+                )
+                try:
+                    subprocess.Popen(
+                        [cmd_exe, "/c", delayed_delete],
+                        close_fds=True,
+                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    )
+                    log.info("Scheduled delayed backup deletion: %s", backup_path)
+                except Exception as e:
+                    log.warning("Failed to schedule delayed backup deletion %s: %s", backup_path, e)
+            else:
+                log.warning("Backup executable still exists after cleanup: %s", backup_path)
+        except Exception as e:
+            log.warning("Failed to remove backup executable %s: %s", backup_path, e)
 
 
 def _pick_relaunch_target(target_exe: Path, backup_path: Path | None) -> Path:
@@ -382,13 +450,24 @@ def main() -> int:
     extract_dir: Path | None = None
     backup_path: Path | None = None
     succeeded = False
+    cleanup_delegated = False
 
     try:
         extract_dir = extract_update_zip(zip_path)
         new_exe = find_extracted_exe(extract_dir)
         backup_path = replace_exe(new_exe, target_exe)
-        relaunch(target_exe, work_dir, relaunch_args)
+        cleanup_delegated = relaunch(
+            target_exe,
+            work_dir,
+            relaunch_args,
+            backup_path=backup_path,
+            cleanup_zip_path=zip_path,
+            cleanup_extract_dir=extract_dir,
+        )
         succeeded = True
+        if cleanup_delegated:
+            log.info("Relaunch delegated to cmd script; exiting helper immediately")
+            return 0
     except zipfile.BadZipFile:
         log.error("Downloaded update zip is corrupted")
         try:
@@ -432,7 +511,7 @@ def main() -> int:
             log.error("Fallback relaunch failed: %s", e2)
         return 6
     finally:
-        if extract_dir:
+        if extract_dir and not cleanup_delegated:
             safe_cleanup(
                 zip_path,
                 extract_dir,
