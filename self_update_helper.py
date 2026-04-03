@@ -170,20 +170,63 @@ def relaunch(exe_path: Path, work_dir: Path, relaunch_args: Sequence[str]) -> No
     cwd = str(work_dir)
 
     if os.name == "nt":
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        attempts = [
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            subprocess.CREATE_NEW_PROCESS_GROUP,
+        ]
+
+        for idx, creationflags in enumerate(attempts, start=1):
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                close_fds=True,
+                creationflags=creationflags,
+            )
+            log.info(
+                "Relaunch attempt %s started pid=%s flags=0x%X",
+                idx,
+                proc.pid,
+                creationflags,
+            )
+
+            # If process exits immediately, try a different launch strategy.
+            time.sleep(1.0)
+            rc = proc.poll()
+            if rc is None:
+                return
+
+            log.warning(
+                "Relaunch attempt %s exited immediately with code %s",
+                idx,
+                rc,
+            )
+
+        # Final fallback: invoke through cmd/start which can be more tolerant
+        # on some Windows setups after executable replacement.
+        fallback_cmd = [
+            "cmd",
+            "/c",
+            "start",
+            "",
+            str(exe_path),
+            *[str(a) for a in relaunch_args],
+        ]
         subprocess.Popen(
-            cmd,
+            fallback_cmd,
             cwd=cwd,
             close_fds=True,
-            creationflags=creationflags,
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
+        log.info("Relaunch fallback via cmd/start triggered")
+        return
     else:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             cwd=cwd,
             close_fds=True,
             start_new_session=True,
         )
+        log.info("Relaunch started pid=%s", proc.pid)
 
 
 def relaunch_with_failure_notice(
