@@ -625,6 +625,12 @@ img#preview-img {
   background-color: #1177bb;
 }
 
+.toast-update-btn-go:disabled {
+  background-color: #4a4a4a;
+  color: #999;
+  cursor: not-allowed;
+}
+
 .toast-update-btn-close {
   background: transparent;
   color: #ff6464;
@@ -641,4 +647,17 @@ img#preview-img {
 .toast-update-btn-close:hover {
   color: #e0f0ff;
   background-color: rgba(255, 255, 255, 0.08);
+}
+
+.toast-update-error {
+  background-color: #3a1f1f;
+  border-top: 1px solid #a94442;
+}
+
+.toast-update-error .toast-update-title {
+  color: #ffd6d6;
+}
+
+.toast-update-error .toast-update-sub {
+  color: #ffb3b3;
 }

@@ -3,16 +3,83 @@ import sys
 import os
 import base64
 import json
+import runpy
+import subprocess
+import webbrowser
 import webview
 import time
 import threading
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
+from urllib.parse import urlparse
 from atlas_converter import auto_convert_atlas
 from atlas_extracter import AtlasProcessor
 from atlas_modifier import AtlasModifier
-from updater import check_for_updates, get_current_version, is_running_as_exe
+from updater import (
+    check_for_updates,
+    download_update_zip,
+    find_windows_asset,
+    get_current_version,
+    get_latest_release_info,
+    is_running_as_exe,
+)
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--run-self-update-helper":
+    helper_path = Path(__file__).parent / "self_update_helper.py"
+    if not helper_path.exists():
+        raise SystemExit(f"Update helper script not found: {helper_path}")
+
+    sys.argv = [str(helper_path), *sys.argv[2:]]
+    runpy.run_path(str(helper_path), run_name="__main__")
+    raise SystemExit(0)
+
+
+def _consume_launch_flags(argv: list[str]) -> tuple[list[str], Optional[dict[str, str]]]:
+    """Consume internal launch flags and return user args + optional failure payload."""
+    clean_args: list[str] = []
+    failed = False
+    failed_log = ""
+    failed_release_url = ""
+    failed_message = ""
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--update-install-failed":
+            failed = True
+            i += 1
+            continue
+        if arg == "--update-failed-log" and i + 1 < len(argv):
+            failed_log = argv[i + 1]
+            i += 2
+            continue
+        if arg == "--update-release-url" and i + 1 < len(argv):
+            failed_release_url = argv[i + 1]
+            i += 2
+            continue
+        if arg == "--update-failed-message" and i + 1 < len(argv):
+            failed_message = argv[i + 1]
+            i += 2
+            continue
+
+        clean_args.append(arg)
+        i += 1
+
+    payload: Optional[dict[str, str]] = None
+    if failed:
+        payload = {
+            "message": failed_message or "Update installation failed. The app was relaunched.",
+            "logPath": failed_log,
+            "releaseUrl": failed_release_url,
+        }
+
+    return clean_args, payload
+
+
+_clean_argv, _pending_update_failure = _consume_launch_flags(sys.argv[1:])
+sys.argv = [sys.argv[0], *_clean_argv]
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -89,6 +156,13 @@ def _get_config_dir() -> Path:
 CONFIG_PATH = _get_config_dir() / "config.json"
 
 
+def _get_update_dir() -> Path:
+    """Return persistent directory for downloaded update artifacts."""
+    d = _get_config_dir() / "update"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 class Api:
     def __init__(self) -> None:
         self._atlas_path: Optional[Path] = None
@@ -103,6 +177,20 @@ class Api:
         self._pre_repack_text: Optional[str] = None
         # Persistent config
         self._config: dict[str, Any] = self._load_config()
+        # Update state
+        self._update_zip_path: Optional[Path] = None
+        self._update_version: Optional[str] = None
+        self._update_release_url: Optional[str] = None
+        self._update_ready: bool = False
+        self._update_progress_lock = threading.Lock()
+        self._update_progress: dict[str, Any] = {
+            "status": "idle",
+            "downloaded_bytes": 0,
+            "total_bytes": None,
+            "percent": 0,
+            "error": None,
+        }
+        self._pending_update_failure: Optional[dict[str, str]] = _pending_update_failure
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -138,10 +226,45 @@ class Api:
 
         threading.Thread(target=self._run_update_check, daemon=True).start()
 
+        if self._pending_update_failure and self._window:
+            payload_json = json.dumps(self._pending_update_failure)
+            self._window.evaluate_js(
+                f"window.showUpdateInstallFailed({payload_json});"
+            )
+
         if len(sys.argv) > 1 and sys.argv[1].endswith('.atlas'):
             return self.load_atlas(sys.argv[1])
         else:
             return False
+
+    def open_update_log(self, log_path: str) -> dict[str, Any]:
+        """Open update failure log file in OS default app."""
+        p = Path(log_path)
+        if not p.exists():
+            return {"ok": False, "error": "Log file not found."}
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(p))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(p)], close_fds=True)
+            else:
+                subprocess.Popen(["xdg-open", str(p)], close_fds=True)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": f"Failed to open log file: {e}"}
+
+    def open_url(self, url: str) -> dict[str, Any]:
+        """Open URL using system default browser."""
+        try:
+            parsed = urlparse(str(url))
+            if parsed.scheme not in ("http", "https"):
+                return {"ok": False, "error": "Invalid URL scheme."}
+
+            webbrowser.open(parsed.geturl())
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": f"Failed to open URL: {e}"}
 
     def choose_file(self) -> bool:
         if not self._window:
@@ -522,17 +645,199 @@ class Api:
             self._window.evaluate_js(f"window.onModImageProcessed({result_json})")
         else:
             self._window.evaluate_js("showToast('Failed to process mod image.', 'error')")
+
+    def _set_update_progress(
+        self,
+        *,
+        status: str,
+        downloaded_bytes: int,
+        total_bytes: Optional[int],
+        percent: int,
+        error: Optional[str] = None,
+    ) -> None:
+        with self._update_progress_lock:
+            self._update_progress = {
+                "status": status,
+                "downloaded_bytes": downloaded_bytes,
+                "total_bytes": total_bytes,
+                "percent": percent,
+                "error": error,
+            }
+
+    def get_update_download_progress(self) -> dict[str, Any]:
+        with self._update_progress_lock:
+            return dict(self._update_progress)
+
+    def download_update(self) -> dict[str, Any]:
+        """Download the Windows update zip into a temp/update folder."""
+        if not is_running_as_exe():
+            return {
+                "ok": False,
+                "error": "Dev mode does not support self-update install flow.",
+            }
+
+        self._update_zip_path = None
+        self._update_version = None
+        self._update_release_url = None
+        self._update_ready = False
+        self._set_update_progress(
+            status="downloading",
+            downloaded_bytes=0,
+            total_bytes=None,
+            percent=0,
+        )
+
+        try:
+            latest = get_latest_release_info()
+            asset = find_windows_asset(latest.assets)
+
+            update_dir = _get_update_dir()
+            safe_tag = "".join(
+                c if c.isalnum() or c in "._-" else "_"
+                for c in (latest.tag_name or latest.latest_version or "latest")
+            )
+            target_zip_path = update_dir / f"{safe_tag}-{asset.name}"
+
+            def _progress(downloaded: int, total: Optional[int]) -> None:
+                percent = int((downloaded * 100) / total) if total and total > 0 else 0
+                self._set_update_progress(
+                    status="downloading",
+                    downloaded_bytes=downloaded,
+                    total_bytes=total,
+                    percent=max(0, min(100, percent)),
+                )
+
+            download_update_zip(
+                download_url=asset.browser_download_url,
+                target_zip_path=target_zip_path,
+                progress_cb=_progress,
+            )
+
+            metadata = {
+                "zip_path": str(target_zip_path),
+                "target_exe_path": str(Path(sys.executable).resolve()),
+                "relaunch_args": sys.argv[1:],
+                "version": latest.latest_version,
+                "release_url": latest.release_url,
+            }
+            metadata_path = update_dir / "pending_update.json"
+            metadata_path.write_text(
+                json.dumps(metadata, ensure_ascii=True, indent=2),
+                encoding="utf-8",
+            )
+
+            self._update_zip_path = target_zip_path
+            self._update_version = latest.latest_version
+            self._update_release_url = latest.release_url
+            self._update_ready = True
+            size = target_zip_path.stat().st_size
+            self._set_update_progress(
+                status="ready",
+                downloaded_bytes=size,
+                total_bytes=size,
+                percent=100,
+            )
+
+            return {
+                "ok": True,
+                "version": latest.latest_version,
+                "downloaded_path": str(target_zip_path),
+            }
+        except Exception as e:
+            msg = str(e) or "Unknown update download error"
+            self._set_update_progress(
+                status="error",
+                downloaded_bytes=0,
+                total_bytes=None,
+                percent=0,
+                error=msg,
+            )
+            return {"ok": False, "error": msg}
+
+    def restart_and_install_update(self) -> dict[str, Any]:
+        """Spawn detached helper process that installs zip and relaunches app."""
+        if not is_running_as_exe():
+            return {
+                "ok": False,
+                "error": "Dev mode does not support restart-and-install self-update.",
+            }
+
+        if not self._update_ready or not self._update_zip_path:
+            return {
+                "ok": False,
+                "error": "No downloaded update found. Please download update first.",
+            }
+
+        zip_path = self._update_zip_path
+        if not zip_path.exists() or zip_path.stat().st_size <= 0:
+            return {
+                "ok": False,
+                "error": "Downloaded update zip is missing or invalid.",
+            }
+
+        target_exe = Path(sys.executable).resolve()
+        relaunch_args_b64 = base64.b64encode(
+            json.dumps(sys.argv[1:], ensure_ascii=True).encode("utf-8")
+        ).decode("ascii")
+        release_url = self._update_release_url or ""
+
+        cmd = [
+            sys.executable,
+            "--run-self-update-helper",
+            "--zip",
+            str(zip_path),
+            "--target-exe",
+            str(target_exe),
+            "--work-dir",
+            str(target_exe.parent),
+            "--relaunch-args-b64",
+            relaunch_args_b64,
+            "--pid",
+            str(os.getpid()),
+        ]
+        if release_url:
+            cmd.extend(["--release-url", release_url])
+
+        try:
+            popen_kwargs: dict[str, Any] = {
+                "cwd": str(target_exe.parent),
+                "close_fds": True,
+            }
+
+            if sys.platform == "win32":
+                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                popen_kwargs["creationflags"] = creationflags
+            else:
+                popen_kwargs["start_new_session"] = True
+
+            subprocess.Popen(cmd, **popen_kwargs)
+
+            if self._window:
+                self._window.destroy()
+
+            return {"ok": True}
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": f"Failed to launch update helper: {e}",
+            }
     
     def _run_update_check(self) -> None:
         """Run update check in background thread, push result to JS when done."""
         try:
             info = check_for_updates()
             if info and self._window:
-                args_json = json.dumps(
-                    [info.latest_version, info.release_name, info.release_url]
-                )
+                payload = {
+                    "latestVersion": info.latest_version,
+                    "releaseName": info.release_name,
+                    "releaseUrl": info.release_url,
+                    "tagName": info.tag_name,
+                    "sourceTreeUrl": info.source_tree_url,
+                    "action": "download" if is_running_as_exe() else "open_source_tag",
+                }
+                args_json = json.dumps(payload)
                 self._window.evaluate_js(
-                    f"(function(a){{window.showUpdateNotification(a[0], a[1], a[2]);}})({args_json});"
+                    f"window.showUpdateNotification({args_json});"
                 )
         except Exception as e:
             log.warning("Update check failed: %s", e)
