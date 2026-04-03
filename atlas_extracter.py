@@ -145,8 +145,11 @@ class AtlasProcessor:
                     img = Image.open(source).convert('RGBA')
                 elif isinstance(source, bytes):
                     img = Image.open(BytesIO(source)).convert('RGBA')
-                else:
+                elif isinstance(source, Image.Image):
                     img = source.convert('RGBA')
+                else:
+                    logging.error(f"Unsupported image source type for {page.filename}: {type(source)}")
+                    continue
                 
                 # Auto Scale Check (scale atlas coords to match real image)
                 if page.size != (0, 0):

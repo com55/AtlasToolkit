@@ -1,7 +1,10 @@
-"""Update checker for Atlas Extracter - checks GitHub for new releases."""
+"""Update and download helpers for AtlasToolkit releases on GitHub."""
+from __future__ import annotations
+
 import logging
 import re
-from typing import NamedTuple
+from pathlib import Path
+from typing import Any, Callable, NamedTuple, Optional
 
 import requests
 
@@ -10,6 +13,22 @@ logger = logging.getLogger(__name__)
 GITHUB_REPO = "com55/AtlasToolkit"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
+WINDOWS_ZIP_ASSET_NAME = "AtlasToolkit-Windows-x64.zip"
+
+
+class ReleaseAsset(NamedTuple):
+    name: str
+    browser_download_url: str
+    size: int
+
+
+class ReleaseInfo(NamedTuple):
+    latest_version: str
+    release_name: str
+    release_url: str
+    tag_name: str
+    source_tree_url: str
+    assets: list[ReleaseAsset]
 
 
 class UpdateInfo(NamedTuple):
@@ -17,6 +36,9 @@ class UpdateInfo(NamedTuple):
     latest_version: str
     release_name: str
     release_url: str
+    tag_name: str
+    source_tree_url: str
+    assets: list[ReleaseAsset]
 
 
 def is_running_as_exe() -> bool:
@@ -59,6 +81,115 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return (0,)
 
 
+def get_latest_release_info() -> ReleaseInfo:
+    """Fetch latest release metadata from GitHub API."""
+    response = requests.get(
+        GITHUB_API_LATEST,
+        headers={"Accept": "application/vnd.github.v3+json"},
+        timeout=12,
+    )
+    response.raise_for_status()
+    data: dict[str, Any] = response.json()
+
+    tag_name = str(data.get("tag_name") or "").strip()
+    latest_version = tag_name.lstrip("v") or str(data.get("name") or "").strip()
+    release_name = str(data.get("name") or tag_name or latest_version or "Latest Release")
+    release_url = str(data.get("html_url") or GITHUB_RELEASES_PAGE)
+    source_tree_url = (
+        f"https://github.com/{GITHUB_REPO}/tree/{tag_name}"
+        if tag_name
+        else release_url
+    )
+
+    assets_data = data.get("assets") or []
+    assets: list[ReleaseAsset] = []
+    for raw in assets_data:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        browser_download_url = str(raw.get("browser_download_url") or "").strip()
+        try:
+            size = int(raw.get("size") or 0)
+        except Exception:
+            size = 0
+        if name and browser_download_url:
+            assets.append(
+                ReleaseAsset(
+                    name=name,
+                    browser_download_url=browser_download_url,
+                    size=size,
+                )
+            )
+
+    return ReleaseInfo(
+        latest_version=latest_version,
+        release_name=release_name,
+        release_url=release_url,
+        tag_name=tag_name,
+        source_tree_url=source_tree_url,
+        assets=assets,
+    )
+
+
+def find_windows_asset(assets: list[ReleaseAsset]) -> ReleaseAsset:
+    """Find the exact Windows zip asset produced by CI."""
+    for asset in assets:
+        if asset.name == WINDOWS_ZIP_ASSET_NAME:
+            return asset
+    raise FileNotFoundError(
+        f"Release asset '{WINDOWS_ZIP_ASSET_NAME}' was not found in latest release"
+    )
+
+
+def download_update_zip(
+    download_url: str,
+    target_zip_path: Path,
+    progress_cb: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> Path:
+    """Download update zip to a target path using streaming I/O."""
+    target_zip_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_zip_path.with_suffix(target_zip_path.suffix + ".part")
+
+    downloaded = 0
+    total: Optional[int] = None
+
+    try:
+        with requests.get(download_url, stream=True, timeout=60) as response:
+            response.raise_for_status()
+            header_total = response.headers.get("Content-Length")
+            if header_total:
+                try:
+                    total = int(header_total)
+                except Exception:
+                    total = None
+
+            with temp_path.open("wb") as fh:
+                for chunk in response.iter_content(chunk_size=1024 * 256):
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_cb:
+                        progress_cb(downloaded, total)
+    except Exception:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except Exception:
+            pass
+        raise
+
+    temp_path.replace(target_zip_path)
+
+    if not target_zip_path.exists() or target_zip_path.stat().st_size <= 0:
+        raise IOError("Downloaded update zip is missing or empty")
+
+    if progress_cb:
+        progress_cb(target_zip_path.stat().st_size, total)
+
+    return target_zip_path
+
+
 def check_for_updates() -> UpdateInfo | None:
     """
     Check GitHub latest release.
@@ -66,18 +197,8 @@ def check_for_updates() -> UpdateInfo | None:
     Never raises — all errors are logged and swallowed.
     """
     try:
-        response = requests.get(
-            GITHUB_API_LATEST,
-            headers={"Accept": "application/vnd.github.v3+json"},
-            timeout=8,
-        )
-        response.raise_for_status()
-        from typing import Any
-        data: dict[str, Any] = response.json()
-
-        latest_version = data.get("tag_name", "").lstrip("v")
-        release_name = data.get("name", latest_version)
-        release_url = data.get("html_url", GITHUB_RELEASES_PAGE)
+        latest = get_latest_release_info()
+        latest_version = latest.latest_version
 
         current = get_current_version().lstrip("v")
         logger.debug("Version check: current=%s latest=%s", current, latest_version)
@@ -87,8 +208,11 @@ def check_for_updates() -> UpdateInfo | None:
             return UpdateInfo(
                 current_version=current,
                 latest_version=latest_version,
-                release_name=release_name,
-                release_url=release_url,
+                release_name=latest.release_name,
+                release_url=latest.release_url,
+                tag_name=latest.tag_name,
+                source_tree_url=latest.source_tree_url,
+                assets=latest.assets,
             )
 
     except requests.RequestException as e:

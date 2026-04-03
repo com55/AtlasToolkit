@@ -13,14 +13,20 @@ on:
       - "v*"
   # 3. MANUAL TRIGGER (workflow_dispatch)
   workflow_dispatch:
+    inputs:
+      test_version:
+        description: "Optional test version (digits only, e.g. 1.2.3) to publish as tag v<version>"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 env:
+  MANUAL_TEST_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_version || '' }}
   # Determine if this is a release (from workflow_call OR tag push)
-  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') }}
-  TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_version != '') }}
+  TAG_NAME: ${{ inputs.tag_name != '' && inputs.tag_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_version != '' && format('v{0}', github.event.inputs.test_version)) || '' }}
   # Force console for manual builds (debugging), disable for releases
   CONSOLE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'attach' || 'disable' }}
 
@@ -47,10 +53,16 @@ jobs:
         id: build_version
         shell: powershell
         run: |
+          if ("${{ env.MANUAL_TEST_VERSION }}" -ne "" -and "${{ env.MANUAL_TEST_VERSION }}" -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid test_version. Expected format: X.Y.Z (digits only)."
+          }
+
           if ("${{ github.ref }}" -match "refs/tags/v(.+)") {
             $version = $matches[1]
           } elseif ("${{ inputs.tag_name }}" -ne "") {
             $version = "${{ inputs.tag_name }}".TrimStart("v")
+          } elseif ("${{ env.MANUAL_TEST_VERSION }}" -ne "") {
+            $version = "${{ env.MANUAL_TEST_VERSION }}"
           } else {
             $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
           }
@@ -68,7 +80,9 @@ jobs:
           windows-console-mode: ${{ env.CONSOLE_MODE }}
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
-          include-data-files: VERSION=VERSION
+          include-data-files: |
+            VERSION=VERSION
+            self_update_helper.py=self_update_helper.py
           include-package-data: webview
           nofollow-import-to: |
             PyQt5
@@ -155,6 +169,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: AtlasToolkit-Windows-x64.zip
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
