@@ -270,9 +270,7 @@ export function _loadImage(source) {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error(`Failed to load image: ${source}`));
     if (source instanceof File) {
-      const url = URL.createObjectURL(source);
-      img.onload = () => { resolve(img); };
-      img.src = url;
+      img.src = URL.createObjectURL(source);
     } else {
       img.src = source;
     }
