@@ -7,6 +7,7 @@ View atlas regions, extract individual sprites, replace sprites with other image
 
 ## Usage
 
+- Now, Web version is available [here](https://com55.github.io/AtlasToolkit/)!
 - You can use the pre-built executables or download stable version source code from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
 - Or, clone the repository and run from source (in-development / unstable):
   ```bash
