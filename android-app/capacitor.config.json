@@ -1,0 +1,14 @@
+{
+  "appId": "com.atlastoolkit.app",
+  "appName": "AtlasToolkit",
+  "webDir": "www",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#2b2b2b"
+  }
+}

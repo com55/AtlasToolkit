@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Atlas Toolkit</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="left-panel">
+      <div class="panel-header">
+        <!-- Extract Mode Header -->
+        <div id="normal-header">
+          <span>Regions (<span id="count">0</span>)</span>
+          <div class="panel-header-buttons">
+            <button class="btn-open" onclick="openFile()">
+              <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+                <path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H447l-80-80H160v480l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Zm84-80h516l72-240H316l-72 240Zm0 0 72-240-72 240Zm-84-400v-80 80Z"/>
+              </svg>
+              Open
+            </button>
+            <button class="btn-open" id="btn-enter-modify" onclick="enterModifyMode()" disabled>
+              <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+                <path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/>
+              </svg>
+              Modify
+            </button>
+          </div>
+        </div>
+        <!-- Modify Mode Header -->
+        <div id="modify-header" class="hidden">
+          <button class="btn-open" onclick="exitModifyMode()">
+            <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+              <path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/>
+            </svg>
+            Back
+          </button>
+          <span>Modify Mode</span>
+        </div>
+      </div>
+      <div id="region-list-container">
+        <ul id="region-list"></ul>
+      </div>
+    </div>
+
+    <div id="right-panel">
+      <div id="controls">
+        <!-- Extract Mode Controls -->
+        <div id="extract-controls">
+          <span id="status-text">Ready</span>
+          <button class="action-btn" id="btn-extract-sel" onclick="extractSelected()" disabled>
+            Extract Selected
+          </button>
+          <button class="action-btn" id="btn-extract-all" onclick="extractAll()" disabled>
+            Extract All
+          </button>
+        </div>
+        <!-- Modify Mode Controls -->
+        <div id="modify-controls" class="hidden">
+          <button class="action-btn" id="btn-modify-sel" onclick="modifySelected()">
+            Modify Selected
+          </button>
+          <span id="modify-status-text">No mod image loaded</span>
+          <button class="action-btn btn-save" id="btn-save-mod" onclick="saveModified()" disabled>
+            Save As...
+          </button>
+        </div>
+        <div id="repack-options" class="hidden">
+          <label class="toggle-label" title="Repack will extract all regions, remove unused space, deduplicate identical sprites, and repack everything into a smaller atlas.">
+            <input type="checkbox" id="chk-repack" />
+            <span class="toggle-switch"></span>
+            <span>Repack</span>
+            <svg class="info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+              <path d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/>
+            </svg>
+          </label>
+        </div>
+      </div>
+      <div id="preview-container">
+        <img id="preview-img" src="" alt="Preview" />
+        <canvas id="region-overlay"></canvas>
+      </div>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div id="modal-overlay" class="hidden">
+      <div id="modal-box">
+        <h3 id="modal-title">Confirm</h3>
+        <p id="modal-message">Are you sure?</p>
+        <div class="modal-buttons">
+          <button id="btn-modal-cancel" class="btn-secondary">Cancel</button>
+          <button id="btn-modal-confirm" class="btn-primary">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drop Overlay -->
+    <div id="drop-overlay" class="hidden">
+      <div class="drop-message">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+          <path d="M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/>
+        </svg>
+        <span id="drop-message-text">Drop .atlas file here to load</span>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="hidden">
+      <div class="context-menu-item" onclick="copyPreviewImage()">
+        <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
+          <path d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"/>
+        </svg>
+        Copy Image
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <!--
+      Capacitor is injected automatically by the native layer at runtime.
+      No explicit <script> tag needed for Capacitor core.
+    -->
+    <script type="module" src="script.js"></script>
+  </body>
+</html>
