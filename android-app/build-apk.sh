@@ -5,6 +5,7 @@
 #   ./build-apk.sh              # debug build (default)
 #   ./build-apk.sh --release    # unsigned release build
 #   ./build-apk.sh --release --sign  # signed release build (requires keystore env vars)
+#   ./build-apk.sh --install-all      # install Java/SDK deps via setup script before build
 #
 # Environment variables for signing (--sign flag):
 #   ANDROID_KEYSTORE_PATH     Path to your .keystore / .jks file
@@ -14,10 +15,10 @@
 #
 # Prerequisites:
 #   - Node.js >= 18 and npm >= 9
-#   - Java 17 (JAVA_HOME must be set, or java/javac must be on PATH)
-#   - Android SDK (ANDROID_HOME or ANDROID_SDK_ROOT must be set)
-#     Alternatively, Android Studio installs it at ~/Android/Sdk (Linux/macOS)
-#     or %LOCALAPPDATA%\Android\Sdk (Windows/WSL)
+#   - Active Python virtual environment (VIRTUAL_ENV set)
+#   - Java 21 (preferred) or Java 17
+#   - Android SDK
+#   - setup_envroment.sh (auto-sourced by this script)
 
 set -euo pipefail
 
@@ -26,11 +27,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Parse arguments ──────────────────────────────────────────────────────────
 BUILD_TYPE="debug"
 SIGN=false
+INSTALL_ALL=false
 
 for arg in "$@"; do
   case "$arg" in
     --release) BUILD_TYPE="release" ;;
     --sign)    SIGN=true ;;
+    --install-all) INSTALL_ALL=true ;;
     --help|-h)
       sed -n '2,30p' "$0" | sed 's/^# //' | sed 's/^#//'
       exit 0
@@ -44,14 +47,37 @@ echo "Build type : $BUILD_TYPE"
 echo "Signing    : $SIGN"
 echo
 
+# ── Bootstrap shell environment (venv-only) ────────────────────────────────
+SETUP_SCRIPT="$SCRIPT_DIR/setup_envroment.sh"
+if [ ! -f "$SETUP_SCRIPT" ]; then
+  echo "❌ setup_envroment.sh not found at $SETUP_SCRIPT"
+  exit 1
+fi
+
+if [ "$INSTALL_ALL" = "true" ]; then
+  # shellcheck source=/dev/null
+  source "$SETUP_SCRIPT" --install-all || exit 1
+else
+  # shellcheck source=/dev/null
+  source "$SETUP_SCRIPT" -- || exit 1
+fi
+echo
+
 # ── Verify prerequisites ─────────────────────────────────────────────────────
 command -v node >/dev/null 2>&1 || { echo "❌ Node.js not found. Install Node.js >= 18."; exit 1; }
 command -v npm  >/dev/null 2>&1 || { echo "❌ npm not found."; exit 1; }
-command -v java >/dev/null 2>&1 || { echo "❌ Java not found. Install Java 17."; exit 1; }
+command -v java >/dev/null 2>&1 || { echo "❌ Java not found. Install Java 21 or 17."; exit 1; }
 
 NODE_MAJOR=$(node --version | sed 's/v\([0-9]*\).*/\1/')
 if [ "$NODE_MAJOR" -lt 18 ]; then
   echo "❌ Node.js >= 18 required (found $(node --version))"; exit 1
+fi
+
+JAVA_MAJOR=$(java -version 2>&1 | sed -n '1s/.*version "\([0-9][0-9]*\).*/\1/p')
+if [ -z "$JAVA_MAJOR" ] || [ "$JAVA_MAJOR" -lt 17 ] || [ "$JAVA_MAJOR" -gt 21 ]; then
+  echo "❌ Java 17-21 required (found $(java -version 2>&1 | head -1))"
+  echo "   Tip: source ./setup_envroment.sh --install-java"
+  exit 1
 fi
 
 # Detect Android SDK
@@ -100,7 +126,11 @@ fi
 
 # ── Sync web assets ───────────────────────────────────────────────────────────
 echo "🔄 Syncing Capacitor assets..."
-npx cap sync android --no-deps
+if npx cap sync android --help 2>&1 | grep -q -- '--no-deps'; then
+  npx cap sync android --no-deps
+else
+  npx cap sync android
+fi
 echo
 
 # ── Build with Gradle ────────────────────────────────────────────────────────

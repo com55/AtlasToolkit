@@ -6,8 +6,8 @@ The Python/pywebview desktop backend has been fully rewritten in JavaScript usin
 ## Architecture
 
 ```
-android-app/
-├── www/                      ← Web assets (served by Capacitor)
+AtlasToolkit/
+├── www/                      ← Web assets (source of truth)
 │   ├── index.html            ← App shell (same UI, ES-module script)
 │   ├── style.css             ← Unchanged from desktop version
 │   ├── script.js             ← UI logic (pywebview.api → AtlasAPI)
@@ -16,8 +16,10 @@ android-app/
 │       ├── atlas-extracter.js  ← Port of atlas_extracter.py (Canvas API)
 │       ├── atlas-modifier.js   ← Port of atlas_modifier.py (Canvas API)
 │       └── atlas-api.js        ← Drop-in replacement for pywebview.api
-├── package.json
-└── capacitor.config.json
+└── android-app/
+    ├── www -> ../www         ← symlink used by Capacitor
+    ├── package.json
+    └── capacitor.config.json
 ```
 
 ### What changed vs the desktop app
@@ -36,7 +38,8 @@ android-app/
 
 - **Node.js** ≥ 18 and **npm** ≥ 9
 - **Android Studio** (latest stable) with Android SDK ≥ 24
-- **Java 17** (required by Gradle)
+- **Python virtual environment (venv)** for local scripts
+- **Java 21** (recommended; Java 17 may work in some setups)
 - Android device or emulator (API 24+)
 
 ---
@@ -48,11 +51,23 @@ android-app/
 ```bash
 cd android-app
 
+# 1) Activate venv first (required)
+python -m venv .venv
+source .venv/bin/activate
+
+# 2) Prepare environment (venv-only script)
+source ./setup_envroment.sh
+# or bootstrap dependencies on a clean machine:
+# source ./setup_envroment.sh --install-all
+
 # Debug APK (fastest, no signing needed)
 ./build-apk.sh
 
 # Unsigned release APK
 ./build-apk.sh --release
+
+# One-shot bootstrap + build (still requires active venv)
+# ./build-apk.sh --install-all --release
 
 # Signed release APK (set env vars first)
 export ANDROID_KEYSTORE_PATH=/path/to/release.keystore
@@ -61,6 +76,11 @@ export ANDROID_KEY_ALIAS=yourKeyAlias
 export ANDROID_KEY_PASSWORD=yourKeyPassword
 ./build-apk.sh --release --sign
 ```
+
+Notes:
+- `setup_envroment.sh` must be sourced, not executed.
+- `build-apk.sh` auto-sources `setup_envroment.sh` and will fail if no active venv is detected.
+- If your Java version is outside 17-21, the build script will stop with a clear message.
 
 Output APKs are written to:
 - Debug: `android/app/build/outputs/apk/debug/app-debug.apk`
@@ -139,7 +159,8 @@ For Android 13+ (API 33), `READ_MEDIA_IMAGES` is needed instead of `READ_EXTERNA
 The app works in a regular browser too (no native features required for core functionality):
 
 ```bash
-# Serve www/ with any static file server, e.g.:
+# Serve root www/ with any static file server, e.g.:
+cd ..
 npx serve www
 # then open http://localhost:3000
 ```
