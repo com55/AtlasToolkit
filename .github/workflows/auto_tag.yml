@@ -57,10 +57,18 @@ jobs:
       should_build: ${{ steps.check.outputs.should_create }}
       tag_name: ${{ steps.create_tag.outputs.tag_name }}
 
-  # Trigger build and release after tag is created
+  # Trigger Windows build and release after tag is created
   build-release:
     needs: create-tag
     if: needs.create-tag.outputs.should_build == 'true'
     uses: ./.github/workflows/build_release.yml
+    with:
+      tag_name: ${{ needs.create-tag.outputs.tag_name }}
+
+  # Trigger Android APK build and release after tag is created
+  build-android:
+    needs: create-tag
+    if: needs.create-tag.outputs.should_build == 'true'
+    uses: ./.github/workflows/build_android.yml
     with:
       tag_name: ${{ needs.create-tag.outputs.tag_name }}

@@ -43,42 +43,67 @@ android-app/
 
 ## Build Instructions
 
-### 1. Install dependencies
+### Option A — Local build script
+
+```bash
+cd android-app
+
+# Debug APK (fastest, no signing needed)
+./build-apk.sh
+
+# Unsigned release APK
+./build-apk.sh --release
+
+# Signed release APK (set env vars first)
+export ANDROID_KEYSTORE_PATH=/path/to/release.keystore
+export ANDROID_KEYSTORE_PASSWORD=yourKeystorePassword
+export ANDROID_KEY_ALIAS=yourKeyAlias
+export ANDROID_KEY_PASSWORD=yourKeyPassword
+./build-apk.sh --release --sign
+```
+
+Output APKs are written to:
+- Debug: `android/app/build/outputs/apk/debug/app-debug.apk`
+- Release: `android/app/build/outputs/apk/release/app-release-{unsigned,signed}.apk`
+
+### Option B — GitHub Actions CI
+
+The workflow `.github/workflows/build_android.yml` runs automatically on:
+
+| Trigger | What happens |
+|---|---|
+| Push to a `v*` tag | Builds debug + release APK, uploads release APK to GitHub Release |
+| `auto_tag.yml` creates a tag | Same as above (called as reusable workflow) |
+| `workflow_dispatch` | Builds debug APK and uploads as an artifact |
+
+#### Keystore secrets (for signed release APKs in CI)
+
+Add these secrets to your GitHub repository (**Settings → Secrets and variables → Actions**):
+
+| Secret | Description |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded `.jks` / `.keystore` file (`base64 -w0 release.keystore`) |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_ALIAS` | Key alias inside the keystore |
+| `ANDROID_KEY_PASSWORD` | Key password |
+
+If these secrets are absent, the CI still builds and uploads an **unsigned** release APK.
+
+### Option C — Android Studio (manual)
 
 ```bash
 cd android-app
 npm install
-```
-
-### 2. Add the Android platform
-
-```bash
-npx cap add android
-```
-
-This generates the `android/` folder with a native Android project.
-
-### 3. Sync web assets into the native project
-
-```bash
-npx cap sync android
-```
-
-Run this command every time you modify files inside `www/`.
-
-### 4. Open in Android Studio
-
-```bash
-npx cap open android
+npx cap add android   # only once
+npx cap sync android  # run after every www/ change
+npx cap open android  # opens in Android Studio
 ```
 
 In Android Studio:
 - Select **Build → Build Bundle(s) / APK(s) → Build APK(s)**
-- The signed/debug APK will be in `android/app/build/outputs/apk/debug/`
+- The debug APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`
 
-### 5. Run on device / emulator
-
-In Android Studio press the **▶ Run** button, or from the CLI:
+### Option D — Run on device / emulator
 
 ```bash
 npx cap run android

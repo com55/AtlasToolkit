@@ -1,0 +1,199 @@
+name: Build Android APK
+
+on:
+  # 1. AUTO RELEASE TRIGGER (from auto_tag.yml)
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  # 2. MANUAL TRIGGER (tag push)
+  push:
+    tags:
+      - "v*"
+  # 3. MANUAL TRIGGER (workflow_dispatch)
+  workflow_dispatch:
+    inputs:
+      test_version:
+        description: "Optional test version (digits only, e.g. 1.2.3)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  MANUAL_TEST_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_version || '' }}
+  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') }}
+  TAG_NAME: ${{ inputs.tag_name != '' && inputs.tag_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      # ── Java 17 (required by Gradle / Android build tools) ───────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ── Node.js 18 (Capacitor CLI) ────────────────────────────────────────
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      # ── Android SDK ───────────────────────────────────────────────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── Determine version ─────────────────────────────────────────────────
+      - name: Determine build version
+        id: build_version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            VERSION="${{ inputs.tag_name }}"
+            VERSION="${VERSION#v}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          elif [ -n "${{ env.MANUAL_TEST_VERSION }}" ]; then
+            VERSION="${{ env.MANUAL_TEST_VERSION }}"
+          else
+            VERSION=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml || echo "0.0.0")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building APK version: $VERSION"
+
+      # ── Install Capacitor dependencies ────────────────────────────────────
+      - name: Install npm dependencies
+        working-directory: android-app
+        run: npm ci --prefer-offline || npm install
+
+      # ── Add Android platform (generates android/ Gradle project) ─────────
+      - name: Add Capacitor Android platform
+        working-directory: android-app
+        run: npx cap add android
+
+      # ── Sync web assets into the native project ───────────────────────────
+      - name: Sync Capacitor assets
+        working-directory: android-app
+        run: npx cap sync android --no-deps
+
+      # ── Inject version into Android project ───────────────────────────────
+      - name: Set versionName in build.gradle
+        working-directory: android-app/android
+        run: |
+          VERSION="${{ steps.build_version.outputs.version }}"
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" app/build.gradle
+          echo "Set versionName to: $VERSION"
+
+      # ── Build debug APK (always) ──────────────────────────────────────────
+      - name: Build debug APK
+        working-directory: android-app/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      # ── Build release APK (only on release/tag triggers) ─────────────────
+      - name: Build release APK (unsigned)
+        if: ${{ env.IS_RELEASE == 'true' }}
+        working-directory: android-app/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      # ── Sign release APK if keystore secrets are available ────────────────
+      - name: Check keystore secrets
+        if: ${{ env.IS_RELEASE == 'true' }}
+        id: check_keystore
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ] && \
+             [ -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" ] && \
+             [ -n "${{ secrets.ANDROID_KEY_ALIAS }}" ] && \
+             [ -n "${{ secrets.ANDROID_KEY_PASSWORD }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️  Keystore secrets not set — release APK will be unsigned."
+          fi
+
+      - name: Sign release APK
+        if: ${{ env.IS_RELEASE == 'true' && steps.check_keystore.outputs.available == 'true' }}
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+
+          UNSIGNED_APK="android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          SIGNED_APK="android-app/android/app/build/outputs/apk/release/app-release-signed.apk"
+
+          # Align
+          zipalign -v -p 4 "$UNSIGNED_APK" "$SIGNED_APK"
+
+          # Sign with apksigner
+          apksigner sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-pass "pass:$KEYSTORE_PASS" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASS" \
+            --out "$SIGNED_APK" \
+            "$SIGNED_APK"
+
+          apksigner verify "$SIGNED_APK"
+          rm -f "$KEYSTORE_PATH"
+          echo "APK signed successfully: $SIGNED_APK"
+
+      # ── Rename and stage artifacts ────────────────────────────────────────
+      - name: Stage APK artifacts
+        id: stage
+        shell: bash
+        run: |
+          VERSION="${{ steps.build_version.outputs.version }}"
+          DEST="apk-output"
+          mkdir -p "$DEST"
+
+          DEBUG_SRC="android-app/android/app/build/outputs/apk/debug/app-debug.apk"
+          DEBUG_DEST="$DEST/AtlasToolkit-Android-debug-v${VERSION}.apk"
+          cp "$DEBUG_SRC" "$DEBUG_DEST"
+          echo "debug_apk=$DEBUG_DEST" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ env.IS_RELEASE }}" == "true" ]; then
+            # Prefer signed, fall back to unsigned
+            if [ -f "android-app/android/app/build/outputs/apk/release/app-release-signed.apk" ]; then
+              REL_SRC="android-app/android/app/build/outputs/apk/release/app-release-signed.apk"
+            else
+              REL_SRC="android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+            fi
+            REL_DEST="$DEST/AtlasToolkit-Android-v${VERSION}.apk"
+            cp "$REL_SRC" "$REL_DEST"
+            echo "release_apk=$REL_DEST" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Upload debug APK as artifact (always) ────────────────────────────
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AtlasToolkit-Android-debug-v${{ steps.build_version.outputs.version }}
+          path: ${{ steps.stage.outputs.debug_apk }}
+
+      # ── Upload release APK to GitHub Release ─────────────────────────────
+      - name: Upload release APK to GitHub Release
+        if: ${{ env.IS_RELEASE == 'true' && steps.stage.outputs.release_apk != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
+          files: ${{ steps.stage.outputs.release_apk }}
+          token: ${{ secrets.GITHUB_TOKEN }}
