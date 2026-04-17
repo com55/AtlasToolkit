@@ -3,7 +3,7 @@ name: Deploy GitHub Pages
 on:
   push:
     branches:
-      - web-app-and-android-app
+      - js-project
     paths:
       - "www/**"
       - ".github/workflows/deploy_pages.yml"
