@@ -1,4 +1,3 @@
-use tauri_plugin_process::ProcessExt;
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
