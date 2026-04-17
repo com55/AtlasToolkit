@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 0.0.0-test)'
+        required: true
+        default: '0.0.0-test'
 
 permissions:
   contents: write
@@ -27,7 +32,8 @@ jobs:
       - name: Set version from tag
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
+          $tag = "${{ github.ref_name }}"
+          $version = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.version }}" } else { $tag.TrimStart("v") }
           $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $conf.version = $version
           $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
@@ -40,8 +46,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'AtlasToolkit ${{ github.ref_name }}'
+          tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          releaseName: 'AtlasToolkit ${{ github.event_name == ''workflow_dispatch'' && inputs.version || github.ref_name }}'
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
