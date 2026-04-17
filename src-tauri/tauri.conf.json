@@ -1,0 +1,35 @@
+{
+  "productName": "AtlasToolkit",
+  "version": "0.1.0",
+  "identifier": "com.com55.atlastoolkit",
+  "build": {
+    "frontendDist": "../www"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "AtlasToolkit",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGODYxOEE0MzQyRDdBNTIKUldSU2VpMDBwQmlHTDBWK2tTREpWUlFzNU4rbkRWYVRQbUUrRjN3Z1FlUWVmLytINzN5QWhLSDcK",
+      "endpoints": [
+        "https://github.com/com55/AtlasToolkit/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/icon.ico"]
+  }
+}
