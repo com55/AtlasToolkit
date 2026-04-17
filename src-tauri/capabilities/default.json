@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}
