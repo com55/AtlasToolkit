@@ -1,4 +1,4 @@
-name: Build Windows
+name: Build Windows (js-project)
 
 on:
   push:
@@ -6,13 +6,16 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to build (e.g. 0.0.0-test)'
-        required: true
-        default: '0.0.0-test'
+      test_version:
+        description: 'Optional test version (e.g. 1.2.3) — skips release, uploads artifact'
+        required: false
+        type: string
 
 permissions:
   contents: write
+
+env:
+  IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   build:
@@ -29,15 +32,23 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Set version from tag
+      - name: Get version for build
+        id: build_version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.version }}" } else { $tag.TrimStart("v") }
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.test_version }}" -ne "") {
+            $version = "${{ inputs.test_version }}"
+          } elseif ("${{ github.ref }}" -match "refs/tags/v(.+)") {
+            $version = $matches[1]
+          } else {
+            $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+            $version = $conf.version
+          }
           $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $conf.version = $version
           $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
-          Write-Host "Version set to: $version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version: $version"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -46,9 +57,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
-          releaseName: 'AtlasToolkit ${{ github.event_name == ''workflow_dispatch'' && inputs.version || github.ref_name }}'
-          releaseDraft: true
+          tagName: ${{ env.IS_RELEASE == 'true' && github.ref_name || '' }}
+          releaseName: ${{ env.IS_RELEASE == 'true' && format('AtlasToolkit {0}', github.ref_name) || '' }}
+          releaseDraft: ${{ env.IS_RELEASE == 'true' }}
           prerelease: false
           updaterJsonPreferNsis: true
 
@@ -98,8 +109,17 @@ jobs:
             if (Test-Path $certPath) { Remove-Item $certPath -Force }
           }
 
-      - name: Re-upload signed installers
-        if: steps.check_secrets.outputs.available == 'true'
+      - name: Upload artifact (test build)
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AtlasToolkit-Windows-${{ steps.build_version.outputs.version }}
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Re-upload signed installers to release
+        if: steps.check_secrets.outputs.available == 'true' && env.IS_RELEASE == 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
