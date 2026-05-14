@@ -35,6 +35,11 @@ export function setMode(mode) {
   }
 }
 
+function lockRepackForMultiPage() {
+  const repackOptions = document.getElementById('repack-options');
+  if (repackOptions) repackOptions.classList.add('hidden');
+}
+
 export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
@@ -43,8 +48,12 @@ export async function enterEditMode() {
       state.modifyRegionBounds = data.regions || {};
       state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
       updateRepackModeAvailability();
+      if (state.modifyPages.length > 1) lockRepackForMultiPage();
       state.hasModImage = false;
-      document.getElementById('modify-status-text').innerText = 'Select regions want to edit.';
+      const statusMsg = state.modifyPages.length > 1
+        ? 'Multi-page atlas — select regions to edit.'
+        : 'Select regions want to edit.';
+      document.getElementById('modify-status-text').innerText = statusMsg;
       document.getElementById('btn-save-mod').disabled = true;
       previewImg.src = data.image;
       previewImg.style.display = 'block';
@@ -114,7 +123,10 @@ export function onModPreviewReceived(data) {
     const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
-    document.getElementById('modify-status-text').innerText = `Merged preview (${imgW}x${imgH}). Ready to save.`;
+    const statusMsg = data.pageCount > 1
+      ? `Repacked across ${data.pageCount} pages. Ready to save.`
+      : `Merged preview (${imgW}x${imgH}). Ready to save.`;
+    document.getElementById('modify-status-text').innerText = statusMsg;
     if (imgW > containerW || imgH > containerH) {
       state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
     }

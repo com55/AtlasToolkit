@@ -7,3 +7,4 @@ test*
 
 # Tauri build output
 src-tauri/target/
+CLAUDE.md
