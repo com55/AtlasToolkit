@@ -514,6 +514,115 @@ export class AtlasModifier {
   }
 }
 
+// ─── Multi-page repack ───────────────────────────────────────────────────────
+
+/**
+ * Repack all sprites across numPages pages using greedy bin-packing.
+ * @param {{ [name: string]: HTMLCanvasElement }} allSprites
+ * @param {number} numPages
+ * @param {Array<{ page: string, format: string, filter: string, repeat: string, pma: boolean }>} pageInfos
+ * @param {{ [name: string]: { atlasName: string, index: number, split: number[]|null, pad: number[]|null, extraPairs: Array } }} regionMetas
+ * @returns {{ pages: HTMLCanvasElement[], atlasText: string }}
+ */
+export async function repackMultiPage(allSprites, numPages, pageInfos, regionMetas) {
+  const spriteNames = Object.keys(allSprites);
+  if (spriteNames.length === 0 || numPages === 0) return { pages: [], atlasText: '' };
+
+  // Greedy first-fit-decreasing: sort by area desc, assign to least-filled group
+  const sorted = [...spriteNames].sort((a, b) => {
+    const sa = allSprites[a], sb = allSprites[b];
+    return sb.width * sb.height - sa.width * sa.height;
+  });
+  const groups = Array.from({ length: numPages }, () => ({ names: [], area: 0 }));
+  for (const name of sorted) {
+    const s = allSprites[name];
+    const g = groups.reduce((min, cur) => cur.area < min.area ? cur : min);
+    g.names.push(name);
+    g.area += s.width * s.height;
+  }
+
+  const resultPages = [];
+  const atlasLines = [];
+
+  for (let i = 0; i < numPages; i++) {
+    const group = groups[i];
+    const pi = pageInfos[i] || pageInfos[0];
+
+    if (i > 0) atlasLines.push('');
+    atlasLines.push(pi.page);
+
+    if (group.names.length === 0) {
+      atlasLines.push('size: 1,1');
+      if (!_isDefaultPageFormat(pi.format)) atlasLines.push(`format: ${pi.format}`);
+      if (!_isDefaultPageFilter(pi.filter)) atlasLines.push(`filter: ${pi.filter}`);
+      if (!_isDefaultPageRepeat(pi.repeat)) atlasLines.push(`repeat: ${pi.repeat}`);
+      if (pi.pma === true) atlasLines.push('pma: true');
+      const blank = document.createElement('canvas');
+      blank.width = 1; blank.height = 1;
+      resultPages.push(blank);
+      continue;
+    }
+
+    const items = group.names.map(n => ({ name: n, w: allSprites[n].width, h: allSprites[n].height }));
+    const { canvasW, canvasH, placements } = _shelfPack(items);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasW; canvas.height = canvasH;
+    const ctx = canvas.getContext('2d');
+
+    const placementMap = {};
+    for (const p of placements) placementMap[p.name] = p;
+
+    for (const name of group.names) {
+      const p = placementMap[name];
+      if (!p) continue;
+      const sprite = allSprites[name];
+      if (p.rotated) {
+        const rc = document.createElement('canvas');
+        rc.width = sprite.height; rc.height = sprite.width;
+        const rCtx = rc.getContext('2d');
+        rCtx.translate(0, sprite.width);
+        rCtx.rotate(-Math.PI / 2);
+        rCtx.drawImage(sprite, 0, 0);
+        ctx.drawImage(rc, p.x, p.y);
+      } else {
+        ctx.drawImage(sprite, p.x, p.y);
+      }
+    }
+    resultPages.push(canvas);
+
+    atlasLines.push(`size: ${canvasW},${canvasH}`);
+    if (!_isDefaultPageFormat(pi.format)) atlasLines.push(`format: ${pi.format}`);
+    if (!_isDefaultPageFilter(pi.filter)) atlasLines.push(`filter: ${pi.filter}`);
+    if (!_isDefaultPageRepeat(pi.repeat)) atlasLines.push(`repeat: ${pi.repeat}`);
+    if (pi.pma === true) atlasLines.push('pma: true');
+
+    for (const name of group.names) {
+      const p = placementMap[name];
+      if (!p) continue;
+      const sprite = allSprites[name];
+      const meta = regionMetas[name] || {};
+      const atlasName = meta.atlasName || name;
+
+      atlasLines.push(atlasName);
+      if (Number.isFinite(meta.index) && meta.index !== -1) atlasLines.push(`  index: ${meta.index}`);
+      const rs = _formatRotate(p.rotated ? 90 : 0);
+      if (rs) atlasLines.push(`  rotate: ${rs}`);
+      atlasLines.push(`  bounds: ${p.x}, ${p.y}, ${sprite.width}, ${sprite.height}`);
+      if (Array.isArray(meta.split) && meta.split.length >= 4) atlasLines.push(`  split: ${meta.split.join(', ')}`);
+      if (Array.isArray(meta.pad) && meta.pad.length >= 4) atlasLines.push(`  pad: ${meta.pad.join(', ')}`);
+      if (Array.isArray(meta.extraPairs)) {
+        for (const pair of meta.extraPairs) {
+          if (!pair || !pair.key) continue;
+          atlasLines.push(`  ${pair.key}: ${(pair.values || []).join(', ')}`);
+        }
+      }
+    }
+  }
+
+  return { pages: resultPages, atlasText: atlasLines.join('\n') };
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function _toCanvas(img) {
