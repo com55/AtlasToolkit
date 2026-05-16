@@ -30,6 +30,14 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["atlas"],
+        "name": "SpineAtlas",
+        "description": "Spine Texture Atlas",
+        "role": "Editor"
+      }
+    ]
   }
 }
