@@ -7,14 +7,15 @@ import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, sa
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
+import { platform } from './js/platform.js';
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   initPanelResizer();
   registerServiceWorker();
 
-  const repackPref     = AtlasAPI.get_pref('repack', false);
-  const repackModePref = AtlasAPI.get_pref('repackMode', 'page');
+  const repackPref     = await AtlasAPI.get_pref('repack', false);
+  const repackModePref = await AtlasAPI.get_pref('repackMode', 'page');
   document.getElementById('chk-repack').checked = repackPref;
   document.getElementById('sel-repack-mode').value = repackModePref === 'all' ? 'all' : 'page';
 
@@ -23,8 +24,35 @@ window.addEventListener('DOMContentLoaded', async () => {
   const loaded = await AtlasAPI.startup_check();
   if (loaded) await loadRegions();
 
+  // Tauri open-with: pick up the file the OS launched us with, and listen for
+  // subsequent open-file events from the single-instance plugin.
+  if (platform.isTauri) {
+    platform.subscribeOpenFile(async (path) => {
+      await loadAtlasFromTauriPath(path);
+    });
+    const startup = await platform.getStartupFile();
+    if (startup) await loadAtlasFromTauriPath(startup);
+  }
+
   checkForTauriUpdate();
 });
+
+async function loadAtlasFromTauriPath(path) {
+  try {
+    const ok = await AtlasAPI.load_from_path(path);
+    if (!ok) { showToast('Failed to load atlas from path.', 'error'); return; }
+    state.selectedIndices.clear();
+    state.lastClickIndex = -1;
+    state.atlasPath = path;
+    previewImg.style.display = 'none';
+    resetPreview();
+    updateButtons();
+    await loadRegions();
+  } catch (e) {
+    console.error('loadAtlasFromTauriPath error:', e);
+    showToast(`Open failed: ${e.message || e}`, 'error');
+  }
+}
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
@@ -36,6 +64,13 @@ function registerServiceWorker() {
 
 async function openFile() {
   try {
+    if (platform.isTauri) {
+      const picked = await platform.pickAtlasFile();
+      if (!picked || !picked.path) return;
+      await loadAtlasFromTauriPath(picked.path);
+      return;
+    }
+
     const success = await AtlasAPI.choose_file();
     if (success) {
       state.selectedIndices.clear();
