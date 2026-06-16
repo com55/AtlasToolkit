@@ -90,7 +90,7 @@ async function extractSelected() {
   const names = Array.from(state.selectedIndices).map(i => state.regionsData[i]);
   document.getElementById('status-text').innerText = 'Extracting...';
   const result = await AtlasAPI.extract_files(names);
-  showToast(result, result.includes('Error') ? 'error' : 'success');
+  showToast(result, _extractToastType(result));
   document.getElementById('status-text').innerText = 'Ready';
 }
 
@@ -100,8 +100,14 @@ async function extractAll() {
   if (!confirmed) return;
   document.getElementById('status-text').innerText = 'Extracting ALL...';
   const result = await AtlasAPI.extract_files(null);
-  showToast(result, result.includes('Error') ? 'error' : 'success');
+  showToast(result, _extractToastType(result));
   document.getElementById('status-text').innerText = 'Ready';
+}
+
+function _extractToastType(result) {
+  if (result === 'Cancelled') return 'info';
+  if (result.startsWith('Error') || result.startsWith('No ')) return 'error';
+  return 'success';
 }
 
 // ─── Expose globals for inline onclick handlers in index.html ─────────────────

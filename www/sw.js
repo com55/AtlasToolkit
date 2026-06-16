@@ -13,7 +13,16 @@ const CORE_ASSETS = [
   'js/atlas-api.js',
   'js/atlas-converter.js',
   'js/atlas-extracter.js',
-  'js/atlas-modifier.js'
+  'js/atlas-modifier.js',
+  'js/dialogs.js',
+  'js/drop.js',
+  'js/modify-mode.js',
+  'js/panel-resizer.js',
+  'js/platform.js',
+  'js/preview.js',
+  'js/region-list.js',
+  'js/state.js',
+  'js/update.js',
 ].map((path) => new URL(path, APP_BASE_URL).href);
 
 self.addEventListener('install', (event) => {

@@ -347,11 +347,16 @@ export class AtlasModifier {
     let modW = modCanvas.width, modH = modCanvas.height;
 
     // Determine original canvas dimensions from offsets of first region
+    // offsets format: [left, bottom, originalWidth, originalHeight]  (Spine spec)
     let origCanvasW = modW, origCanvasH = modH;
     const firstRegion = this.regions[selectedRegions[0]];
+    const offX_orig = (firstRegion && firstRegion.offsets) ? firstRegion.offsets[0] : 0;
+    const offY_orig = (firstRegion && firstRegion.offsets) ? firstRegion.offsets[1] : 0;
+    const baseOrigW  = (firstRegion && firstRegion.offsets) ? firstRegion.offsets[2] : modW;
+    const baseOrigH  = (firstRegion && firstRegion.offsets) ? firstRegion.offsets[3] : modH;
     if (firstRegion && firstRegion.offsets) {
-      origCanvasW = firstRegion.offsets[2];
-      origCanvasH = firstRegion.offsets[3];
+      origCanvasW = baseOrigW;
+      origCanvasH = baseOrigH;
     }
 
     // Detect proportional scale (e.g. user supplied 2× mod)
@@ -361,16 +366,25 @@ export class AtlasModifier {
         const scale = (ratioW + ratioH) / 2;
         origCanvasW = Math.round(origCanvasW * scale);
         origCanvasH = Math.round(origCanvasH * scale);
+      } else {
+        // Non-proportional scale: treat mod as new full canvas at its actual dimensions
+        origCanvasW = modW;
+        origCanvasH = modH;
       }
     }
 
-    // Pad mod image to canvas size if needed
+    // Pad mod image to canvas size if needed.
+    // Place sprite at (left, origH - bottom - spriteH) per Spine offset convention.
     let finalMod = modCanvas;
     if (modW !== origCanvasW || modH !== origCanvasH) {
+      const scaleX = baseOrigW > 0 ? origCanvasW / baseOrigW : 1;
+      const scaleY = baseOrigH > 0 ? origCanvasH / baseOrigH : 1;
+      const pasteX = Math.round(offX_orig * scaleX);
+      const pasteY = origCanvasH - modH - Math.round(offY_orig * scaleY);
       finalMod = document.createElement('canvas');
       finalMod.width = origCanvasW;
       finalMod.height = origCanvasH;
-      finalMod.getContext('2d').drawImage(modCanvas, 0, origCanvasH - modH);
+      finalMod.getContext('2d').drawImage(modCanvas, pasteX, pasteY);
       modW = origCanvasW; modH = origCanvasH;
     }
 

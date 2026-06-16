@@ -515,14 +515,18 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
     input.accept = accept;
     input.multiple = multiple;
     // listen for change; also handle cancel gracefully
-    const onchange = (e) => {
+    const cleanup = () => {
       input.removeEventListener('change', onchange);
-      resolve(Array.from(e.target.files));
+      input.removeEventListener('cancel', oncancel);
+      clearTimeout(timer);
     };
+    const onchange = (e) => { cleanup(); resolve(Array.from(e.target.files)); };
+    const oncancel = () => { cleanup(); resolve([]); };
     input.addEventListener('change', onchange);
+    input.addEventListener('cancel', oncancel);
     input.click();
-    // Safari/some Android may not fire 'cancel' event; resolve with [] after long delay
-    setTimeout(() => { input.removeEventListener('change', onchange); resolve([]); }, 60000);
+    // Safari/some Android may not fire 'cancel'; resolve with [] after long delay
+    const timer = setTimeout(() => { cleanup(); resolve([]); }, 60000);
   });
 }
 
@@ -877,18 +881,17 @@ export const AtlasAPI = {
     _mergedAtlasText = atlasText;
     _mergedCanvas = null;
 
-    // 5. Build region bounds for page[0] preview
+    // 5. Build region bounds for overlay — include all regions so selections
+    //    on any page are highlighted when that page's preview is shown.
     const page0Filename = pageInfos.length > 0 ? pageInfos[0].page : null;
     const proc = new AtlasProcessor(atlasText);
     const regionBounds = {};
     for (const [name, info] of Object.entries(proc.regions)) {
-      if (!page0Filename || info.pageFilename === page0Filename) {
-        regionBounds[name] = [info.x, info.y, info.w, info.h, info.rotate];
-      }
+      regionBounds[name] = [info.x, info.y, info.w, info.h, info.rotate];
     }
 
     const image = pages.length > 0 ? pages[0].toDataURL('image/png') : null;
-    return { image, regions: regionBounds, pageCount: numPages };
+    return { image, regions: regionBounds, pageCount: numPages, previewPage: page0Filename };
   },
 
   /** Process a mod image (File or canvas/img) for the selected regions. */

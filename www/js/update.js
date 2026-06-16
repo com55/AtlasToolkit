@@ -1,7 +1,7 @@
 import { showToast } from './dialogs.js';
 
 export async function checkForTauriUpdate() {
-  const invoke = window.__TAURI__?.core?.invoke;
+  const invoke = window.__TAURI_INTERNALS__?.invoke;
   if (!invoke) return;
   try {
     const update = await invoke('fetch_update');
