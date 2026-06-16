@@ -124,9 +124,9 @@ if (platform.isTauri) {
   platform.subscribeDragDrop({
     onEnter: () => showDropOverlay(),
     onLeave: () => hideDropOverlay(),
-    onDrop: (paths) => {
+    onDrop: async (paths) => {
       hideDropOverlay();
-      processDroppedPaths(paths);
+      await processDroppedPaths(paths);
     },
   });
 } else {

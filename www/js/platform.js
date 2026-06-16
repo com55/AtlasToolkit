@@ -113,19 +113,11 @@ function _bytesToFile(bytes, name, type = 'image/png') {
 function _extractRequiredPagesFromText(atlasText) {
   const lines = atlasText.split(/\r?\n/);
   const pages = [];
-  for (let i = 0; i < lines.length; i++) {
-    const s = lines[i].trim();
+  for (const line of lines) {
+    const s = line.trim();
     if (!s || s.includes(':')) continue;
-    const ext = _ext(s);
-    if (!IMAGE_EXTS.has(ext)) continue;
-    for (let j = i + 1; j < lines.length; j++) {
-      const next = lines[j].trim();
-      if (!next) continue;
-      if (next.includes(':')) {
-        if (!pages.includes(s)) pages.push(s);
-      }
-      break;
-    }
+    if (!IMAGE_EXTS.has(_ext(s))) continue;
+    if (!pages.includes(s)) pages.push(s);
   }
   return pages;
 }
