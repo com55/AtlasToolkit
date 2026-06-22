@@ -75,6 +75,20 @@ async function loadAtlasFromTauriPath(path) {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+
+  // Tauri serves assets locally and runs over http://tauri.localhost, so a
+  // service worker offers nothing here and only caches stale JS across app
+  // updates. Skip registration and purge any SW/cache left by older builds.
+  if (platform.isTauri) {
+    navigator.serviceWorker.getRegistrations()
+      .then((regs) => regs.forEach((r) => r.unregister()))
+      .catch(() => {});
+    if (window.caches?.keys) {
+      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+    }
+    return;
+  }
+
   navigator.serviceWorker.register('./sw.js').catch((err) => {
     console.warn('Service worker registration failed:', err);
   });

@@ -78,23 +78,25 @@ async function _readBytes(path) {
   return new Uint8Array(result);
 }
 
+// The fs write commands read the file bytes from the request BODY, with the
+// path and options passed as invoke headers (unlike read/mkdir which take
+// normal args). Mirror the official @tauri-apps/plugin-fs guest bindings.
+function _writeHeaders(path) {
+  return { path: encodeURIComponent(path), options: JSON.stringify({}) };
+}
+
 async function _writeText(path, data) {
-  return _invoke('plugin:fs|write_text_file', { path, data });
+  const bytes = new TextEncoder().encode(String(data));
+  return _TI.invoke('plugin:fs|write_text_file', bytes, { headers: _writeHeaders(path) });
 }
 
 async function _writeBytes(path, data) {
-  // Tauri expects a plain number array for binary writes via invoke
-  let arr;
-  if (data instanceof Uint8Array) {
-    arr = Array.from(data);
-  } else if (data instanceof ArrayBuffer) {
-    arr = Array.from(new Uint8Array(data));
-  } else if (data instanceof Blob) {
-    arr = Array.from(new Uint8Array(await data.arrayBuffer()));
-  } else {
-    arr = Array.from(data);
-  }
-  return _invoke('plugin:fs|write_file', { path, data: arr });
+  let bytes;
+  if (data instanceof Uint8Array) bytes = data;
+  else if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+  else if (data instanceof Blob) bytes = new Uint8Array(await data.arrayBuffer());
+  else bytes = new Uint8Array(data);
+  return _TI.invoke('plugin:fs|write_file', bytes, { headers: _writeHeaders(path) });
 }
 
 async function _exists(path) {
@@ -139,12 +141,14 @@ function _extractRequiredPagesFromText(atlasText) {
 export async function pickAtlasFile() {
   if (isTauri) {
     const selected = await _invoke('plugin:dialog|open', {
-      multiple: false,
-      directory: false,
-      filters: [
-        { name: 'Atlas', extensions: ['atlas', 'txt'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
+      options: {
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: 'Atlas', extensions: ['atlas', 'txt'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      },
     });
     if (!selected) return null;
     const path = Array.isArray(selected) ? selected[0] : selected;
@@ -179,7 +183,7 @@ export async function pickFiles({ extensions = [], multiple = false } = {}) {
   const filters = [];
   if (extensions.length) filters.push({ name: 'Files', extensions });
   filters.push({ name: 'All Files', extensions: ['*'] });
-  const selected = await _invoke('plugin:dialog|open', { multiple, directory: false, filters });
+  const selected = await _invoke('plugin:dialog|open', { options: { multiple, directory: false, filters } });
   if (!selected) return [];
   const paths = Array.isArray(selected) ? selected : [selected];
   const files = [];
@@ -275,9 +279,11 @@ export async function readDroppedPaths(paths) {
 export async function pickSaveFolder(defaultPath = null) {
   if (isTauri) {
     const selected = await _invoke('plugin:dialog|open', {
-      directory: true,
-      multiple: false,
-      defaultPath: defaultPath || undefined,
+      options: {
+        directory: true,
+        multiple: false,
+        defaultPath: defaultPath || undefined,
+      },
     });
     return selected || null;
   }
