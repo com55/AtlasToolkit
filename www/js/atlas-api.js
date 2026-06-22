@@ -8,6 +8,7 @@ import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor, _loadImage } from './atlas-extracter.js';
 import { AtlasModifier, parseAtlas, rebuildAtlasText, repackMultiPage } from './atlas-modifier.js';
 import { platform } from './platform.js';
+import { createZip } from './zip.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,6 @@ let _mergedPages = null;
 let _preRepackCanvas = null;
 let _preRepackText = null;
 let _lastSaveHandle = null;
-let _lastExtractDirHandle = null;
 let _currentModifyPage = null;
 let _currentAtlasPath = null;
 let _currentSkel = null; // { name, blob } | null
@@ -50,6 +50,30 @@ function _isDesktopFsApiAvailable() {
     && window.isSecureContext
     && typeof window.showSaveFilePicker === 'function'
     && typeof window.showDirectoryPicker === 'function';
+}
+
+/** True when running as an installed PWA (standalone window), not a browser tab. */
+function _isInstalledPWA() {
+  if (typeof window === 'undefined') return false;
+  return !!(window.matchMedia?.('(display-mode: standalone)').matches
+    || window.matchMedia?.('(display-mode: window-controls-overlay)').matches
+    || window.navigator.standalone === true); // iOS Safari
+}
+
+/**
+ * Whether saving should open a folder picker (Tauri native, or installed-PWA
+ * File System Access API) rather than downloading a zip. A browser tab — even a
+ * Chromium one with the FS API — gets a zip download.
+ */
+function _useFolderPicker() {
+  return platform.isTauri
+    || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
+}
+
+/** Base name (no extension) of the loaded atlas, for naming zip downloads. */
+function _extractZipBaseName() {
+  const base = (_currentAtlasFilename || 'atlas').replace(/\.[^.]+$/, '');
+  return base || 'atlas';
 }
 
 function _isImageFile(file) {
@@ -434,14 +458,15 @@ async function _writeBlobToHandle(fileHandle, blob) {
 
 async function _saveBlobWithDialog(filename, blob) {
   const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+  const fileType = ext === 'png'
+    ? { description: 'PNG image', accept: { 'image/png': ['.png'] } }
+    : ext === 'zip'
+      ? { description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }
+      : { description: 'Atlas text', accept: { 'text/plain': ['.atlas', '.txt'] } };
   const pickerOptions = {
     id: 'atlastoolkit-export',
     suggestedName: filename,
-    types: [
-      ext === 'png'
-        ? { description: 'PNG image', accept: { 'image/png': ['.png'] } }
-        : { description: 'Atlas text', accept: { 'text/plain': ['.atlas', '.txt'] } }
-    ],
+    types: [fileType],
     excludeAcceptAllOption: false,
   };
 
@@ -450,19 +475,6 @@ async function _saveBlobWithDialog(filename, blob) {
   const fileHandle = await window.showSaveFilePicker(pickerOptions);
   await _writeBlobToHandle(fileHandle, blob);
   _lastSaveHandle = fileHandle;
-}
-
-async function _saveManyPngToDirectory(fileBlobs) {
-  const pickerOptions = { id: 'atlastoolkit-extract-folder', mode: 'readwrite' };
-  if (_lastExtractDirHandle) pickerOptions.startIn = _lastExtractDirHandle;
-
-  const dirHandle = await window.showDirectoryPicker(pickerOptions);
-  _lastExtractDirHandle = dirHandle;
-
-  for (const { filename, blob } of fileBlobs) {
-    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-    await _writeBlobToHandle(fileHandle, blob);
-  }
 }
 
 /**
@@ -746,8 +758,11 @@ export const AtlasAPI = {
       }
     }
 
+    if (extracted.length === 0) return 'No regions to extract.';
+
     try {
-      if (platform.isTauri && extracted.length >= 1) {
+      // Tauri / installed PWA: pick a folder and write the PNGs into it.
+      if (_useFolderPicker()) {
         const defaultPath = _currentAtlasPath ? _atlasDirName(_currentAtlasPath) : null;
         const folder = await platform.pickSaveFolder(defaultPath);
         if (!folder) return 'Cancelled';
@@ -758,20 +773,22 @@ export const AtlasAPI = {
         return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
       }
 
-      if (_isDesktopFsApiAvailable() && extracted.length > 1) {
-        await _saveManyPngToDirectory(extracted);
-        return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
+      // Single image in a browser tab: a direct download beats a zip-of-one.
+      if (extracted.length === 1) {
+        await _downloadBlob(extracted[0].filename, extracted[0].blob);
+        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
       }
 
-      for (const item of extracted) {
-        await _downloadBlob(item.filename, item.blob);
-      }
+      // Browser tab, multiple images: bundle into a zip.
+      const zipBlob = await createZip(
+        extracted.map(item => ({ name: item.filename, data: item.blob })),
+      );
+      await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
+      return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
     } catch (e) {
       if (e && e.name === 'AbortError') return 'Cancelled';
       throw e;
     }
-
-    return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
   },
 
   // ── Modify Mode ────────────────────────────────────────────────────────────
@@ -1005,7 +1022,8 @@ export const AtlasAPI = {
       outputs.push({ name: _currentAtlasFilename, data: _mergedAtlasText });
       if (_currentSkel) outputs.push({ name: _currentSkel.name, data: _currentSkel.blob });
 
-      if (platform.isTauri) {
+      // Tauri / installed PWA: pick a folder and write all outputs into it.
+      if (_useFolderPicker()) {
         const defaultPath = _atlasDirName(_currentAtlasPath);
         const folder = await platform.pickSaveFolder(defaultPath);
         if (!folder) return 'Cancelled';
@@ -1014,15 +1032,11 @@ export const AtlasAPI = {
         return `Saved to selected folder: ${fileNames}`;
       }
 
-      // Web fallback: per-file Save As / downloads (matches previous behavior).
-      for (const item of outputs) {
-        const blob = item.data instanceof Blob
-          ? item.data
-          : new Blob([item.data], { type: 'text/plain' });
-        await _downloadBlob(item.name, blob);
-      }
+      // Browser tab: bundle all outputs into a single zip download.
+      const zipBlob = await createZip(outputs);
+      await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, zipBlob);
       const summary = outputs.map(o => o.name).join(' and ');
-      return `Saved: ${summary}`;
+      return `Saved as zip: ${summary}`;
     } catch (e) {
       if (e && e.name === 'AbortError') return 'Cancelled';
       return `Error: ${e.message}`;
