@@ -24,14 +24,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   const loaded = await AtlasAPI.startup_check();
   if (loaded) await loadRegions();
 
-  // Tauri open-with: pick up the file the OS launched us with, and listen for
-  // subsequent open-file events from the single-instance plugin.
+  // Tauri open-with: pick up the file the OS launched us with. Each open-with
+  // launch starts its own app instance/window by design (no single-instance
+  // dedup), so there is nothing else to subscribe to here.
   if (platform.isTauri) {
-    platform.subscribeOpenFile(async (path) => {
-      await loadAtlasFromTauriPath(path);
-    });
     const startup = await platform.getStartupFile();
     if (startup) await loadAtlasFromTauriPath(startup);
+  } else if ('launchQueue' in window) {
+    // PWA open-with (File Handling API): the browser hands us the launched
+    // file via launchQueue instead of process args.
+    window.launchQueue.setConsumer(async (launchParams) => {
+      if (!launchParams.files || launchParams.files.length === 0) return;
+      try {
+        const file = await launchParams.files[0].getFile();
+        const ok = await AtlasAPI.load_atlas_from_file(file);
+        if (!ok) { showToast('Failed to load atlas file.', 'error'); return; }
+        state.selectedIndices.clear();
+        state.lastClickIndex = -1;
+        previewImg.style.display = 'none';
+        resetPreview();
+        updateButtons();
+        await loadRegions();
+      } catch (e) {
+        console.error('launchQueue consumer error:', e);
+        showToast(`Open failed: ${e.message || e}`, 'error');
+      }
+    });
   }
 
   checkForTauriUpdate();
