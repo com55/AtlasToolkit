@@ -508,7 +508,18 @@ function _canvasToBlob(canvas) {
 }
 
 /** Pick one or more files using a hidden file input triggered by a user gesture. */
+function _acceptToExtensions(accept) {
+  return accept.split(',')
+    .map(s => s.trim())
+    .filter(s => s.startsWith('.'))
+    .map(s => s.slice(1).toLowerCase());
+}
+
 function _pickFiles({ accept = '', multiple = false } = {}) {
+  // Tauri webview blocks <input type=file>; use the native dialog instead.
+  if (platform.isTauri) {
+    return platform.pickFiles({ extensions: _acceptToExtensions(accept), multiple });
+  }
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -655,6 +666,12 @@ export const AtlasAPI = {
 
   /** Open a file picker that accepts .atlas and image files. */
   async choose_file() {
+    // Tauri: pick the atlas via native dialog and load sibling PNGs from disk.
+    if (platform.isTauri) {
+      const picked = await platform.pickAtlasFile();
+      if (!picked || !picked.path) return false;
+      return _loadAtlasFromPath(picked.path);
+    }
     const files = await _pickFiles({
       accept: '.atlas,.txt,text/plain,image/png,.png',
       multiple: true,

@@ -29,7 +29,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": ["msi"],
     "icon": ["icons/icon.ico"],
     "fileAssociations": [
       {
