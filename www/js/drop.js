@@ -120,21 +120,28 @@ async function processDroppedPaths(paths) {
   }
 }
 
+// The missing-images dialog runs its own per-row drag-drop handling while
+// open; stand down here so we don't also try to load the dropped PNG as a
+// new atlas/mod-image.
+const isMissingDialogOpen = () => document.body.dataset.missingDialogOpen === 'true';
+
 if (platform.isTauri) {
   platform.subscribeDragDrop({
-    onEnter: () => showDropOverlay(),
-    onLeave: () => hideDropOverlay(),
+    onEnter: () => { if (!isMissingDialogOpen()) showDropOverlay(); },
+    onLeave: () => { if (!isMissingDialogOpen()) hideDropOverlay(); },
     onDrop: async (paths) => {
+      if (isMissingDialogOpen()) return;
       hideDropOverlay();
       await processDroppedPaths(paths);
     },
   });
 } else {
-  // ─── Browser / PWA drag & drop (unchanged) ───────────────────────────────────
+  // ─── Browser / PWA drag & drop ───────────────────────────────────
   ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => e.preventDefault(), false));
 
   window.addEventListener('dragenter', (e) => {
     e.preventDefault();
+    if (isMissingDialogOpen()) return;
     if (e.dataTransfer.types.includes('Files')) showDropOverlay();
   });
 
@@ -147,6 +154,7 @@ if (platform.isTauri) {
 
   dropOverlay.addEventListener('drop', async (e) => {
     e.preventDefault();
+    if (isMissingDialogOpen()) return;
     hideDropOverlay();
     const files = Array.from(e.dataTransfer.files);
     await processDroppedFiles(files);

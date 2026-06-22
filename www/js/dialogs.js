@@ -1,3 +1,5 @@
+import { platform } from './platform.js';
+
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-overlay');
@@ -89,12 +91,34 @@ export function showMissingAtlasImagesDialog(missingPages) {
 
     const subtitle = document.createElement('p');
     subtitle.className = 'missing-images-subtitle';
-    subtitle.innerText = 'Choose one image for each page below.';
+    subtitle.innerText = 'Choose one image for each page below, or drag & drop a PNG onto a row.';
 
     const list = document.createElement('div');
     list.className = 'missing-images-list';
 
     const rowByPage = new Map();
+    const statusByPage = new Map();
+    const btnByPage = new Map();
+
+    function applySelection(pageName, file) {
+      if (!file) return;
+      const row = rowByPage.get(pageName);
+      const statusEl = statusByPage.get(pageName);
+      const actionBtn = btnByPage.get(pageName);
+      if (!row || !statusEl || !actionBtn) return;
+      selectedByPage[pageName] = file;
+      statusEl.innerText = formatSelectedImageLabel(file, pageName);
+      statusEl.title = String(file.name || pageName);
+      row.classList.add('selected');
+      actionBtn.innerText = 'Change';
+      actionBtn.classList.add('btn-save');
+      updateConfirmState();
+    }
+
+    function isPngFile(file) {
+      return !!file && (file.type === 'image/png' || /\.png$/i.test(file.name || ''));
+    }
+
     for (const pageName of pages) {
       const row = document.createElement('div');
       row.className = 'missing-images-row';
@@ -113,14 +137,27 @@ export function showMissingAtlasImagesDialog(missingPages) {
       actionBtn.innerText = 'Add image';
       actionBtn.addEventListener('click', async () => {
         const file = await pickSingleImageFile();
-        if (!file) return;
-        selectedByPage[pageName] = file;
-        statusEl.innerText = formatSelectedImageLabel(file, pageName);
-        statusEl.title = String(file.name || pageName);
-        row.classList.add('selected');
-        actionBtn.innerText = 'Change';
-        actionBtn.classList.add('btn-save');
-        updateConfirmState();
+        if (file) applySelection(pageName, file);
+      });
+
+      // Browser/PWA drag & drop directly onto the row. Stop propagation so the
+      // global window-level drop overlay (drop.js) never sees this drag.
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.remove('drag-over');
+      });
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.remove('drag-over');
+        const file = Array.from(e.dataTransfer?.files || []).find(isPngFile);
+        if (file) applySelection(pageName, file);
       });
 
       row.appendChild(pageEl);
@@ -128,7 +165,14 @@ export function showMissingAtlasImagesDialog(missingPages) {
       row.appendChild(actionBtn);
       list.appendChild(row);
       rowByPage.set(pageName, row);
+      statusByPage.set(pageName, statusEl);
+      btnByPage.set(pageName, actionBtn);
     }
+
+    // Backdrop: swallow stray drag events so they never reach drop.js's
+    // global window-level listeners while this dialog is open.
+    overlay.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+    overlay.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); });
 
     const buttons = document.createElement('div');
     buttons.className = 'missing-images-buttons';
@@ -144,8 +188,11 @@ export function showMissingAtlasImagesDialog(missingPages) {
     confirmBtn.innerText = 'Load atlas';
     confirmBtn.disabled = true;
 
+    let unsubscribeTauriDrag = null;
     const close = (result) => {
       window.removeEventListener('keydown', onKeyDown);
+      delete document.body.dataset.missingDialogOpen;
+      if (unsubscribeTauriDrag) unsubscribeTauriDrag();
       overlay.remove();
       resolve(result);
     };
@@ -170,6 +217,40 @@ export function showMissingAtlasImagesDialog(missingPages) {
     dialog.appendChild(buttons);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
+    document.body.dataset.missingDialogOpen = 'true';
+
+    // Tauri's webview intercepts drag-drop at the native layer, so the DOM
+    // dragover/drop listeners on the rows above never fire there. Subscribe
+    // to Tauri's own drag-drop event instead and resolve the target row from
+    // the (physical-pixel) cursor position.
+    if (platform.isTauri) {
+      const rowAtPosition = (position) => {
+        if (!position) return null;
+        const dpr = window.devicePixelRatio || 1;
+        const el = document.elementFromPoint(position.x / dpr, position.y / dpr);
+        return el ? el.closest('.missing-images-row') : null;
+      };
+      const clearDragOver = () => { for (const r of rowByPage.values()) r.classList.remove('drag-over'); };
+
+      platform.subscribeDragDrop({
+        onOver: (p) => {
+          const row = rowAtPosition(p?.position);
+          for (const [, r] of rowByPage) r.classList.toggle('drag-over', r === row);
+        },
+        onLeave: clearDragOver,
+        onDrop: async (paths, p) => {
+          clearDragOver();
+          const row = rowAtPosition(p?.position);
+          const pageName = row && [...rowByPage.entries()].find(([, r]) => r === row)?.[0];
+          if (!pageName) return;
+          const pngPath = (paths || []).find(path => /\.png$/i.test(path));
+          if (!pngPath) return;
+          const { droppedImageFiles } = await platform.readDroppedPaths([pngPath]);
+          const file = droppedImageFiles.values().next().value;
+          if (file) applySelection(pageName, file);
+        },
+      }).then((unlisten) => { unsubscribeTauriDrag = unlisten; });
+    }
 
     window.addEventListener('keydown', onKeyDown);
     updateConfirmState();

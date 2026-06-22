@@ -641,6 +641,12 @@ img#preview-img {
   border-color: #0e639c;
 }
 
+.missing-images-row.drag-over {
+  border-color: #0e639c;
+  border-style: dashed;
+  background-color: #28415a;
+}
+
 .missing-images-page {
   color: #e4e4e4;
   font-size: 13px;

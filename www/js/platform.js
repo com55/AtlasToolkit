@@ -313,26 +313,11 @@ export async function subscribeDragDrop({ onEnter, onOver, onLeave, onDrop }) {
       if (type === 'enter') onEnter && onEnter(p.paths || []);
       else if (type === 'over') onOver && onOver(p);
       else if (type === 'leave' || type === 'cancel') onLeave && onLeave();
-      else if (type === 'drop') onDrop && onDrop(p.paths || []);
+      else if (type === 'drop') onDrop && onDrop(p.paths || [], p);
     });
     return unlisten;
   } catch (e) {
     console.warn('[platform] subscribeDragDrop failed:', e);
-    return () => {};
-  }
-}
-
-/** Subscribe to "open-file" events emitted from Rust. */
-export async function subscribeOpenFile(handler) {
-  if (!isTauri) return () => {};
-  try {
-    const listen = _T?.event?.listen;
-    if (typeof listen !== 'function') return () => {};
-    return await listen('open-file', (event) => {
-      if (typeof event.payload === 'string') handler(event.payload);
-    });
-  } catch (e) {
-    console.warn('[platform] subscribeOpenFile failed:', e);
     return () => {};
   }
 }
@@ -422,7 +407,6 @@ export const platform = {
   pickSaveFolder,
   writeFilesToFolder,
   subscribeDragDrop,
-  subscribeOpenFile,
   getStartupFile,
   loadPref,
   savePref,
