@@ -58,7 +58,15 @@ function _invoke(cmd, args) {
 }
 
 async function _readText(path) {
-  return _invoke('plugin:fs|read_text_file', { path });
+  // Tauri 2's fs plugin `read_text_file` command returns raw bytes over IPC
+  // (ArrayBuffer | number[]); the official JS wrapper decodes them. Since we
+  // invoke the command directly, decode here too.
+  const result = await _invoke('plugin:fs|read_text_file', { path });
+  if (typeof result === 'string') return result;
+  const bytes = result instanceof Uint8Array ? result
+    : result instanceof ArrayBuffer ? new Uint8Array(result)
+    : new Uint8Array(result);
+  return new TextDecoder('utf-8').decode(bytes);
 }
 
 async function _readBytes(path) {
@@ -159,6 +167,29 @@ export async function pickAtlasFile() {
     input.click();
     setTimeout(() => { if (!settled) resolve(null); }, 5 * 60 * 1000);
   });
+}
+
+/**
+ * Pick one or more files via the native dialog and return them as File objects
+ * (bytes read from disk). Tauri only — used where the web build uses an
+ * <input type=file>, which doesn't open a dialog inside the Tauri webview.
+ */
+export async function pickFiles({ extensions = [], multiple = false } = {}) {
+  if (!isTauri) throw new Error('pickFiles requires Tauri');
+  const filters = [];
+  if (extensions.length) filters.push({ name: 'Files', extensions });
+  filters.push({ name: 'All Files', extensions: ['*'] });
+  const selected = await _invoke('plugin:dialog|open', { multiple, directory: false, filters });
+  if (!selected) return [];
+  const paths = Array.isArray(selected) ? selected : [selected];
+  const files = [];
+  for (const p of paths) {
+    const bytes = await _readBytes(p);
+    const name = _baseName(p);
+    const type = _ext(name) === 'png' ? 'image/png' : 'text/plain';
+    files.push(_bytesToFile(bytes, name, type));
+  }
+  return files;
 }
 
 /**
@@ -402,6 +433,7 @@ export function savePref(key, value) {
 export const platform = {
   isTauri,
   pickAtlasFile,
+  pickFiles,
   readAtlasWithSiblings,
   readDroppedPaths,
   pickSaveFolder,
