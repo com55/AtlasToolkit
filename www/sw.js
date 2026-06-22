@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v3';
+const CACHE_NAME = 'atlas-toolkit-v4';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
@@ -23,6 +23,7 @@ const CORE_ASSETS = [
   'js/region-list.js',
   'js/state.js',
   'js/update.js',
+  'js/zip.js',
 ].map((path) => new URL(path, APP_BASE_URL).href);
 
 self.addEventListener('install', (event) => {
