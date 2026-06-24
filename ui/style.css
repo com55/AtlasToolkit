@@ -376,6 +376,42 @@ img#preview-img {
   background-color: #1e1e1e;
 }
 
+/* Multi-page switcher */
+#modify-page-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+#page-indicator {
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+  min-width: 64px;
+  text-align: center;
+}
+.page-nav-btn {
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  background-color: #3c3c3c;
+  color: #ccc;
+  border-color: #555;
+}
+.page-nav-btn:hover:not(:disabled) {
+  background-color: #4c4c4c;
+  color: white;
+  border-color: #666;
+}
+.page-nav-btn:disabled {
+  background-color: #333;
+  color: #555;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
 /* Modal Styling */
 .hidden {
   display: none !important;

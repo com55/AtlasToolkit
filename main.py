@@ -722,23 +722,52 @@ class Api:
             self._pre_repack_image = None
             self._pre_repack_text = None
 
-            # 5. Region bounds for overlay (all regions across all pages).
+            # 5. Region bounds for overlay (all regions across all pages) plus
+            #    the MERGED region→page map (repack redistributed them, so the
+            #    enter_modify_mode map is now stale).
             _, _, merged_regions = parse_atlas(atlas_text)
             region_bounds: dict[str, list[int]] = {}
+            region_pages: dict[str, str] = {}
             for name, info in merged_regions.items():
                 region_bounds[name] = [*info.bounds, info.rotate]
+                region_pages[name] = info.page
 
             return {
                 "image": self._image_to_base64(pages[0]) if pages else None,
                 "regions": region_bounds,
+                "regionPages": region_pages,
+                "pages": [str(pi["page"]) for pi in page_infos],
                 "pageCount": len(pages),
-                "previewPage": page_infos[0]["page"] if page_infos else None,
+                "previewPage": str(page_infos[0]["page"]) if page_infos else None,
             }
 
         except Exception as e:
             log.error("Processing multi-page mod image: %s", e)
             if self._window:
                 self._window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
+            return None
+
+    def get_modify_page_preview(self, index: int) -> Optional[str]:
+        """Return a base64 data-URI for page *index* of the current modify view.
+
+        Serves the repacked merged pages when a multi-page merge is active,
+        otherwise the originally-loaded atlas page images (so the page switcher
+        works both before and after merging).
+        """
+        try:
+            if self._merged_pages is not None:
+                if 0 <= index < len(self._merged_pages):
+                    return self._image_to_base64(self._merged_pages[index])
+                return None
+            if self._processor and 0 <= index < len(self._processor.pages):
+                img = self._processor.get_page_image(
+                    self._processor.pages[index].filename
+                )
+                if img is not None:
+                    return self._image_to_base64(img)
+            return None
+        except Exception as e:
+            log.error("get_modify_page_preview: %s", e)
             return None
 
     def save_modified(self) -> str:
