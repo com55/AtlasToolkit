@@ -7,6 +7,10 @@ let dragStartIndex = -1;
 let currentMode = "extract"; // 'extract' | 'modify'
 let modifyRegionBounds = {}; // {name: [x, y, w, h], ...}
 let hasModImage = false;
+// Multi-page modify state
+let modifyPages = []; // ordered page filenames
+let modifyActivePageIndex = 0;
+let modifyRegionPages = {}; // {name: pageFilename}
 let viewState = {
   scale: 1,
   x: 0,
@@ -61,6 +65,7 @@ async function enterModifyMode() {
     if (data) {
       setMode("modify");
       modifyRegionBounds = data.regions || {};
+      setupModifyPages(data);
       hasModImage = false;
       document.getElementById("modify-status-text").innerText =
         "Select regions and click Modify Selected";
@@ -97,6 +102,10 @@ async function exitModifyMode() {
   }
   setMode("extract");
   modifyRegionBounds = {};
+  modifyPages = [];
+  modifyRegionPages = {};
+  modifyActivePageIndex = 0;
+  document.getElementById("modify-page-switcher").classList.add("hidden");
   hasModImage = false;
   clearOverlay();
   // Restore preview from current selection
@@ -135,6 +144,8 @@ function onModPreviewReceived(data) {
   if (data.regions) {
     modifyRegionBounds = data.regions;
   }
+  // Refresh multi-page state (regions were redistributed across pages by repack)
+  setupModifyPages(data);
   previewImg.src = data.image;
   previewImg.style.display = "block";
   document.getElementById("modify-status-text").innerText =
@@ -175,6 +186,64 @@ async function saveModified() {
     console.error(e);
     showToast("Save failed.", "error");
   }
+}
+
+// ==========================================
+//  MULTI-PAGE SWITCHER
+// ==========================================
+function setupModifyPages(data) {
+  modifyPages = Array.isArray(data.pages) ? data.pages : [];
+  modifyRegionPages = data.regionPages || {};
+  modifyActivePageIndex = 0;
+  const switcher = document.getElementById("modify-page-switcher");
+  if (modifyPages.length > 1) {
+    switcher.classList.remove("hidden");
+    updatePageIndicator();
+  } else {
+    switcher.classList.add("hidden");
+  }
+}
+
+function updatePageIndicator() {
+  const ind = document.getElementById("page-indicator");
+  if (ind)
+    ind.innerText = `Page ${modifyActivePageIndex + 1} / ${modifyPages.length}`;
+  document.getElementById("page-prev").disabled = modifyActivePageIndex <= 0;
+  document.getElementById("page-next").disabled =
+    modifyActivePageIndex >= modifyPages.length - 1;
+}
+
+async function showModifyPage(index) {
+  if (index < 0 || index >= modifyPages.length) return;
+  modifyActivePageIndex = index;
+  updatePageIndicator();
+  try {
+    const dataUri = await pywebview.api.get_modify_page_preview(index);
+    if (!dataUri) return;
+    previewImg.src = dataUri;
+    previewImg.style.display = "block";
+    previewImg.onload = function () {
+      resetPreview();
+      const containerW = previewContainer.clientWidth - 40;
+      const containerH = previewContainer.clientHeight - 40;
+      const imgW = previewImg.naturalWidth;
+      const imgH = previewImg.naturalHeight;
+      if (imgW > containerW || imgH > containerH) {
+        viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+      }
+      applyTransform(); // redraws overlay (filtered to this page)
+      previewImg.onload = null;
+    };
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function modifyPagePrev() {
+  showModifyPage(modifyActivePageIndex - 1);
+}
+function modifyPageNext() {
+  showModifyPage(modifyActivePageIndex + 1);
 }
 
 document.getElementById("chk-repack").addEventListener("change", async (e) => {
@@ -500,7 +569,13 @@ function drawRegionOverlay() {
   const lineWidth = 3;
   const names = getSelectedNames();
 
+  // On multi-page atlases only draw regions that live on the visible page.
+  const activePage =
+    modifyPages.length > 1 ? modifyPages[modifyActivePageIndex] : null;
+
   for (const name of names) {
+    if (activePage && modifyRegionPages[name] && modifyRegionPages[name] !== activePage)
+      continue;
     const bounds = modifyRegionBounds[name];
     if (!bounds) continue;
     const [bx, by, bw, bh, rotate] = bounds;

@@ -59,6 +59,25 @@
             Back
           </button>
           <span>Modify Mode</span>
+          <div id="modify-page-switcher" class="hidden">
+            <button
+              class="page-nav-btn"
+              id="page-prev"
+              onclick="modifyPagePrev()"
+              title="Previous page"
+            >
+              ‹
+            </button>
+            <span id="page-indicator">Page 1 / 1</span>
+            <button
+              class="page-nav-btn"
+              id="page-next"
+              onclick="modifyPageNext()"
+              title="Next page"
+            >
+              ›
+            </button>
+          </div>
         </div>
       </div>
       <div id="region-list-container">
