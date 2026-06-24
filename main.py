@@ -4,6 +4,7 @@ import os
 import base64
 import json
 import runpy
+import shutil
 import subprocess
 import webbrowser
 import webview
@@ -283,6 +284,8 @@ class Api:
         self._modifier: Optional[AtlasModifier] = None
         self._merged_image: Optional[Image] = None
         self._merged_atlas_text: Optional[str] = None
+        # Multi-page merge output (set instead of _merged_image for >1 page atlases)
+        self._merged_pages: Optional[List[Image]] = None
         # Pre-repack state (merge output before repack was applied)
         self._pre_repack_image: Optional[Image] = None
         self._pre_repack_text: Optional[str] = None
@@ -438,6 +441,7 @@ class Api:
         self._modifier = None
         self._merged_image = None
         self._merged_atlas_text = None
+        self._merged_pages = None
         self._pre_repack_image = None
         self._pre_repack_text = None
 
@@ -555,17 +559,29 @@ class Api:
             self._modifier = AtlasModifier(auto_convert_atlas(atlas_text), self._atlas_path, base_image)
             self._merged_image = None
             self._merged_atlas_text = None
+            self._merged_pages = None
             log.debug("Entered modify mode")
-            
+
             # Build region bounds dict for client-side overlay
             # Each value: [x, y, w, h, rotate]
             region_bounds: dict[str, list[int]] = {}
             for name, info in self._modifier.regions.items():
                 region_bounds[name] = [*info.bounds, info.rotate]
-            
+
+            # Multi-page metadata (consumed by the page switcher UI). For a
+            # single-page atlas these are a 1-element list / trivial map.
+            pages = [p.filename for p in self._processor.pages]
+            region_pages = {
+                name: r.page_filename
+                for name, r in self._processor.regions.items()
+            }
+
             return {
                 "image": self._image_to_base64(base_image),
                 "regions": region_bounds,
+                "pages": pages,
+                "regionPages": region_pages,
+                "activePage": pages[0] if pages else None,
             }
             
         except Exception as e:
@@ -601,11 +617,17 @@ class Api:
         """Run merge (and optional repack) and return dict with base64 preview + updated region bounds."""
         if not self._modifier:
             return None
-        
+
+        # Multi-page atlases take a dedicated path: extract every region from
+        # every page, swap in the mod for the selected regions, and repack all
+        # pages. (Mirrors the JS multi-page branch; repack flag is implied.)
+        if self._processor and len(self._processor.pages) > 1:
+            return self._process_mod_multi_page(path_str, selected_names)
+
         try:
             mod_path = Path(path_str)
             log.debug("Processing mod image: %s", mod_path)
-            
+
             merged_image, merged_atlas_text = self._modifier.merge_mod_image(
                 mod_path, selected_names
             )
@@ -642,27 +664,132 @@ class Api:
                 self._window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
             return None
 
+    def _process_mod_multi_page(
+        self, path_str: str, selected_names: List[str]
+    ) -> Optional[dict[str, object]]:
+        """Multi-page merge: extract every region (whitespace restored), replace
+        the selected regions with the mod image, then repack across all pages."""
+        if not self._processor:
+            return None
+
+        try:
+            from PIL import Image
+            from atlas_modifier import parse_atlas, repack_multi_page
+
+            # 1. Extract every region from every page (offset padding restored).
+            all_sprites: dict[str, Image] = {}
+            for name in self._processor.regions:
+                sprite = self._processor.extract_region(name)
+                if sprite is not None:
+                    all_sprites[name] = sprite
+
+            # 2. Replace the selected regions' sprites with the mod image.
+            mod_img = Image.open(Path(path_str)).convert("RGBA")
+            for name in selected_names:
+                if name in all_sprites:
+                    all_sprites[name] = mod_img
+
+            # 3. Collect per-page infos and per-region metadata.
+            page_infos: list[dict[str, object]] = [
+                {
+                    "page": p.filename,
+                    "format": p.format,
+                    "filter": f"{p.filter[0]}, {p.filter[1]}",
+                    "repeat": p.repeat,
+                    "pma": p.pma,
+                }
+                for p in self._processor.pages
+            ]
+            region_metas: dict[str, dict[str, object]] = {
+                name: {
+                    "atlas_name": r.atlas_name or name,
+                    "index": r.index,
+                    "split": r.split,
+                    "pad": r.pad,
+                    "extra_pairs": r.extra_pairs,
+                }
+                for name, r in self._processor.regions.items()
+            }
+
+            # 4. Repack across all pages.
+            pages, atlas_text = repack_multi_page(
+                all_sprites, len(self._processor.pages), page_infos, region_metas
+            )
+
+            self._merged_pages = pages
+            self._merged_atlas_text = atlas_text
+            self._merged_image = None
+            self._pre_repack_image = None
+            self._pre_repack_text = None
+
+            # 5. Region bounds for overlay (all regions across all pages).
+            _, _, merged_regions = parse_atlas(atlas_text)
+            region_bounds: dict[str, list[int]] = {}
+            for name, info in merged_regions.items():
+                region_bounds[name] = [*info.bounds, info.rotate]
+
+            return {
+                "image": self._image_to_base64(pages[0]) if pages else None,
+                "regions": region_bounds,
+                "pageCount": len(pages),
+                "previewPage": page_infos[0]["page"] if page_infos else None,
+            }
+
+        except Exception as e:
+            log.error("Processing multi-page mod image: %s", e)
+            if self._window:
+                self._window.evaluate_js(f"showToast('Error: {str(e)}', 'error')")
+            return None
+
     def save_modified(self) -> str:
         """Open a folder dialog and save the merged atlas files."""
-        if not self._modifier or not self._merged_image or not self._merged_atlas_text or not self._window:
+        if not self._merged_atlas_text or not self._window:
             return "Error: No merged data to save."
-        
+        if not self._merged_pages and not (self._modifier and self._merged_image):
+            return "Error: No merged data to save."
+
         default_dir = str(self._atlas_path.parent) if self._atlas_path else ''
-        
+
         result = self._window.create_file_dialog(
             webview.FileDialog.FOLDER,
             directory=default_dir,
         )
-        
+
         if not result:
             return "Cancelled"
-        
+
         try:
             output_dir = Path(result[0])
-            self._modifier.save(output_dir, self._merged_image, self._merged_atlas_text)
+            if self._merged_pages is not None:
+                self._save_multi_page(output_dir)
+            else:
+                self._modifier.save(output_dir, self._merged_image, self._merged_atlas_text)
             return f"Saved to: {output_dir}"
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def _save_multi_page(self, output_dir: Path) -> None:
+        """Write each repacked page PNG (named by its original page filename),
+        the updated atlas text, and copy the .skel if present."""
+        if not self._processor or not self._atlas_path or self._merged_pages is None:
+            return
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        for i, page_img in enumerate(self._merged_pages):
+            if i < len(self._processor.pages):
+                page_name = self._processor.pages[i].filename
+            else:
+                page_name = f"page{i}.png"
+            page_img.save(output_dir / Path(page_name).name)
+
+        if self._merged_atlas_text is not None:
+            (output_dir / self._atlas_path.name).write_text(
+                self._merged_atlas_text, encoding="utf-8"
+            )
+
+        skel_path = self._atlas_path.with_suffix(".skel")
+        if skel_path.exists():
+            shutil.copy(skel_path, output_dir / skel_path.name)
 
     def toggle_repack(self, repack: bool) -> Optional[dict[str, object]]:
         """Re-apply or remove repack on the existing merge result."""
