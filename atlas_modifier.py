@@ -25,17 +25,23 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 class RegionInfo(NamedTuple):
     """Information about a region parsed from atlas file."""
-    name: str
+    name: str          # unique key (e.g. "arm#2")
     bounds: Tuple[int, int, int, int]  # x, y, w, h
     offsets: Optional[Tuple[int, int, int, int]]  # off_x, off_y, orig_w, orig_h
     rotate: int  # 0, 90, 180, 270
+    atlas_name: str = ""  # real name emitted to the atlas
+    page: str = ""
+    index: int = -1
+    split: Optional[List[int]] = None
+    pad: Optional[List[int]] = None
+    extra_pairs: List[Tuple[str, List[str]]] = []
 
 
-def parse_atlas(atlas_text: str) -> Tuple[Dict[str, str], List[str], Dict[str, RegionInfo]]:
+def parse_atlas(atlas_text: str) -> Tuple[Dict[str, object], List[str], Dict[str, RegionInfo]]:
     from atlas_extracter import AtlasProcessor
     processor = AtlasProcessor(atlas_text, {})
-    
-    page_info = {}
+
+    page_info: Dict[str, object] = {}
     if processor.pages:
         p = processor.pages[0]
         page_info["page"] = p.filename
@@ -43,7 +49,8 @@ def parse_atlas(atlas_text: str) -> Tuple[Dict[str, str], List[str], Dict[str, R
         page_info["format"] = p.format
         page_info["filter"] = f"{p.filter[0]}, {p.filter[1]}"
         page_info["repeat"] = p.repeat
-    
+        page_info["pma"] = bool(p.pma)
+
     region_names = list(processor.regions.keys())
     regions = {}
     for name, r in processor.regions.items():
@@ -52,8 +59,14 @@ def parse_atlas(atlas_text: str) -> Tuple[Dict[str, str], List[str], Dict[str, R
             bounds=(r.x, r.y, r.w, r.h),
             offsets=r.offsets,
             rotate=r.rotate,
+            atlas_name=r.atlas_name or name,
+            page=r.page_filename,
+            index=r.index,
+            split=r.split,
+            pad=r.pad,
+            extra_pairs=list(r.extra_pairs),
         )
-    
+
     return page_info, region_names, regions
 
 # Type alias for updated region data: (bounds, offsets, rotate)
@@ -75,6 +88,33 @@ def _format_rotate(rotate_val: int) -> Optional[str]:
     if rotate_val == 270:
         return "270"
     return None
+
+
+def _is_default_offsets(
+    offsets: Optional[Tuple[int, int, int, int]],
+    bounds: Tuple[int, int, int, int],
+) -> bool:
+    """True when offsets carry no information (0,0,w,h) and can be omitted."""
+    if not offsets or not bounds:
+        return True
+    return (
+        offsets[0] == 0
+        and offsets[1] == 0
+        and offsets[2] == bounds[2]
+        and offsets[3] == bounds[3]
+    )
+
+
+def _is_default_page_format(fmt: object) -> bool:
+    return str(fmt or "").upper() == "RGBA8888"
+
+
+def _is_default_page_filter(flt: object) -> bool:
+    return "".join(str(flt or "").split()).lower() == "nearest,nearest"
+
+
+def _is_default_page_repeat(repeat: object) -> bool:
+    return str(repeat or "").lower() == "none"
 
 
 def _flush_pending_rotate(
@@ -205,10 +245,10 @@ def update_atlas_text(
     return "\n".join(result)
 
 def rebuild_atlas_text(
-    page_info: Dict[str, str],
+    page_info: Dict[str, object],
     new_size: Tuple[int, int],
     region_names: List[str],
-    region_data: Dict[str, Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]], int]],
+    region_data: Dict[str, tuple],
 ) -> str:
     """
     Build a complete atlas text from scratch.
@@ -217,48 +257,66 @@ def rebuild_atlas_text(
         page_info: Original page metadata (must contain 'page').
         new_size: (width, height) of the new canvas.
         region_names: Ordered list of region names.
-        region_data: Mapping of name → (bounds, offsets, rotate).
+        region_data: Mapping of name → (bounds, offsets, rotate[, meta]).
+            ``meta`` is an optional dict carrying atlas_name, index, split,
+            pad, extra_pairs so duplicate names and unknown keys survive.
+
+    Default page keys (format RGBA8888, filter nearest,nearest, repeat none),
+    default offsets (0,0,w,h) and pma:false are omitted for clean output.
     """
-    lines: List[str] = []
-
-    # Blank line before page header (Spine convention)
-    lines.append("")
-    lines.append(page_info.get("page", "atlas.png"))
-    lines.append(f"size: {new_size[0]},{new_size[1]}")
-
-    # Reproduce other page-level keys (filter, format, repeat, etc.)
-    for key, value in page_info.items():
-        if key in ("page", "size"):
-            continue
-        lines.append(f"{key}: {value}")
+    lines: List[str] = [
+        str(page_info.get("page", "atlas.png")),
+        f"size: {new_size[0]},{new_size[1]}",
+    ]
+    if not _is_default_page_format(page_info.get("format")):
+        lines.append(f"format: {page_info.get('format')}")
+    if not _is_default_page_filter(page_info.get("filter")):
+        lines.append(f"filter: {page_info.get('filter')}")
+    if not _is_default_page_repeat(page_info.get("repeat")):
+        lines.append(f"repeat: {page_info.get('repeat')}")
+    if page_info.get("pma") is True:
+        lines.append("pma: true")
 
     for name in region_names:
         if name not in region_data:
             continue
-        bounds, offsets, rotate_val = region_data[name]
-        lines.append(name)
-        if rotate_val == 90:
-            rotate_str = "true"
-        elif rotate_val == 180:
-            rotate_str = "180"
-        elif rotate_val == 270:
-            rotate_str = "270"
-        else:
-            rotate_str = None
+        entry = region_data[name]
+        bounds, offsets, rotate_val = entry[0], entry[1], entry[2]
+        meta: Dict[str, object] = entry[3] if len(entry) > 3 and entry[3] else {}
+
+        atlas_name = meta.get("atlas_name") or meta.get("name") or name
+        lines.append(str(atlas_name))
+
+        index = meta.get("index")
+        if isinstance(index, int) and index != -1:
+            lines.append(f"  index: {index}")
+
+        rotate_str = _format_rotate(rotate_val)
         if rotate_str:
             lines.append(f"  rotate: {rotate_str}")
+
         lines.append(
             f"  bounds: {bounds[0]}, {bounds[1]}, {bounds[2]}, {bounds[3]}"
         )
-        if offsets:
+        if offsets and not _is_default_offsets(offsets, bounds):
             lines.append(
                 f"  offsets: {offsets[0]}, {offsets[1]}, "
                 f"{offsets[2]}, {offsets[3]}"
             )
-        else:
-            lines.append(
-                f"  offsets: 0, 0, {bounds[2]}, {bounds[3]}"
-            )
+
+        split = meta.get("split")
+        if isinstance(split, (list, tuple)) and len(split) >= 4:
+            lines.append("  split: " + ", ".join(str(v) for v in split))
+        pad = meta.get("pad")
+        if isinstance(pad, (list, tuple)) and len(pad) >= 4:
+            lines.append("  pad: " + ", ".join(str(v) for v in pad))
+        extra_pairs = meta.get("extra_pairs")
+        if isinstance(extra_pairs, (list, tuple)):
+            for pair in extra_pairs:
+                if not pair or not pair[0]:
+                    continue
+                key, vals = pair[0], pair[1] if len(pair) > 1 else []
+                lines.append(f"  {key}: " + ", ".join(str(v) for v in vals))
 
     return "\n".join(lines)
 
@@ -411,13 +469,19 @@ class AtlasModifier:
 
         logging.info(f"Base: {base_w}x{base_h}, Mod: {mod_w}x{mod_h}")
 
-        # Determine original canvas dimensions from the first selected region
+        # Determine original canvas dimensions from the first selected region.
+        # offsets format: [left, bottom, originalWidth, originalHeight] (Spine spec)
         orig_canvas_w, orig_canvas_h = mod_w, mod_h
 
         first_region = self.regions.get(selected_regions[0])
-        if first_region and first_region.offsets:
-            orig_canvas_w = first_region.offsets[2]
-            orig_canvas_h = first_region.offsets[3]
+        has_offsets = bool(first_region and first_region.offsets)
+        off_x_orig = first_region.offsets[0] if has_offsets else 0
+        off_y_orig = first_region.offsets[1] if has_offsets else 0
+        base_orig_w = first_region.offsets[2] if has_offsets else mod_w
+        base_orig_h = first_region.offsets[3] if has_offsets else mod_h
+        if has_offsets:
+            orig_canvas_w = base_orig_w
+            orig_canvas_h = base_orig_h
 
         # Detect proportional scale (e.g. mod is 2x the expected canvas)
         if (
@@ -436,17 +500,28 @@ class AtlasModifier:
                     f"Mod image scale: {mod_scale:.3f}x "
                     f"(canvas → {orig_canvas_w}x{orig_canvas_h})"
                 )
+            else:
+                # Non-proportional scale: treat the mod as a brand-new full
+                # canvas at its own dimensions so it is never clipped. [A1]
+                orig_canvas_w = mod_w
+                orig_canvas_h = mod_h
 
-        # Pad mod image to (possibly scaled) canvas size if needed
+        # Pad mod image to (possibly scaled) canvas size if needed.
+        # Place the sprite at (left, origH - bottom - spriteH) per the Spine
+        # offset convention so whitespace-trimmed sprites stay aligned. [A2]
         if mod_w != orig_canvas_w or mod_h != orig_canvas_h:
+            scale_x = (orig_canvas_w / base_orig_w) if base_orig_w > 0 else 1
+            scale_y = (orig_canvas_h / base_orig_h) if base_orig_h > 0 else 1
+            paste_x = round(off_x_orig * scale_x)
+            paste_y = orig_canvas_h - mod_h - round(off_y_orig * scale_y)
             logging.info(
                 f"Padding mod image to canvas: "
-                f"{orig_canvas_w}x{orig_canvas_h}"
+                f"{orig_canvas_w}x{orig_canvas_h} at ({paste_x}, {paste_y})"
             )
             padded_mod = Image.new(
                 "RGBA", (orig_canvas_w, orig_canvas_h), (0, 0, 0, 0)
             )
-            padded_mod.paste(mod_img, (0, orig_canvas_h - mod_h))
+            padded_mod.paste(mod_img, (paste_x, paste_y))
             mod_img = padded_mod
             mod_w, mod_h = orig_canvas_w, orig_canvas_h
 
@@ -737,10 +812,7 @@ class AtlasModifier:
             canvas.paste(sprite, (px, py))
 
         # ---- 6. Build region data for atlas text ----
-        region_data: Dict[
-            str,
-            Tuple[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]], int],
-        ] = {}
+        region_data: Dict[str, tuple] = {}
 
         for name in region_names:
             if name not in canonical_map:
@@ -755,10 +827,20 @@ class AtlasModifier:
 
             # Bounds always use ORIGINAL dimensions - no swap!
             bounds = (px, py, orig_w, orig_h)
-            
-            orig_offsets = regions[name].offsets
-            
-            region_data[name] = (bounds, orig_offsets, rotate_val)
+
+            info = regions[name]
+            region_data[name] = (
+                bounds,
+                info.offsets,
+                rotate_val,
+                {
+                    "atlas_name": info.atlas_name or info.name,
+                    "index": info.index,
+                    "split": info.split,
+                    "pad": info.pad,
+                    "extra_pairs": info.extra_pairs,
+                },
+            )
 
         new_atlas_text = rebuild_atlas_text(
             page_info, (canvas_w, canvas_h), region_names, region_data
