@@ -3,7 +3,6 @@ import sys
 import os
 import base64
 import json
-import runpy
 import shutil
 import subprocess
 import webbrowser
@@ -19,8 +18,8 @@ from atlas_extracter import AtlasProcessor
 from atlas_modifier import AtlasModifier
 from updater import (
     check_for_updates,
-    download_update_zip,
-    find_windows_asset,
+    download_update_asset,
+    find_windows_installer_asset,
     get_current_version,
     get_latest_release_info,
     is_running_as_exe,
@@ -30,35 +29,10 @@ from updater import (
 def get_resource_path(path: str) -> Path:
     """Get path to a resource file embedded in the executable.
 
-    In Nuitka onefile mode, ``__file__`` resolves to the temporary directory
-    where embedded resources are unpacked.
+    In Nuitka standalone mode, ``__file__`` resolves to the install directory
+    where embedded resources sit next to the executable.
     """
     return Path(__file__).parent / path
-
-
-def _resolve_helper_launch() -> tuple[Optional[Path], list[str]]:
-    """Resolve helper script path and passthrough args for helper bootstrap."""
-    if len(sys.argv) <= 1:
-        return None, []
-
-    arg1 = sys.argv[1]
-    if Path(arg1).name == "self_update_helper.py":
-        candidate = Path(arg1)
-        if not candidate.is_absolute():
-            candidate = Path.cwd() / candidate
-        return candidate, sys.argv[2:]
-
-    return None, []
-
-
-_helper_path, _helper_args = _resolve_helper_launch()
-if _helper_path is not None:
-    if not _helper_path.exists():
-        raise SystemExit(f"Update helper script not found: {_helper_path}")
-
-    sys.argv = [str(_helper_path), *_helper_args]
-    runpy.run_path(str(_helper_path), run_name="__main__")
-    raise SystemExit(0)
 
 
 def _consume_launch_flags(argv: list[str]) -> tuple[list[str], Optional[dict[str, str]]]:
@@ -275,6 +249,85 @@ def _get_running_executable_path() -> Path:
     return Path(sys.executable).resolve()
 
 
+def _install_dir() -> Path:
+    """The per-user install directory the Inno Setup installer targets."""
+    base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    return (base / "AtlasToolkit").resolve()
+
+
+def _is_installed_build() -> bool:
+    """True when running from the installed location (vs a portable copy).
+
+    Only installed builds get the silent installer self-update; portable copies
+    are pointed at the releases page instead (a silent install would replace a
+    different folder and orphan the portable exe).
+    """
+    if not is_running_as_exe():
+        return False
+    try:
+        exe = _get_running_executable_path().resolve()
+        install_dir = _install_dir()
+        return exe.parent == install_dir or install_dir in exe.parents
+    except Exception:
+        return False
+
+
+# Silent installer flags: no UI, no msgboxes, don't reboot, close the running
+# app via Restart Manager, and don't let Inno restart it (the script relaunches).
+_INNO_SILENT_FLAGS = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
+
+
+def _build_update_script(
+    installer_path: Path,
+    target_exe: Path,
+    pid: int,
+    relaunch_args: list[str],
+    release_url: str,
+    inno_log_path: Path,
+) -> str:
+    """Build the detached .cmd that waits for the app to exit, runs the Inno
+    installer silently, then relaunches the freshly-installed app (or relaunches
+    with a failure notice). Returned as text so it can be unit-tested off-Windows.
+    """
+    inst = str(installer_path)
+    exe = str(target_exe)
+    log = str(inno_log_path)
+    relaunch_suffix = " ".join(f'"{a}"' for a in relaunch_args)
+    success_launch = f'start "" "{exe}" {relaunch_suffix}'.rstrip()
+
+    fail_message = "Update failed: the installer reported an error."
+    fail_args = [
+        "--update-install-failed",
+        "--update-failed-message", f'"{fail_message}"',
+        "--update-failed-log", f'"{log}"',
+    ]
+    if release_url:
+        fail_args += ["--update-release-url", f'"{release_url}"']
+    fail_launch = f'start "" "{exe}" ' + " ".join(fail_args)
+
+    lines = [
+        "@echo off",
+        "setlocal",
+        ":waitloop",
+        f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul',
+        "if not errorlevel 1 (",
+        "    ping -n 2 127.0.0.1 >nul",
+        "    goto waitloop",
+        ")",
+        f'"{inst}" {_INNO_SILENT_FLAGS} /LOG="{log}"',
+        "if errorlevel 1 goto failed",
+        success_launch,
+        "goto cleanup",
+        ":failed",
+        fail_launch,
+        ":cleanup",
+        f'del /f /q "{inst}" >nul 2>nul',
+        'del /f /q "%~f0" >nul 2>nul',
+        "endlocal",
+    ]
+    return "\r\n".join(lines) + "\r\n"
+
+
 class Api:
     def __init__(self) -> None:
         self._atlas_path: Optional[Path] = None
@@ -292,7 +345,7 @@ class Api:
         # Persistent config
         self._config: dict[str, Any] = self._load_config()
         # Update state
-        self._update_zip_path: Optional[Path] = None
+        self._update_installer_path: Optional[Path] = None
         self._update_version: Optional[str] = None
         self._update_release_url: Optional[str] = None
         self._update_ready: bool = False
@@ -936,14 +989,19 @@ class Api:
             return dict(self._update_progress)
 
     def download_update(self) -> dict[str, Any]:
-        """Download the Windows update zip into a temp/update folder."""
+        """Download the Windows installer (Setup.exe) into the update folder."""
         if not is_running_as_exe():
             return {
                 "ok": False,
                 "error": "Dev mode does not support self-update install flow.",
             }
+        if not _is_installed_build():
+            return {
+                "ok": False,
+                "error": "Portable build does not support silent self-update. Use the releases page.",
+            }
 
-        self._update_zip_path = None
+        self._update_installer_path = None
         self._update_version = None
         self._update_release_url = None
         self._update_ready = False
@@ -956,14 +1014,14 @@ class Api:
 
         try:
             latest = get_latest_release_info()
-            asset = find_windows_asset(latest.assets)
+            asset = find_windows_installer_asset(latest.assets)
 
             update_dir = _get_update_dir()
             safe_tag = "".join(
                 c if c.isalnum() or c in "._-" else "_"
                 for c in (latest.tag_name or latest.latest_version or "latest")
             )
-            target_zip_path = update_dir / f"{safe_tag}-{asset.name}"
+            target_installer_path = update_dir / f"{safe_tag}-{asset.name}"
 
             def _progress(downloaded: int, total: Optional[int]) -> None:
                 percent = int((downloaded * 100) / total) if total and total > 0 else 0
@@ -974,16 +1032,16 @@ class Api:
                     percent=max(0, min(100, percent)),
                 )
 
-            download_update_zip(
+            download_update_asset(
                 download_url=asset.browser_download_url,
-                target_zip_path=target_zip_path,
+                target_path=target_installer_path,
                 progress_cb=_progress,
             )
 
             target_exe = _get_running_executable_path()
 
             metadata = {
-                "zip_path": str(target_zip_path),
+                "installer_path": str(target_installer_path),
                 "target_exe_path": str(target_exe),
                 "relaunch_args": sys.argv[1:],
                 "version": latest.latest_version,
@@ -995,11 +1053,11 @@ class Api:
                 encoding="utf-8",
             )
 
-            self._update_zip_path = target_zip_path
+            self._update_installer_path = target_installer_path
             self._update_version = latest.latest_version
             self._update_release_url = latest.release_url
             self._update_ready = True
-            size = target_zip_path.stat().st_size
+            size = target_installer_path.stat().st_size
             self._set_update_progress(
                 status="ready",
                 downloaded_bytes=size,
@@ -1010,7 +1068,7 @@ class Api:
             return {
                 "ok": True,
                 "version": latest.latest_version,
-                "downloaded_path": str(target_zip_path),
+                "downloaded_path": str(target_installer_path),
             }
         except Exception as e:
             msg = str(e) or "Unknown update download error"
@@ -1024,76 +1082,62 @@ class Api:
             return {"ok": False, "error": msg}
 
     def restart_and_install_update(self) -> dict[str, Any]:
-        """Spawn detached helper process that installs zip and relaunches app."""
+        """Spawn a detached cmd that runs the installer silently and relaunches the app."""
         if not is_running_as_exe():
             return {
                 "ok": False,
                 "error": "Dev mode does not support restart-and-install self-update.",
             }
 
-        if not self._update_ready or not self._update_zip_path:
+        if not self._update_ready or not self._update_installer_path:
             return {
                 "ok": False,
                 "error": "No downloaded update found. Please download update first.",
             }
 
-        zip_path = self._update_zip_path
-        if not zip_path.exists() or zip_path.stat().st_size <= 0:
+        installer_path = self._update_installer_path
+        if not installer_path.exists() or installer_path.stat().st_size <= 0:
             return {
                 "ok": False,
-                "error": "Downloaded update zip is missing or invalid.",
-            }
-
-        helper_path = get_resource_path("self_update_helper.py")
-        if not helper_path.exists():
-            return {
-                "ok": False,
-                "error": f"Update helper script not found: {helper_path}",
+                "error": "Downloaded installer is missing or invalid.",
             }
 
         target_exe = _get_running_executable_path()
-        launcher_exe = target_exe
-        if not launcher_exe.exists() or not launcher_exe.is_file():
+        if not target_exe.exists() or not target_exe.is_file():
             return {
                 "ok": False,
-                "error": f"Cannot locate executable for updater launch: {launcher_exe}",
+                "error": f"Cannot locate executable for relaunch: {target_exe}",
             }
 
-        relaunch_args_b64 = base64.b64encode(
-            json.dumps(sys.argv[1:], ensure_ascii=True).encode("utf-8")
-        ).decode("ascii")
-        release_url = self._update_release_url or ""
-
-        cmd = [
-            str(launcher_exe),
-            str(helper_path),
-            "--zip",
-            str(zip_path),
-            "--target-exe",
-            str(target_exe),
-            "--work-dir",
-            str(target_exe.parent),
-            "--relaunch-args-b64",
-            relaunch_args_b64,
-            "--pid",
-            str(os.getpid()),
-        ]
-        if release_url:
-            cmd.extend(["--release-url", release_url])
+        update_dir = _get_update_dir()
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        inno_log_path = update_dir / f"inno_install_{timestamp}.log"
+        script_text = _build_update_script(
+            installer_path=installer_path,
+            target_exe=target_exe,
+            pid=os.getpid(),
+            relaunch_args=list(sys.argv[1:]),
+            release_url=self._update_release_url or "",
+            inno_log_path=inno_log_path,
+        )
+        script_path = update_dir / f"install_update_{timestamp}_{os.getpid()}.cmd"
 
         try:
+            script_path.write_text(script_text, encoding="utf-8")
+
+            cmd_exe = os.environ.get("COMSPEC") or "cmd"
             popen_kwargs: dict[str, Any] = {
-                "cwd": str(launcher_exe.parent),
+                "cwd": str(update_dir),
                 "close_fds": True,
             }
-
             if sys.platform == "win32":
-                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                popen_kwargs["creationflags"] = creationflags
+                popen_kwargs["creationflags"] = (
+                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
             else:
                 popen_kwargs["start_new_session"] = True
 
-            subprocess.Popen(cmd, **popen_kwargs)
+            subprocess.Popen([cmd_exe, "/d", "/c", str(script_path)], **popen_kwargs)
 
             if self._window:
                 self._window.destroy()
@@ -1102,7 +1146,7 @@ class Api:
         except Exception as e:
             return {
                 "ok": False,
-                "error": f"Failed to launch update helper: {e}",
+                "error": f"Failed to launch update installer: {e}",
             }
     
     def _run_update_check(self) -> None:
@@ -1110,13 +1154,25 @@ class Api:
         try:
             info = check_for_updates()
             if info and self._window:
+                # Installed build → silent in-app installer update.
+                # Portable build → open the releases page (no silent install).
+                # Dev → open the source tree at the tag.
+                if _is_installed_build():
+                    action = "download"
+                    source_tree_url = info.source_tree_url
+                elif is_running_as_exe():
+                    action = "open_source_tag"
+                    source_tree_url = info.release_url
+                else:
+                    action = "open_source_tag"
+                    source_tree_url = info.source_tree_url
                 payload = {
                     "latestVersion": info.latest_version,
                     "releaseName": info.release_name,
                     "releaseUrl": info.release_url,
                     "tagName": info.tag_name,
-                    "sourceTreeUrl": info.source_tree_url,
-                    "action": "download" if is_running_as_exe() else "open_source_tag",
+                    "sourceTreeUrl": source_tree_url,
+                    "action": action,
                 }
                 args_json = json.dumps(payload)
                 self._window.evaluate_js(
