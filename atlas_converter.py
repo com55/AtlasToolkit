@@ -12,6 +12,12 @@ from typing import Dict, Optional
 # Keys that are old format at region level (not page)
 _OLD_REGION_KEYS = {"xy", "size", "orig", "offset"}
 
+# Region keys handled explicitly by flush_region (everything else is preserved)
+_REGION_CORE_KEYS = {
+    "index", "rotate", "bounds", "xy", "size", "offsets", "orig", "offset",
+    "split", "pad",
+}
+
 # Keys that are page-level (don't touch)
 _PAGE_KEYS = {"size", "format", "filter", "repeat", "pma"}
 
@@ -103,11 +109,16 @@ def convert_atlas_to_new_format(atlas_text: str) -> str:
             result.append(f"  offsets: {off_x}, {off_y}, {orig_w}, {orig_h}")
         # If no pair → Do not output offsets (spine format default is packed = original)
 
-        # --- split / pad และ key อื่นๆ ---
+        # --- split / pad ---
         for key in ("split", "pad"):
             if key in region_kv:
                 vals = ", ".join(region_kv[key])
                 result.append(f"  {key}: {vals}")
+
+        # Unknown region keys → re-emit so they survive conversion
+        for key, values in region_kv.items():
+            if key not in _REGION_CORE_KEYS:
+                result.append(f"  {key}: {', '.join(values)}")
 
         # Extra lines that we don't know
         result.extend(region_extra_lines)

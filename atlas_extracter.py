@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple, Union
@@ -11,7 +11,8 @@ logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 @dataclass
 class AtlasRegion:
-    name: str
+    name: str           # unique key (e.g. "arm#2" for a duplicate region name)
+    atlas_name: str     # real name written to the atlas (e.g. "arm")
     page_filename: str
     index: int = -1
     x: int = 0
@@ -20,6 +21,9 @@ class AtlasRegion:
     h: int = 0
     offsets: Optional[Tuple[int, int, int, int]] = None
     rotate: int = 0
+    split: Optional[List[int]] = None
+    pad: Optional[List[int]] = None
+    extra_pairs: List[Tuple[str, List[str]]] = field(default_factory=list)
 
 @dataclass
 class AtlasPage:
@@ -28,6 +32,7 @@ class AtlasPage:
     format: str = "RGBA8888"
     filter: Tuple[str, str] = ("Nearest", "Nearest")
     repeat: str = "none"
+    pma: bool = False
     scale_x: float = 1.0
     scale_y: float = 1.0
 
@@ -50,6 +55,12 @@ class AtlasProcessor:
         
         current_page: Optional[AtlasPage] = None
         current_region: Optional[AtlasRegion] = None
+        region_name_counts: Dict[str, int] = {}
+
+        def get_unique_region_key(atlas_name: str) -> str:
+            nxt = region_name_counts.get(atlas_name, 0) + 1
+            region_name_counts[atlas_name] = nxt
+            return atlas_name if nxt == 1 else f"{atlas_name}#{nxt}"
 
         while True:
             try:
@@ -88,7 +99,8 @@ class AtlasProcessor:
                     elif key == 'xy': # Support LibGDX old format
                         current_region.x = int(values[0])
                         current_region.y = int(values[1])
-                    elif key == 'size': # Support LibGDX old format
+                    elif key == 'size' and current_region.w == 0:
+                        # Only apply size to region if we haven't got bounds yet
                         current_region.w = int(values[0])
                         current_region.h = int(values[1])
                     elif key == 'rotate':
@@ -104,9 +116,15 @@ class AtlasProcessor:
                                 current_region.rotate = 0
                     elif key == 'offsets':
                         if len(values) >= 4:
-                            current_region.offsets = tuple(map(int, values)) # type: ignore
+                            current_region.offsets = tuple(map(int, values[:4])) # type: ignore
                     elif key == 'index':
                         current_region.index = int(values[0])
+                    elif key == 'split' and len(values) >= 4:
+                        current_region.split = [int(v) for v in values]
+                    elif key == 'pad' and len(values) >= 4:
+                        current_region.pad = [int(v) for v in values]
+                    else:
+                        current_region.extra_pairs.append((key, list(values)))
 
                 elif current_page:
                     if key == 'size':
@@ -117,15 +135,24 @@ class AtlasProcessor:
                         current_page.filter = (values[0], values[1])
                     elif key == 'repeat':
                         current_page.repeat = values[0]
+                    elif key == 'pma':
+                        current_page.pma = str(values[0]).strip().lower() == 'true'
 
             else:
                 # 3. If no colon and not .png -> It's a Region Name
                 if current_page is None:
                     continue
                 
-                # Found a new region name -> Create object
-                current_region = AtlasRegion(name=line, page_filename=current_page.filename)
-                self.regions[line] = current_region
+                # Found a new region name -> Create object.
+                # Duplicate names (common with Spine index: multi-region sprites)
+                # get a unique dict key; the real name is kept in atlas_name.
+                region_key = get_unique_region_key(line)
+                current_region = AtlasRegion(
+                    name=region_key,
+                    atlas_name=line,
+                    page_filename=current_page.filename,
+                )
+                self.regions[region_key] = current_region
 
     def _load_images(self, loader: Mapping[str, Union[str, bytes, Path, Image.Image]]) -> None:
         for page in self.pages:
