@@ -9,6 +9,8 @@ View atlas regions, extract individual sprites, replace sprites with other image
 
 - Now, Web version is available [here](https://com55.github.io/AtlasToolkit/)!
 - You can use the pre-built executables or download stable version source code from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
+  - Windows is distributed as an **installer** (`AtlasToolkit-Setup-x64.exe`, per-user, no admin) plus a **portable** zip. The installed build updates itself silently in-app; the portable build links to the releases page.
+  - **One-time migration:** builds made before the installer switch used the old single-exe auto-update and will report "asset not found" when checking for this release — download and run the new installer once manually.
 - Or, clone the repository and run from source (in-development / unstable):
   ```bash
   git clone https://github.com/com55/AtlasToolkit.git

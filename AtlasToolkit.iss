@@ -25,6 +25,9 @@ PrivilegesRequired=lowest
 DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; Force the fixed install location that _is_installed_build() / silent self-update
+; assume — without this the user could install elsewhere and never get auto-updates.
+DisableDirPage=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=installer
