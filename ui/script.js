@@ -196,11 +196,16 @@ function setupModifyPages(data) {
   modifyRegionPages = data.regionPages || {};
   modifyActivePageIndex = 0;
   const switcher = document.getElementById("modify-page-switcher");
+  const repackOptions = document.getElementById("repack-options");
   if (modifyPages.length > 1) {
     switcher.classList.remove("hidden");
     updatePageIndicator();
+    // Multi-page always repacks all pages; the per-page repack toggle is
+    // inert here (and toggling it post-merge errors), so hide it.
+    repackOptions.classList.add("hidden");
   } else {
     switcher.classList.add("hidden");
+    repackOptions.classList.remove("hidden");
   }
 }
 
