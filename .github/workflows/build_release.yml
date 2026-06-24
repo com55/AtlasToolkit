@@ -72,18 +72,17 @@ jobs:
           $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
           echo "Building version: $version"
 
-      - name: Build with Nuitka 🏗️
+      - name: Build with Nuitka (standalone / onedir) 🏗️
         uses: Nuitka/Nuitka-Action@main
         with:
           nuitka-version: main
           script-name: main.py
-          mode: onefile
+          mode: standalone
           windows-console-mode: ${{ env.CONSOLE_MODE }}
           windows-icon-from-ico: ui/icon.ico
           include-data-dir: ui=ui
           include-data-files: |
             VERSION=VERSION
-            self_update_helper.py=self_update_helper.py
           include-package-data: webview
           nofollow-import-to: |
             PyQt5
@@ -93,8 +92,22 @@ jobs:
             tkinter
             gi
           output-dir: dist
-          output-file: AtlasToolkit.exe
-          onefile-tempdir-spec: "{TEMP}/AtlasToolkit"
+
+      - name: Normalize standalone exe name 🔧
+        shell: pwsh
+        run: |
+          $dist = "dist/main.dist"
+          # standalone mode names the exe after the script (main.exe); output-file
+          # is ignored for standalone, so rename to the user-facing name.
+          if (Test-Path "$dist/main.exe") {
+            Rename-Item -Path "$dist/main.exe" -NewName "AtlasToolkit.exe" -Force
+          }
+          if (-not (Test-Path "$dist/AtlasToolkit.exe")) {
+            Write-Host "Expected exe not found. Contents of ${dist}:"
+            Get-ChildItem -Recurse $dist | Select-Object FullName
+            throw "AtlasToolkit.exe missing after standalone build"
+          }
+          Write-Host "OK: $dist/AtlasToolkit.exe present"
 
       - name: Check signing secrets
         id: check_secrets
@@ -106,7 +119,7 @@ jobs:
             echo "available=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sign Executable
+      - name: Sign Standalone Executable
         if: steps.check_secrets.outputs.available == 'true'
         shell: pwsh
         env:
@@ -114,10 +127,10 @@ jobs:
           CERT_PASS: ${{ secrets.CERT_PASSWORD }}
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
-          $exePath = "dist/AtlasToolkit.exe"
+          $exePath = "dist/main.dist/AtlasToolkit.exe"
 
-          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse | 
-                      Where-Object { $_.FullName -match "x64" } | 
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse |
+                      Where-Object { $_.FullName -match "x64" } |
                       Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
 
           try {
@@ -129,9 +142,9 @@ jobs:
               certutil -p $env:CERT_PASS -dump $certPath | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "Incorrect password or corrupted PFX file." }
 
-              Write-Host "Signing executable..."
+              Write-Host "Signing standalone executable..."
               & $signtool sign /f $certPath /p "$env:CERT_PASS" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /v $exePath
-              
+
               if ($LASTEXITCODE -ne 0) { throw "SignTool failed with code: $LASTEXITCODE" }
           }
           catch {
@@ -142,35 +155,76 @@ jobs:
               if (Test-Path $certPath) { Remove-Item $certPath -Force }
           }
 
-      - name: Prepare Assets for Upload 📦
-        shell: powershell
-        id: prepare_assets
+      - name: Install Inno Setup 🧰
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Installer (Inno Setup) 📦
+        shell: pwsh
         run: |
-          $exePath = "dist/AtlasToolkit.exe"
-          # Release (from workflow_call or tag push)
-          if ("${{ env.IS_RELEASE }}" -eq 'true') {
-            Compress-Archive -Path $exePath -DestinationPath "AtlasToolkit-Windows-x64.zip"
-            echo "ARTIFACT_PATH=AtlasToolkit-Windows-x64.zip" >> $env:GITHUB_OUTPUT
-          }
-          # Manual (workflow_dispatch)
-          else {
-            echo "ARTIFACT_NAME=AtlasToolkit-Windows-x64" >> $env:GITHUB_OUTPUT
-            echo "ARTIFACT_PATH=$exePath" >> $env:GITHUB_OUTPUT
+          $version = "${{ steps.build_version.outputs.version }}"
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc "/DMyAppVersion=$version" AtlasToolkit.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with code: $LASTEXITCODE" }
+          if (-not (Test-Path "installer/AtlasToolkit-Setup-x64.exe")) {
+            throw "Installer not produced at installer/AtlasToolkit-Setup-x64.exe"
           }
 
-      - name: Upload Artifact (Testing) 💾
+      - name: Sign Installer
+        if: steps.check_secrets.outputs.available == 'true'
+        shell: pwsh
+        env:
+          CERT_DATA: ${{ secrets.CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          $exePath = "installer/AtlasToolkit-Setup-x64.exe"
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse |
+                      Where-Object { $_.FullName -match "x64" } |
+                      Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+          try {
+              $cleanBase64 = $env:CERT_DATA -replace '\s',''
+              $certBytes = [System.Convert]::FromBase64String($cleanBase64)
+              [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+
+              Write-Host "Signing installer..."
+              & $signtool sign /f $certPath /p "$env:CERT_PASS" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /v $exePath
+              if ($LASTEXITCODE -ne 0) { throw "SignTool failed with code: $LASTEXITCODE" }
+          }
+          catch {
+              Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
+          finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+          }
+
+      - name: Create portable zip 📁
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/main.dist/*" -DestinationPath "AtlasToolkit-Windows-x64-portable.zip" -Force
+          if (-not (Test-Path "AtlasToolkit-Windows-x64-portable.zip")) { throw "Portable zip not produced" }
+
+      - name: Upload Artifacts (Testing) 💾
         uses: actions/upload-artifact@v4
-        if: ${{ steps.prepare_assets.outputs.ARTIFACT_NAME != '' }}
+        if: ${{ env.IS_RELEASE != 'true' }}
         with:
-          name: ${{ steps.prepare_assets.outputs.ARTIFACT_NAME }}
-          path: ${{ steps.prepare_assets.outputs.ARTIFACT_PATH }}
+          name: AtlasToolkit-Windows-x64
+          path: |
+            installer/AtlasToolkit-Setup-x64.exe
+            AtlasToolkit-Windows-x64-portable.zip
 
-      - name: Upload Release Asset 📤
+      - name: Upload Release Assets 📤
         if: ${{ env.IS_RELEASE == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
-          files: AtlasToolkit-Windows-x64.zip
+          files: |
+            installer/AtlasToolkit-Setup-x64.exe
+            AtlasToolkit-Windows-x64-portable.zip
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
