@@ -847,3 +847,132 @@ class AtlasModifier:
         )
 
         return canvas, new_atlas_text
+
+
+# ---------------------------------------------------------------------------- #
+#  Multi-page repack                                                            #
+# ---------------------------------------------------------------------------- #
+
+
+def repack_multi_page(
+    all_sprites: Dict[str, Image.Image],
+    num_pages: int,
+    page_infos: List[Dict[str, object]],
+    region_metas: Dict[str, Dict[str, object]],
+) -> Tuple[List[Image.Image], str]:
+    """Repack all sprites across *num_pages* pages.
+
+    Greedy first-fit-decreasing assignment (largest sprite → least-filled page),
+    then shelf-pack each page. Mirrors the JS ``repackMultiPage``.
+
+    Unlike the single-page :meth:`AtlasModifier.repack`, this does **not**
+    deduplicate identical sprites — every sprite is placed.
+
+    Args:
+        all_sprites: name → sprite image (already whitespace-restored).
+        num_pages: number of output pages.
+        page_infos: per-page metadata dicts (page, format, filter, repeat, pma).
+        region_metas: name → dict(atlas_name, index, split, pad, extra_pairs).
+
+    Returns:
+        (list of page images, atlas text).
+    """
+    sprite_names = list(all_sprites.keys())
+    if not sprite_names or num_pages == 0:
+        return [], ""
+
+    # Greedy first-fit-decreasing: largest area first → least-filled group.
+    ordered = sorted(
+        sprite_names,
+        key=lambda n: all_sprites[n].width * all_sprites[n].height,
+        reverse=True,
+    )
+    groups: List[Dict[str, object]] = [
+        {"names": [], "area": 0} for _ in range(num_pages)
+    ]
+    for name in ordered:
+        s = all_sprites[name]
+        g = min(groups, key=lambda gr: gr["area"])  # type: ignore[index]
+        g["names"].append(name)  # type: ignore[attr-defined]
+        g["area"] += s.width * s.height  # type: ignore[operator]
+
+    result_pages: List[Image.Image] = []
+    atlas_lines: List[str] = []
+
+    def _emit_page_keys(pi: Dict[str, object]) -> None:
+        if not _is_default_page_format(pi.get("format")):
+            atlas_lines.append(f"format: {pi.get('format')}")
+        if not _is_default_page_filter(pi.get("filter")):
+            atlas_lines.append(f"filter: {pi.get('filter')}")
+        if not _is_default_page_repeat(pi.get("repeat")):
+            atlas_lines.append(f"repeat: {pi.get('repeat')}")
+        if pi.get("pma") is True:
+            atlas_lines.append("pma: true")
+
+    for i in range(num_pages):
+        names: List[str] = groups[i]["names"]  # type: ignore[assignment]
+        pi = page_infos[i] if i < len(page_infos) else page_infos[0]
+
+        if i > 0:
+            atlas_lines.append("")  # blank line between page sections
+        atlas_lines.append(str(pi.get("page")))
+
+        if not names:
+            atlas_lines.append("size: 1,1")
+            _emit_page_keys(pi)
+            result_pages.append(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+            continue
+
+        items = [(n, all_sprites[n].width, all_sprites[n].height) for n in names]
+        canvas_w, canvas_h, placements = AtlasModifier._shelf_pack(items)
+        placement_map = {p[0]: p for p in placements}
+
+        canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        for name in names:
+            placement = placement_map.get(name)
+            if not placement:
+                continue
+            _, px, py, _pw, _ph, rotated = placement
+            sprite = all_sprites[name]
+            if rotated:
+                sprite = sprite.transpose(Image.Transpose.ROTATE_90)
+            canvas.paste(sprite, (px, py))
+        result_pages.append(canvas)
+
+        atlas_lines.append(f"size: {canvas_w},{canvas_h}")
+        _emit_page_keys(pi)
+
+        for name in names:
+            placement = placement_map.get(name)
+            if not placement:
+                continue
+            _, px, py, _pw, _ph, rotated = placement
+            sprite = all_sprites[name]  # original (unrotated) dims for bounds
+            meta = region_metas.get(name, {})
+
+            atlas_lines.append(str(meta.get("atlas_name") or name))
+            index = meta.get("index")
+            if isinstance(index, int) and index != -1:
+                atlas_lines.append(f"  index: {index}")
+            rotate_str = _format_rotate(90 if rotated else 0)
+            if rotate_str:
+                atlas_lines.append(f"  rotate: {rotate_str}")
+            atlas_lines.append(
+                f"  bounds: {px}, {py}, {sprite.width}, {sprite.height}"
+            )
+            split = meta.get("split")
+            if isinstance(split, (list, tuple)) and len(split) >= 4:
+                atlas_lines.append("  split: " + ", ".join(str(v) for v in split))
+            pad = meta.get("pad")
+            if isinstance(pad, (list, tuple)) and len(pad) >= 4:
+                atlas_lines.append("  pad: " + ", ".join(str(v) for v in pad))
+            extra_pairs = meta.get("extra_pairs")
+            if isinstance(extra_pairs, (list, tuple)):
+                for pair in extra_pairs:
+                    if not pair or not pair[0]:
+                        continue
+                    key = pair[0]
+                    vals = pair[1] if len(pair) > 1 else []
+                    atlas_lines.append(f"  {key}: " + ", ".join(str(v) for v in vals))
+
+    return result_pages, "\n".join(atlas_lines)
