@@ -9,6 +9,7 @@
 #define MyAppName "AtlasToolkit"
 #define MyAppExeName "AtlasToolkit.exe"
 #define MyAppProgId "AtlasToolkit.atlas"
+#define MyAppMutex "AtlasToolkitSingleInstanceMutex"
 #define MyAppPublisher "com55"
 #define MyAppURL "https://github.com/com55/AtlasToolkit"
 
@@ -23,9 +24,11 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
 ; Per-user install — no admin / no UAC, so silent self-update works unattended.
 PrivilegesRequired=lowest
-DefaultDirName={localappdata}\{#MyAppName}
+; {userpf} == %LOCALAPPDATA%\Programs — kept separate from the app's data dir
+; (%LOCALAPPDATA%\AtlasToolkit) so [InstallDelete] never wipes config / updates.
+DefaultDirName={userpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
-DisableProgramGroupPage=yes
+AllowNoIcons=yes
 ; Force the fixed install location that _is_installed_build() / silent self-update
 ; assume — without this the user could install elsewhere and never get auto-updates.
 DisableDirPage=yes
@@ -35,9 +38,14 @@ OutputDir=installer
 OutputBaseFilename=AtlasToolkit-Setup-x64
 SetupIconFile=ui\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+VersionInfoVersion={#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Detect a running instance (app holds this named mutex) and block a second
+; installer from running concurrently.
+AppMutex={#MyAppMutex}
+SetupMutex=AtlasToolkitSetupMutex
 ; During a silent self-update, close the running app via Restart Manager; the
 ; updater cmd handles relaunch, so don't let Inno restart it (avoids double-launch).
 CloseApplications=yes
@@ -50,7 +58,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Associate .atlas files with {#MyAppName}"; GroupDescription: "File associations:"
+
+[InstallDelete]
+; Clear the previous install payload before copying the new one so stale Nuitka
+; DLLs / data files from an older version never linger (onedir upgrades).
+; {app} is the program dir only — the app's config/update data lives elsewhere.
+Type: filesandordirs; Name: "{app}\*"
 
 [Files]
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -67,7 +82,13 @@ Root: HKA; Subkey: "Software\Classes\{#MyAppProgId}\shell\open\command"; ValueTy
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
 ; Interactive install only — the silent self-update relaunch is owned by the updater cmd.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; On uninstall, drop the update cache (downloaded installers / logs / scripts);
+; user config (config.json) in the same data dir is intentionally left intact.
+Filename: "{cmd}"; Parameters: "/c rmdir /s /q ""{localappdata}\{#MyAppName}\update"""; Flags: runhidden; RunOnceId: "DelUpdateCache"

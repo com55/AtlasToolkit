@@ -250,9 +250,14 @@ def _get_running_executable_path() -> Path:
 
 
 def _install_dir() -> Path:
-    """The per-user install directory the Inno Setup installer targets."""
+    """The per-user install directory the Inno Setup installer targets.
+
+    {userpf}\\AtlasToolkit == %LOCALAPPDATA%\\Programs\\AtlasToolkit — deliberately
+    separate from the config/update dir (%LOCALAPPDATA%\\AtlasToolkit) so the
+    installer's [InstallDelete] never wipes config or an in-progress update.
+    """
     base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    return (base / "AtlasToolkit").resolve()
+    return (base / "Programs" / "AtlasToolkit").resolve()
 
 
 def _is_installed_build() -> bool:
@@ -1198,8 +1203,20 @@ def setup_drop(window: webview.Window, api: Api) -> None:
         log.error("Failed to setup drop events: %s", e)
 
 if __name__ == '__main__':
+    # Named mutex so the Inno Setup installer's AppMutex can detect a running
+    # instance (used by CloseApplications during silent self-update). The handle
+    # is intentionally left open for the process lifetime.
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            _single_instance_mutex = ctypes.windll.kernel32.CreateMutexW(
+                None, False, "AtlasToolkitSingleInstanceMutex"
+            )
+        except Exception:
+            _single_instance_mutex = None
+
     api = Api()
-    
+
     # Calculate center position for primary monitor
     window_width, window_height = 900, 600
     if sys.platform == 'win32':
