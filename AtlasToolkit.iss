@@ -8,6 +8,7 @@
 
 #define MyAppName "AtlasToolkit"
 #define MyAppExeName "AtlasToolkit.exe"
+#define MyAppProgId "AtlasToolkit.atlas"
 #define MyAppPublisher "com55"
 #define MyAppURL "https://github.com/com55/AtlasToolkit"
 
@@ -41,15 +42,27 @@ WizardStyle=modern
 ; updater cmd handles relaunch, so don't let Inno restart it (avoids double-launch).
 CloseApplications=yes
 RestartApplications=no
+; Notify the shell when the .atlas association changes (refreshes icons / Open With).
+ChangesAssociations=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "associate"; Description: "Associate .atlas files with {#MyAppName}"; GroupDescription: "File associations:"
 
 [Files]
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+[Registry]
+; Per-user .atlas file association (HKA -> HKCU under PrivilegesRequired=lowest).
+; Only written when the "associate" task is selected; cleaned up on uninstall.
+Root: HKA; Subkey: "Software\Classes\.atlas\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.atlas"; ValueType: string; ValueName: ""; ValueData: "{#MyAppProgId}"; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\{#MyAppProgId}"; ValueType: string; ValueName: ""; ValueData: "Spine Atlas File"; Flags: uninsdeletekey; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\{#MyAppProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\{#MyAppProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: associate
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
