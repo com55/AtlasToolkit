@@ -250,14 +250,12 @@ def _get_running_executable_path() -> Path:
 
 
 def _install_dir() -> Path:
-    """The per-user install directory the Inno Setup installer targets.
-
-    {userpf}\\AtlasToolkit == %LOCALAPPDATA%\\Programs\\AtlasToolkit — deliberately
-    separate from the config/update dir (%LOCALAPPDATA%\\AtlasToolkit) so the
-    installer's [InstallDelete] never wipes config or an in-progress update.
-    """
+    """The per-user install directory the Inno Setup installer targets
+    (%LOCALAPPDATA%\\AtlasToolkit). The installer upgrades cleanly by running the
+    previous version's uninstaller first, which removes only installer-tracked
+    files and leaves the app's config / update cache (in the same dir) intact."""
     base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    return (base / "Programs" / "AtlasToolkit").resolve()
+    return (base / "AtlasToolkit").resolve()
 
 
 def _is_installed_build() -> bool:

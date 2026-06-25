@@ -24,9 +24,7 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
 ; Per-user install — no admin / no UAC, so silent self-update works unattended.
 PrivilegesRequired=lowest
-; {userpf} == %LOCALAPPDATA%\Programs — kept separate from the app's data dir
-; (%LOCALAPPDATA%\AtlasToolkit) so [InstallDelete] never wipes config / updates.
-DefaultDirName={userpf}\{#MyAppName}
+DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 ; Force the fixed install location that _is_installed_build() / silent self-update
@@ -61,12 +59,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Associate .atlas files with {#MyAppName}"; GroupDescription: "File associations:"
 
-[InstallDelete]
-; Clear the previous install payload before copying the new one so stale Nuitka
-; DLLs / data files from an older version never linger (onedir upgrades).
-; {app} is the program dir only — the app's config/update data lives elsewhere.
-Type: filesandordirs; Name: "{app}\*"
-
 [Files]
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
@@ -92,3 +84,46 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 ; On uninstall, drop the update cache (downloaded installers / logs / scripts);
 ; user config (config.json) in the same data dir is intentionally left intact.
 Filename: "{cmd}"; Parameters: "/c rmdir /s /q ""{localappdata}\{#MyAppName}\update"""; Flags: runhidden; RunOnceId: "DelUpdateCache"
+
+[Code]
+{ Clean upgrade without blunt deletion: run the PREVIOUS version's uninstaller
+  before installing the new files. It removes only what the old version installed
+  (per its uninstall log) — so stale files from a dropped dependency are cleaned —
+  while leaving app-created data (config.json, update cache) untouched. }
+
+function GetUninstallString(): String;
+var
+  Key: String;
+  S: String;
+begin
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{AADE8604-EC9B-491C-92FA-D0628C934556}_is1';
+  S := '';
+  if not RegQueryStringValue(HKCU, Key, 'UninstallString', S) then
+    RegQueryStringValue(HKLM, Key, 'UninstallString', S);
+  Result := S;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  UnInstStr, OldExe: String;
+  ResultCode, Waited: Integer;
+begin
+  if CurStep <> ssInstall then
+    Exit;
+  UnInstStr := GetUninstallString();
+  if UnInstStr = '' then
+    Exit;
+  UnInstStr := RemoveQuotes(UnInstStr);
+  OldExe := ExtractFilePath(UnInstStr) + '{#MyAppExeName}';
+  if Exec(UnInstStr, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    { The uninstaller relaunches a temp copy and returns early; wait until the old
+      exe is actually gone so it can't delete our freshly-copied files (cap ~20s). }
+    Waited := 0;
+    while FileExists(OldExe) and (Waited < 100) do
+    begin
+      Sleep(200);
+      Waited := Waited + 1;
+    end;
+  end;
+end;
