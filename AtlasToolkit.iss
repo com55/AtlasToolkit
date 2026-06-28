@@ -46,7 +46,7 @@ AppMutex={#MyAppMutex}
 SetupMutex=AtlasToolkitSetupMutex
 ; CloseApplications=yes lets silent self-update shut down the running app via
 ; Restart Manager. RestartApplications=no keeps interactive installs on [Run];
-; self-update passes /RESTARTAPPLICATIONS on the command line to relaunch.
+; self-update relaunch (with preserved argv) is handled by the update runner script.
 CloseApplications=yes
 RestartApplications=no
 ; Notify the shell when the .atlas association changes (refreshes icons / Open With).
@@ -78,7 +78,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-; Interactive install only — the silent self-update relaunch is owned by the updater cmd.
+; Interactive install only — silent self-update relaunch is handled by the update runner script.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

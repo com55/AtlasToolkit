@@ -482,7 +482,11 @@ class Api:
         return self._updates.download()
 
     def restart_and_install_update(self) -> dict[str, Any]:
-        return self._updates.restart_and_install()
+        def _close_window() -> None:
+            if self._window:
+                self._window.destroy()
+
+        return self._updates.restart_and_install(on_success=_close_window)
 
     def _run_update_check(self) -> None:
         try:
