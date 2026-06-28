@@ -21,7 +21,8 @@ from atlas_toolkit.core.document import (
     Region,
     UpdatedRegionData,
 )
-from atlas_toolkit.atlas.repacker import repack_single_page
+from atlas_toolkit.atlas.repacker import repack_from_sprites, repack_single_page
+from atlas_toolkit.core.region_ops import extract_raw_sprite
 
 
 def parse_atlas(
@@ -303,7 +304,11 @@ class AtlasModifier:
     # ------------------------------------------------------------------ #
 
     def merge_mod_image(
-        self, mod_image_path: Path, selected_regions: List[str]
+        self,
+        mod_image_path: Path,
+        selected_regions: List[str],
+        *,
+        prepared_mod: Optional[Tuple[Image.Image, int, int, bool]] = None,
     ) -> Tuple[Image.Image, str]:
         """
         Merges a mod image onto the base atlas canvas for the selected regions.
@@ -317,55 +322,14 @@ class AtlasModifier:
         if not selected_regions:
             raise ValueError("No regions selected for modification")
 
-        mod_img = Image.open(mod_image_path).convert("RGBA")
+        if prepared_mod is not None:
+            mod_img, mod_w, mod_h, shared_canvas_mod = prepared_mod
+        else:
+            mod_img, mod_w, mod_h, shared_canvas_mod = self._prepare_mod_image(
+                mod_image_path, selected_regions
+            )
 
         base_w, base_h = self.base_image.size
-        mod_w, mod_h = mod_img.size
-
-        logging.info(f"Base: {base_w}x{base_h}, Mod: {mod_w}x{mod_h}")
-
-        # offsets format: [left, bottom, originalWidth, originalHeight] (Spine spec)
-        (
-            orig_canvas_w,
-            orig_canvas_h,
-            base_orig_w,
-            base_orig_h,
-            off_x_orig,
-            off_y_orig,
-            is_full_canvas,
-        ) = self._resolve_mod_canvas(selected_regions, mod_w, mod_h)
-
-        if is_full_canvas:
-            logging.info("Mod image treated as full canvas replacement")
-
-        # Pad trimmed sprite mods onto the logical canvas.
-        # Full-canvas mods (combined multi-region sheets, or mod ≈ canvas size)
-        # are pasted at (0, 0) — trim offsets only apply to partial sprites.
-        if not is_full_canvas and (
-            mod_w != orig_canvas_w or mod_h != orig_canvas_h
-        ):
-            scale_x = (orig_canvas_w / base_orig_w) if base_orig_w > 0 else 1
-            scale_y = (orig_canvas_h / base_orig_h) if base_orig_h > 0 else 1
-            paste_x = round(off_x_orig * scale_x)
-            paste_y = orig_canvas_h - mod_h - round(off_y_orig * scale_y)
-            logging.info(
-                f"Padding mod image to canvas: "
-                f"{orig_canvas_w}x{orig_canvas_h} at ({paste_x}, {paste_y})"
-            )
-            padded_mod = Image.new(
-                "RGBA", (orig_canvas_w, orig_canvas_h), (0, 0, 0, 0)
-            )
-            padded_mod.paste(mod_img, (paste_x, paste_y))
-            mod_img = padded_mod
-            mod_w, mod_h = orig_canvas_w, orig_canvas_h
-
-        shared_canvas_mod = (
-            is_full_canvas and self._selected_share_canvas(selected_regions)
-        )
-        if shared_canvas_mod:
-            logging.info(
-                "Shared logical canvas: all selected regions use one atlas area"
-            )
 
         # --- Find the best placement ---
         best = self._find_best_placement(
@@ -427,6 +391,80 @@ class AtlasModifier:
 
         return merged, new_atlas_text
 
+    def _prepare_mod_image(
+        self, mod_image_path: Path, selected_regions: List[str]
+    ) -> Tuple[Image.Image, int, int, bool]:
+        """Load and pad a mod image for the selected regions' logical canvas."""
+        mod_img = Image.open(mod_image_path).convert("RGBA")
+
+        base_w, base_h = self.base_image.size
+        mod_w, mod_h = mod_img.size
+
+        logging.info(f"Base: {base_w}x{base_h}, Mod: {mod_w}x{mod_h}")
+
+        (
+            orig_canvas_w,
+            orig_canvas_h,
+            base_orig_w,
+            base_orig_h,
+            off_x_orig,
+            off_y_orig,
+            is_full_canvas,
+        ) = self._resolve_mod_canvas(selected_regions, mod_w, mod_h)
+
+        if is_full_canvas:
+            logging.info("Mod image treated as full canvas replacement")
+
+        if not is_full_canvas and (
+            mod_w != orig_canvas_w or mod_h != orig_canvas_h
+        ):
+            scale_x = (orig_canvas_w / base_orig_w) if base_orig_w > 0 else 1
+            scale_y = (orig_canvas_h / base_orig_h) if base_orig_h > 0 else 1
+            paste_x = round(off_x_orig * scale_x)
+            paste_y = orig_canvas_h - mod_h - round(off_y_orig * scale_y)
+            logging.info(
+                f"Padding mod image to canvas: "
+                f"{orig_canvas_w}x{orig_canvas_h} at ({paste_x}, {paste_y})"
+            )
+            padded_mod = Image.new(
+                "RGBA", (orig_canvas_w, orig_canvas_h), (0, 0, 0, 0)
+            )
+            padded_mod.paste(mod_img, (paste_x, paste_y))
+            mod_img = padded_mod
+            mod_w, mod_h = orig_canvas_w, orig_canvas_h
+
+        shared_canvas_mod = (
+            is_full_canvas and self._selected_share_canvas(selected_regions)
+        )
+        if shared_canvas_mod:
+            logging.info(
+                "Shared logical canvas: all selected regions use one atlas area"
+            )
+
+        return mod_img, mod_w, mod_h, shared_canvas_mod
+
+    def repack_with_modded_sprites(
+        self,
+        modded_sprites: Dict[str, Image.Image],
+        *,
+        full_canvas_regions: Optional[set[str]] = None,
+    ) -> Tuple[Image.Image, str]:
+        """Unpack base sprites, overlay *modded_sprites*, then shelf-pack."""
+        sprites: Dict[str, Image.Image] = {
+            name: extract_raw_sprite(self.base_image, region)
+            for name, region in self.regions.items()
+        }
+        logging.info("Repack: extracted %s sprites from base", len(sprites))
+        for name, sprite in modded_sprites.items():
+            if name in sprites:
+                sprites[name] = sprite
+        result = repack_from_sprites(
+            sprites,
+            self.atlas_text,
+            full_canvas_regions=full_canvas_regions,
+        )
+        return result.image, result.atlas_text
+
     def save(self, output_dir: Path, merged_image: Image.Image, atlas_text: str) -> Path:
         """
         Save the merged PNG, updated atlas text, and copy .skel if it exists.
@@ -459,6 +497,6 @@ class AtlasModifier:
         merged_image: Image.Image,
         atlas_text: str,
     ) -> Tuple[Image.Image, str]:
-        """Repack all regions into an optimally-sized canvas."""
+        """Repack all regions from an already-merged canvas (legacy helper)."""
         result = repack_single_page(merged_image, atlas_text)
         return result.image, result.atlas_text

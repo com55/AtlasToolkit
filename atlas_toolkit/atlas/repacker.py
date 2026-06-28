@@ -165,7 +165,26 @@ def repack_single_page(
         name: extract_raw_sprite(merged_image, region)
         for name, region in regions.items()
     }
-    log.info("Repack: extracted %s sprites", len(sprites))
+    return repack_from_sprites(
+        sprites, atlas_text, page_info=page_info, deduplicate=deduplicate
+    )
+
+
+def repack_from_sprites(
+    sprites: Dict[str, Image.Image],
+    atlas_text: str,
+    *,
+    page_info: Optional[Dict[str, object]] = None,
+    deduplicate: bool = True,
+    full_canvas_regions: Optional[set[str]] = None,
+) -> RepackSingleResult:
+    """Shelf-pack *sprites* and emit updated single-page atlas text."""
+    if page_info is None:
+        page_info, region_names, regions = _parse_atlas(atlas_text)
+    else:
+        _, region_names, regions = _parse_atlas(atlas_text)
+
+    log.info("Repack: packing %s sprites", len(sprites))
 
     if deduplicate:
         canonical_map = _deduplicate_sprites(sprites, region_names)
@@ -188,6 +207,7 @@ def repack_single_page(
     )
 
     region_data: Dict[str, tuple] = {}
+    full_canvas = full_canvas_regions or set()
     for name in region_names:
         if name not in canonical_map:
             continue
@@ -197,15 +217,27 @@ def repack_single_page(
         orig_sprite = sprites[name]
         bounds = (px, py, orig_sprite.width, orig_sprite.height)
         info = regions[name]
+        if name in full_canvas:
+            offsets: Optional[Tuple[int, int, int, int]] = (
+                0,
+                0,
+                orig_sprite.width,
+                orig_sprite.height,
+            )
+        else:
+            offsets = info.offsets
         region_data[name] = (
             bounds,
-            info.offsets,
+            offsets,
             rotate_val,
             info.to_meta_dict(),
         )
 
     new_atlas_text = AtlasDocument.from_rebuild_args(
-        page_info, (canvas_w, canvas_h), region_names, region_data
+        page_info or _parse_atlas(atlas_text)[0],
+        (canvas_w, canvas_h),
+        region_names,
+        region_data,
     ).serialize()
     return RepackSingleResult(image=canvas, atlas_text=new_atlas_text)
 
@@ -220,8 +252,11 @@ def repack_multi_page(
     num_pages: int,
     page_infos: List[Dict[str, object]],
     region_metas: Dict[str, Dict[str, object]],
+    *,
+    full_canvas_regions: Optional[set[str]] = None,
 ) -> Tuple[List[Image.Image], str]:
     """Repack sprites across multiple pages; emit canonical atlas via AtlasDocument."""
+    full_canvas = full_canvas_regions or set()
     sprite_names = list(all_sprites.keys())
     if not sprite_names or num_pages == 0:
         return [], ""
@@ -286,6 +321,9 @@ def repack_multi_page(
             sprite = all_sprites[name]
             meta = region_metas.get(name, {})
             rotate_val = 90 if rotated else 0
+            offsets: Optional[Tuple[int, int, int, int]] = None
+            if name in full_canvas:
+                offsets = (0, 0, sprite.width, sprite.height)
             page_regions.append(
                 Region(
                     name=name,
@@ -296,6 +334,7 @@ def repack_multi_page(
                     w=sprite.width,
                     h=sprite.height,
                     rotate=rotate_val,
+                    offsets=offsets,
                     index=int(meta["index"]) if isinstance(meta.get("index"), int) else -1,
                     split=list(meta["split"]) if isinstance(meta.get("split"), (list, tuple)) else None,
                     pad=list(meta["pad"]) if isinstance(meta.get("pad"), (list, tuple)) else None,

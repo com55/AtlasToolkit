@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -12,33 +11,26 @@ import threading
 import time
 import webbrowser
 import webview
-from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urlparse
 
 from atlas_toolkit.app.config import AppConfig
+from atlas_toolkit.app.preview_cache import PreviewCache
 from atlas_toolkit.app.session import AtlasSession, ModifyResult, ModifyViewData
 from atlas_toolkit.update.controller import UpdateController
 from atlas_toolkit.update.updater import get_current_version
-
-if TYPE_CHECKING:
-    from PIL.Image import Image
 
 log = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png"}
 
 
-def _image_to_base64(img: Image) -> str:
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
-
-
-def _modify_view_to_payload(view: ModifyViewData) -> dict[str, object]:
+def _modify_view_to_payload(
+    view: ModifyViewData, cache: PreviewCache
+) -> dict[str, object]:
     payload: dict[str, object] = {
-        "image": _image_to_base64(view.image),
+        "image": cache.store_image(view.image, "modify_page_0"),
         "regions": view.regions,
         "overlayRects": view.overlay_rects,
         "pages": view.pages,
@@ -51,9 +43,21 @@ def _modify_view_to_payload(view: ModifyViewData) -> dict[str, object]:
     return payload
 
 
-def _modify_result_to_payload(result: ModifyResult) -> dict[str, object]:
+def _modify_result_to_payload(
+    result: ModifyResult, cache: PreviewCache
+) -> dict[str, object]:
+    page_key = "modify_page_0"
+    extra = result.extra or {}
+    preview_page = extra.get("previewPage")
+    pages = extra.get("pages")
+    if isinstance(pages, list) and pages and isinstance(preview_page, str):
+        try:
+            page_key = f"modify_page_{pages.index(preview_page)}"
+        except ValueError:
+            pass
+
     payload: dict[str, object] = {
-        "image": _image_to_base64(result.image),
+        "image": cache.store_image(result.image, page_key),
         "regions": result.regions,
         "overlayRects": result.overlay_rects,
         "modifiedRegions": result.modified_regions,
@@ -71,6 +75,7 @@ class Api:
         self._session = AtlasSession()
         self._config = AppConfig()
         self._updates = UpdateController(pending_failure=pending_update_failure)
+        self._preview_cache = PreviewCache()
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -80,6 +85,19 @@ class Api:
 
     def set_pref(self, key: str, value: Any) -> None:
         self._config.set(key, value)
+
+    def has_pending_modifications(self) -> bool:
+        return self._session.has_pending_modifications()
+
+    def _confirm_discard_modifications(self) -> bool:
+        if not self._session.has_pending_modifications():
+            return True
+        if not self._window:
+            return False
+        return self._window.create_confirmation_dialog(
+            "Discard modifications?",
+            "You have unsaved atlas modifications. Continue and discard them?",
+        )
 
     def startup_check(self) -> bool:
         time.sleep(0.5)
@@ -131,6 +149,50 @@ class Api:
             return self.load_atlas(result[0])
         return False
 
+    def pick_page_image(self, page_name: str, default_dir: str = "") -> Optional[str]:
+        if not self._window:
+            return None
+        file_types = ("PNG images (*.png)",)
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=file_types,
+            directory=default_dir or None,
+        )
+        if not result:
+            return None
+        path = result[0]
+        if not path.lower().endswith(".png"):
+            return None
+        return path
+
+    def _prompt_missing_page_images(
+        self, missing_pages: list[str], atlas_dir: str
+    ) -> Optional[dict[str, str]]:
+        if not self._window or not missing_pages:
+            return {}
+        pages_json = json.dumps(missing_pages)
+        atlas_dir_json = json.dumps(atlas_dir)
+        holder: dict[str, object] = {}
+        done = threading.Event()
+
+        def on_result(value: object) -> None:
+            holder["value"] = value
+            done.set()
+
+        self._window.evaluate_js(
+            f"showMissingAtlasImages({pages_json}, {atlas_dir_json})",
+            on_result,
+        )
+        if not done.wait(timeout=600.0):
+            return None
+        value = holder.get("value")
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+        return {str(k): str(v) for k, v in value.items()}
+
     def load_atlas(self, path_str: str) -> bool:
         log.debug("load_atlas received path: %r", path_str)
         if not self._window:
@@ -140,31 +202,30 @@ class Api:
             atlas_path = Path(path_str)
             content = atlas_path.read_text(encoding="utf-8")
             page_images: dict[str, Path] = {}
+            resolved_pages = self._session.resolve_page_images(atlas_path, content)
 
-            for page_name, resolved in self._session.resolve_page_images(
-                atlas_path, content
-            ).items():
+            for page_name, resolved in resolved_pages.items():
                 if resolved is not None:
                     page_images[page_name] = resolved
-                    continue
 
-                self._window.evaluate_js(
-                    f"alert('Image \\\"{page_name}\\\" not found. Please locate it.')"
+            missing_pages = [
+                name for name, resolved in resolved_pages.items() if resolved is None
+            ]
+            if missing_pages:
+                selected = self._prompt_missing_page_images(
+                    missing_pages, str(atlas_path.parent)
                 )
-                file_types = (
-                    f"{Path(page_name).stem} (*{Path(page_name).suffix})",
-                    "All files (*.*)",
-                )
-                result = self._window.create_file_dialog(
-                    webview.FileDialog.OPEN,
-                    allow_multiple=False,
-                    file_types=file_types,
-                    directory=str(atlas_path.parent),
-                )
-                if result:
-                    page_images[page_name] = Path(result[0])
-                else:
-                    self._window.evaluate_js("alert('Load cancelled.')")
+                if selected is None:
+                    return False
+                for page_name, image_path in selected.items():
+                    page_images[page_name] = Path(image_path)
+
+                still_missing = [
+                    name
+                    for name in self._session.required_page_names(content)
+                    if name not in page_images
+                ]
+                if still_missing:
                     return False
 
             self._session.load(atlas_path, page_images)
@@ -173,7 +234,8 @@ class Api:
             )
             return True
         except Exception as e:
-            self._window.evaluate_js(f"alert('Error: {str(e)}')")
+            msg = json.dumps(f"Error: {e}")
+            self._window.evaluate_js(f"showToast({msg}, 'error')")
             return False
 
     def get_region_names(self) -> List[str]:
@@ -181,18 +243,20 @@ class Api:
 
     def get_preview(self, names: List[str]) -> Optional[str]:
         img = self._session.get_preview_image(names)
-        return _image_to_base64(img) if img else None
+        if img is None:
+            return None
+        return self._preview_cache.store_image(img, "view_preview")
 
-    def save_preview_image(
-        self, png_data_url: str, default_filename: str = "merged.png"
+    def save_preview(
+        self, region_names: List[str], default_filename: str = "merged.png"
     ) -> str:
+        """Save the composited extract preview for *region_names* via a save dialog."""
         if not self._window:
             return "Error: Window not ready."
-        try:
-            b64 = png_data_url.split(",", 1)[1] if "," in png_data_url else png_data_url
-            data = base64.b64decode(b64)
-        except Exception as e:
-            return f"Error: Invalid image data ({e})."
+
+        img = self._session.get_preview_image(region_names)
+        if img is None:
+            return "Error: No image to save."
 
         default_dir = (
             str(self._session.atlas_path.parent) if self._session.atlas_path else ""
@@ -205,10 +269,11 @@ class Api:
         if not result:
             return "Cancelled"
         try:
-            Path(result[0]).write_bytes(data)
+            Path(result[0]).parent.mkdir(parents=True, exist_ok=True)
+            img.save(result[0], format="PNG")
             return f"Saved to {result[0]}"
         except Exception as e:
-            log.error("Save preview image error: %s", e)
+            log.error("Save preview error: %s", e)
             return f"Error: {e}"
 
     def extract_files(self, region_names: Optional[List[str]]) -> str:
@@ -259,18 +324,19 @@ class Api:
         view = self._session.enter_modify_mode()
         if view is not None:
             log.debug("Entered modify mode")
-            return _modify_view_to_payload(view)
+            return _modify_view_to_payload(view, self._preview_cache)
         return None
 
     def reset_modify_mode(self) -> Optional[dict[str, object]]:
         view = self._session.reset_modify_mode()
         if view is not None:
             log.debug("Reset modify mode to original atlas")
-            return _modify_view_to_payload(view)
+            return _modify_view_to_payload(view, self._preview_cache)
         return None
 
     def exit_modify_mode(self) -> None:
         self._session.exit_modify_mode()
+        self._preview_cache.clear()
         log.debug("Exited modify mode")
 
     def select_mod_image(
@@ -301,11 +367,13 @@ class Api:
             if self._window:
                 self._window.evaluate_js("showToast('Error processing mod image.', 'error')")
             return None
-        return _modify_result_to_payload(result)
+        return _modify_result_to_payload(result, self._preview_cache)
 
     def get_modify_page_preview(self, index: int) -> Optional[str]:
         img = self._session.get_modify_page_image(index)
-        return _image_to_base64(img) if img else None
+        if img is None:
+            return None
+        return self._preview_cache.store_image(img, f"modify_page_{index}")
 
     def save_modified(self) -> str:
         if not self._session.has_merged_output() or not self._window:
@@ -329,7 +397,7 @@ class Api:
 
     def toggle_repack(self, repack: bool) -> Optional[dict[str, object]]:
         result = self._session.toggle_repack(repack)
-        return _modify_result_to_payload(result) if result else None
+        return _modify_result_to_payload(result, self._preview_cache) if result else None
 
     def debug_log(self, msg: str) -> None:
         log.debug("JS: %s", msg)
@@ -346,9 +414,27 @@ class Api:
                 return
 
             path_lower = path.lower()
+
+            if self._window:
+                missing_open = self._window.evaluate_js(
+                    "typeof isMissingDialogOpen === 'function' && isMissingDialogOpen()"
+                )
+                if missing_open:
+                    if not path_lower.endswith(".png"):
+                        return
+                    path_json = json.dumps(path)
+                    client_x = e.get("clientX")
+                    client_y = e.get("clientY")
+                    if client_x is not None and client_y is not None:
+                        self._window.evaluate_js(
+                            f"applyMissingImageDrop({path_json}, {client_x}, {client_y})"
+                        )
+                    return
+
             if path_lower.endswith(".atlas"):
-                if self.load_atlas(path) and self._window:
-                    self._window.evaluate_js("onAtlasLoadedFromPython()")
+                if self._window:
+                    path_json = json.dumps(path)
+                    self._window.evaluate_js(f"requestLoadAtlas({path_json})")
             elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                 if self._session.modifier:
                     self._handle_image_drop(path)
@@ -418,12 +504,12 @@ def setup_drop(window: webview.Window, api: Api) -> None:
     try:
         from webview.dom import DOMEventHandler
 
-        def _no_op(e: Any) -> None:
+        def _drag_over_no_op(_e: Any) -> None:
             pass
 
         log.debug("Binding drop events...")
         doc = window.dom.document
-        doc.events.dragover += DOMEventHandler(_no_op, True, True, debounce=500)  # type: ignore[operator]
+        doc.events.dragover += DOMEventHandler(_drag_over_no_op, True, True)  # type: ignore[operator]
         doc.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
         log.debug("Drop events bound.")
     except Exception as e:

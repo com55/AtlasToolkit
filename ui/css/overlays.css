@@ -88,6 +88,126 @@
 .btn-secondary:active {
   background-color: #2d2d2d;
 }
+
+.btn-primary:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+}
+
+.missing-images-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.55);
+  z-index: 2600;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(2px);
+}
+
+.missing-images-overlay.missing-images-file-drag {
+  cursor: not-allowed;
+}
+
+.missing-images-overlay.missing-images-file-drag .missing-images-dialog {
+  cursor: not-allowed;
+}
+
+.missing-images-overlay.missing-images-file-drag .missing-images-row.missing-images-drop-target {
+  cursor: copy;
+}
+
+.missing-images-dialog {
+  width: min(680px, calc(100vw - 24px));
+  max-height: min(80vh, 760px);
+  overflow: hidden;
+  background-color: #252526;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: modalPop 0.2s ease-out;
+}
+
+.missing-images-title {
+  margin: 0;
+  font-size: 18px;
+  color: #e5e5e5;
+}
+
+.missing-images-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #b7b7b7;
+}
+
+.missing-images-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  min-width: 0;
+}
+
+.missing-images-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  background-color: #2b2b2b;
+}
+
+.missing-images-row.selected {
+  border-color: #0e639c;
+}
+
+.missing-images-row.drag-over {
+  border-color: #0e639c;
+  border-style: dashed;
+  background-color: #28415a;
+}
+
+.missing-images-page {
+  color: #e4e4e4;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.missing-images-status {
+  color: #a6a6a6;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.missing-images-row.selected .missing-images-status {
+  color: #d8ecff;
+}
+
+.missing-images-btn {
+  height: 30px;
+}
+
+.missing-images-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
 /* Context Menu */
 #context-menu {
   position: fixed;

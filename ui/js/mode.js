@@ -16,9 +16,6 @@ function clearRegionSelection() {
 }
 
 function setMode(mode) {
-  if (mode !== currentMode) {
-    clearRegionSelection();
-  }
   currentMode = mode;
   const extractControls = document.getElementById("extract-controls");
   const modifyControls = document.getElementById("modify-controls");
@@ -41,6 +38,8 @@ function setMode(mode) {
     clearOverlay();
   }
   updateModeToggleUI();
+  renderSelection();
+  updateButtons();
 
   if (mode === "extract") {
     updatePreview(getSelectedNames());
@@ -65,10 +64,13 @@ async function enterModifyMode() {
   }
 }
 async function exitModifyMode() {
+  const ok = await confirmDiscardModifications();
+  if (!ok) return false;
   try {
     await pywebview.api.exit_modify_mode();
   } catch (e) {
     console.error(e);
+    return false;
   }
   setMode("extract");
   modifyRegionBounds = {};
@@ -81,8 +83,6 @@ async function exitModifyMode() {
   modifiedRegionNames = new Set();
   renderRegionList();
   clearOverlay();
-  // Restore preview from current selection
-  previewImg.style.display = "none";
-  resetPreview();
-  setStatus("Ready");
+  await updatePreview(getSelectedNames());
+  return true;
 }

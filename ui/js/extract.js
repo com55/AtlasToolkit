@@ -1,16 +1,4 @@
 // Atlas Toolkit UI module
-function getPreviewPngBlob() {
-  const img = previewImg;
-  if (!img.naturalWidth || !img.naturalHeight) return null;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  canvas.getContext("2d").drawImage(img, 0, 0);
-
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-}
-
 function previewSaveDefaultName(names) {
   if (!names || names.length === 0) return "image.png";
   const safe = names.map((n) => n.replace(/[<>:"/\\|?*]/g, "_"));
@@ -21,22 +9,15 @@ function previewSaveDefaultName(names) {
 }
 
 async function saveMergedImage() {
+  const names = getSelectedNames();
+  if (!names.length) {
+    showToast("No regions selected.", "error");
+    return;
+  }
+
   try {
-    const blob = await getPreviewPngBlob();
-    if (!blob) {
-      showToast("No image to save.", "error");
-      return;
-    }
-
-    const reader = new FileReader();
-    const dataUrl = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-
-    const defaultName = previewSaveDefaultName(getSelectedNames());
-    const result = await pywebview.api.save_preview_image(dataUrl, defaultName);
+    const defaultName = previewSaveDefaultName(names);
+    const result = await pywebview.api.save_preview(names, defaultName);
     if (result === "Cancelled") {
       showToast(result, "info");
     } else if (result.startsWith("Error")) {
@@ -75,4 +56,3 @@ async function extractAll() {
   showToast(result, result.includes("Error") ? "error" : "success");
   setStatus("Ready");
 }
-
