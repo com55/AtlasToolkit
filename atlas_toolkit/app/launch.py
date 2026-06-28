@@ -9,22 +9,29 @@ from typing import Optional
 import webview
 
 from atlas_toolkit.app.bridge import Api, setup_drop
-from atlas_toolkit.paths import resource_path
+from atlas_toolkit.paths import is_source_run, resource_path
 from atlas_toolkit.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
 
 
-def _consume_launch_flags(argv: list[str]) -> tuple[list[str], Optional[dict[str, str]]]:
+def _consume_launch_flags(
+    argv: list[str],
+) -> tuple[list[str], Optional[dict[str, str]], bool]:
     clean_args: list[str] = []
     failed = False
     failed_log = ""
     failed_release_url = ""
     failed_message = ""
+    debug = False
 
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg == "--debug":
+            debug = True
+            i += 1
+            continue
         if arg == "--update-install-failed":
             failed = True
             i += 1
@@ -51,7 +58,7 @@ def _consume_launch_flags(argv: list[str]) -> tuple[list[str], Optional[dict[str
             "logPath": failed_log,
             "releaseUrl": failed_release_url,
         }
-    return clean_args, payload
+    return clean_args, payload, debug
 
 
 def configure_stdio() -> None:
@@ -73,8 +80,14 @@ def run() -> None:
     configure_stdio()
     configure_logging()
 
-    clean_argv, pending_failure = _consume_launch_flags(sys.argv[1:])
+    clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
+
+    webview_debug = debug_requested and is_source_run()
+    if debug_requested and not webview_debug:
+        log.info("--debug is only available when running from source; ignored.")
+    elif webview_debug:
+        log.info("pywebview debug mode enabled (--debug).")
 
     if sys.platform == "win32":
         try:
@@ -116,7 +129,12 @@ def run() -> None:
 
     if window:
         api.set_window(window)
+
+        def on_closing() -> bool:
+            return api._confirm_discard_modifications()
+
+        window.events.closing += on_closing
     else:
         sys.exit(1)
 
-    webview.start(func=setup_drop, args=(window, api))
+    webview.start(func=setup_drop, args=(window, api), debug=webview_debug)

@@ -31,6 +31,8 @@ function applyModifyView(data, statusText) {
 
 async function resetModify() {
   if (!hasModImage) return;
+  const ok = await showConfirm(RESET_MOD_MESSAGE, "Reset modifications?");
+  if (!ok) return;
   try {
     const data = await pywebview.api.reset_modify_mode();
     if (data) {
@@ -44,29 +46,6 @@ async function resetModify() {
     console.error(e);
     showToast("Failed to reset modifications.", "error");
   }
-}
-
-async function exitModifyMode() {
-  try {
-    await pywebview.api.exit_modify_mode();
-  } catch (e) {
-    console.error(e);
-  }
-  setMode("extract");
-  modifyRegionBounds = {};
-  modifyOverlayRects = {};
-  modifyPages = [];
-  modifyRegionPages = {};
-  modifyActivePageIndex = 0;
-  document.getElementById("modify-page-switcher").classList.add("hidden");
-  hasModImage = false;
-  modifiedRegionNames = new Set();
-  renderRegionList();
-  clearOverlay();
-  // Restore preview from current selection
-  previewImg.style.display = "none";
-  resetPreview();
-  setStatus("Ready");
 }
 
 async function modifySelected() {
@@ -157,9 +136,6 @@ function setupModifyPages(data) {
   if (modifyPages.length > 1) {
     switcher.classList.remove("hidden");
     updatePageIndicator();
-    // Multi-page always repacks all pages; the per-page repack toggle is
-    // inert here (and toggling it post-merge errors), so hide it.
-    repackOptions.classList.add("hidden");
   } else {
     switcher.classList.add("hidden");
     repackOptions.classList.remove("hidden");

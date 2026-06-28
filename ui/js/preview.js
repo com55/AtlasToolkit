@@ -143,9 +143,9 @@ async function updatePreview(names) {
     return;
   }
 
-  const base64Img = await pywebview.api.get_preview(names);
-  if (base64Img) {
-    previewImg.src = base64Img;
+  const previewUrl = await pywebview.api.get_preview(names);
+  if (previewUrl) {
+    previewImg.src = previewUrl;
     previewImg.style.display = "block";
     if (names.length === 1) {
       status.innerText = `Previewing: ${names[0]}`;

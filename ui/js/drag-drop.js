@@ -9,6 +9,7 @@ var dropOverlay = document.getElementById("drop-overlay");
 // 2. Window logic to show/hide overlay
 window.addEventListener("dragenter", (e) => {
   e.preventDefault();
+  if (typeof isMissingDialogOpen === "function" && isMissingDialogOpen()) return;
   if (e.dataTransfer.types.includes("Files")) {
     dropOverlay.classList.remove("hidden");
     dropOverlay.style.pointerEvents = "auto";
@@ -32,6 +33,10 @@ dropOverlay.addEventListener("drop", (e) => {
   e.preventDefault();
   dropOverlay.classList.add("hidden");
   dropOverlay.style.pointerEvents = "none";
+  if (typeof isMissingDialogOpen === "function" && isMissingDialogOpen()) {
+    e.stopPropagation();
+    return;
+  }
   // Python handler (DOMEventHandler) will continue to process the file
 });
 

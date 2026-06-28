@@ -1,5 +1,7 @@
 // Atlas Toolkit UI module
 async function openFile() {
+  const ok = await confirmDiscardModifications();
+  if (!ok) return;
   try {
     const success = await pywebview.api.choose_file();
     if (success) {
@@ -28,3 +30,17 @@ async function loadRegions() {
   }
   updateModeToggleUI();
 }
+
+async function requestLoadAtlas(path) {
+  const ok = await confirmDiscardModifications();
+  if (!ok) return;
+  try {
+    const success = await pywebview.api.load_atlas(path);
+    if (success) {
+      await onAtlasLoadedFromPython();
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+window.requestLoadAtlas = requestLoadAtlas;

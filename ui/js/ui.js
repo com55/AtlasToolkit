@@ -1,7 +1,27 @@
 // Atlas Toolkit UI module
+const DISCARD_MOD_MESSAGE =
+  "You have unsaved atlas modifications.\nContinue and discard them?";
+const RESET_MOD_MESSAGE =
+  "Reset all modifications and restore the original atlas preview?";
+
 function setStatus(text) {
   document.getElementById("status-text").innerText = text;
 }
+
+async function confirmDiscardModifications(
+  message = DISCARD_MOD_MESSAGE,
+  title = "Discard modifications?"
+) {
+  let pending = false;
+  try {
+    pending = await pywebview.api.has_pending_modifications();
+  } catch (e) {
+    pending = hasModImage || modifiedRegionNames.size > 0;
+  }
+  if (!pending) return true;
+  return showConfirm(message, title);
+}
+
 function showConfirm(message, title = "Confirm") {
   return new Promise((resolve) => {
     const overlay = document.getElementById("modal-overlay");
@@ -50,7 +70,7 @@ function showToast(message, type = "info") {
   const container = document.getElementById("toast-container");
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
-  toast.innerText = message;
+  toast.textContent = message;
 
   container.appendChild(toast);
 
@@ -66,5 +86,5 @@ function showToast(message, type = "info") {
     toast.addEventListener("animationend", () => {
       toast.remove();
     });
-  }, 3000);
+  }, 5000);
 }
