@@ -44,8 +44,9 @@ WizardStyle=modern
 ; installer from running concurrently.
 AppMutex={#MyAppMutex}
 SetupMutex=AtlasToolkitSetupMutex
-; During a silent self-update, close the running app via Restart Manager; the
-; updater cmd handles relaunch, so don't let Inno restart it (avoids double-launch).
+; CloseApplications=yes lets silent self-update shut down the running app via
+; Restart Manager. RestartApplications=no keeps interactive installs on [Run];
+; self-update passes /RESTARTAPPLICATIONS on the command line to relaunch.
 CloseApplications=yes
 RestartApplications=no
 ; Notify the shell when the .atlas association changes (refreshes icons / Open With).
