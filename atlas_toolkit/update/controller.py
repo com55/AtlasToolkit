@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import sys
 import threading
 import time
@@ -23,13 +22,11 @@ from atlas_toolkit.update.updater import (
 
 log = logging.getLogger(__name__)
 
-# Runner invokes Inno after this process exits (AppMutex blocks while we are alive).
-# Relaunch with preserved argv is done by the runner — not Inno Restart Manager.
-_INNO_SILENT_INSTALL_FLAGS = (
+# Inno closes the running app via Restart Manager; relaunch argv is handled in the PS runner.
+_INNO_SILENT_INSTALL_ARGS = (
     "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
-    "/CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
+    "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
 )
-_PID_WAIT_MAX_ITERATIONS = 90
 
 
 def get_update_dir() -> Path:
@@ -149,48 +146,46 @@ def get_relaunch_executable_path() -> Path:
     return get_running_executable_path()
 
 
-def _batch_quote(value: str) -> str:
-    """Quote and escape a value for a cmd.exe double-quoted string."""
-    escaped = value.replace("^", "^^").replace('"', '^"')
-    return f'"{escaped}"'
+def _ps_single_quoted(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
-def build_update_runner_script(
-    installer_path: Path,
-    target_exe: Path,
-    pid: int,
-    relaunch_args: list[str],
-    inno_log_path: Path,
-) -> str:
-    """Wait for app exit, run Inno, relaunch with saved command-line args."""
-    inst = _batch_quote(str(installer_path))
-    exe = _batch_quote(str(target_exe))
-    log_path = _batch_quote(str(inno_log_path))
-    relaunch_suffix = " ".join(_batch_quote(a) for a in relaunch_args)
-    success_launch = f'start "" {exe} {relaunch_suffix}'.rstrip()
+def build_update_runner_ps1(inno_log_path: Path, pending_json_path: Path) -> str:
+    """PowerShell runner: Inno silent install (force-close app) then relaunch with saved argv."""
+    log_literal = _ps_single_quoted(str(inno_log_path))
+    pending_literal = _ps_single_quoted(str(pending_json_path))
+    inno_args_literal = _ps_single_quoted(_INNO_SILENT_INSTALL_ARGS)
 
     lines = [
-        "@echo off",
-        "setlocal",
-        "set /a wait_count=0",
-        ":waitloop",
-        f'tasklist /FI "PID eq {pid}" 2>nul | find /I " {pid} " >nul',
-        "if not errorlevel 1 (",
-        "    set /a wait_count+=1",
-        f'    if %wait_count% geq {_PID_WAIT_MAX_ITERATIONS} goto runinstaller',
-        "    ping -n 2 127.0.0.1 >nul",
-        "    goto waitloop",
-        ")",
-        ":runinstaller",
-        f"{inst} {_INNO_SILENT_INSTALL_FLAGS} /LOG={log_path}",
-        "if errorlevel 1 goto cleanup",
-        success_launch,
-        ":cleanup",
-        'start "" /min cmd /c del /f /q "%~f0"',
-        "endlocal",
-        "exit /b 0",
+        "$ErrorActionPreference = 'Stop'",
+        f"$Meta = Get-Content -LiteralPath {pending_literal} -Raw | ConvertFrom-Json",
+        f"$InnoArgs = ({inno_args_literal} -split ' ') + @('/LOG=' + {log_literal})",
+        "$Proc = Start-Process -FilePath $Meta.installer_path -ArgumentList $InnoArgs -Wait -PassThru",
+        "if ($Proc.ExitCode -ne 0) { exit $Proc.ExitCode }",
+        "if ($Meta.relaunch_args -and @($Meta.relaunch_args).Count -gt 0) {",
+        "    Start-Process -FilePath $Meta.target_exe_path -ArgumentList @($Meta.relaunch_args)",
+        "} else {",
+        "    Start-Process -FilePath $Meta.target_exe_path",
+        "}",
+        "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
     ]
     return "\r\n".join(lines) + "\r\n"
+
+
+def _shell_execute(file: str, params: str, work_dir: str) -> None:
+    """Launch a process via ShellExecute (independent of our process tree)."""
+    import ctypes
+
+    result = ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
+        None,
+        "open",
+        file,
+        params,
+        work_dir,
+        0,  # SW_HIDE
+    )
+    if result <= 32:
+        raise OSError(f"ShellExecuteW failed with code {result}")
 
 
 class UpdateController:
@@ -379,37 +374,39 @@ class UpdateController:
             }
 
         update_dir = get_update_dir()
+        pending_json_path = update_dir / "pending_update.json"
+        pending_json_path.write_text(
+            json.dumps(
+                {
+                    "installer_path": str(installer_path),
+                    "target_exe_path": str(target_exe),
+                    "relaunch_args": self._relaunch_args,
+                    "version": self._version or "",
+                    "release_url": self._release_url or "",
+                },
+                ensure_ascii=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         inno_log_path = update_dir / f"inno_install_{timestamp}.log"
-        script_text = build_update_runner_script(
-            installer_path=installer_path,
-            target_exe=target_exe,
-            pid=os.getpid(),
-            relaunch_args=self._relaunch_args,
-            inno_log_path=inno_log_path,
+        script_path = update_dir / f"install_update_{timestamp}.ps1"
+        script_path.write_text(
+            build_update_runner_ps1(inno_log_path, pending_json_path),
+            encoding="utf-8",
         )
-        script_path = update_dir / f"install_update_{timestamp}_{os.getpid()}.cmd"
 
         try:
-            script_path.write_text(script_text, encoding="utf-8")
-            cmd_exe = os.environ.get("COMSPEC") or "cmd"
-            popen_kwargs: dict[str, Any] = {
-                "cwd": str(update_dir),
-                "close_fds": True,
-            }
-            if sys.platform == "win32":
-                popen_kwargs["creationflags"] = (
-                    subprocess.DETACHED_PROCESS
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
-                    | subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                popen_kwargs["start_new_session"] = True
-
-            # Runner waits for this PID; exit immediately so Inno AppMutex is released.
-            subprocess.Popen([cmd_exe, "/d", "/c", str(script_path)], **popen_kwargs)
+            ps_params = (
+                f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass '
+                f'-File "{script_path}"'
+            )
+            _shell_execute("powershell.exe", ps_params, str(update_dir))
+            # Exit soon so Inno /FORCECLOSEAPPLICATIONS can shut us down cleanly.
             threading.Timer(0.25, lambda: os._exit(0)).start()
-            log.info("Launched update runner (pid=%s): %s", os.getpid(), script_path.name)
+            log.info("Launched update runner via ShellExecute: %s", script_path.name)
             return {"ok": True}
         except Exception as e:
             return {
