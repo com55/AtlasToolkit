@@ -5,7 +5,8 @@ let lastClickIndex = -1;
 let isDragSelecting = false;
 let dragStartIndex = -1;
 let currentMode = "extract"; // 'extract' | 'modify'
-let modifyRegionBounds = {}; // {name: [x, y, w, h], ...}
+let modifyRegionBounds = {}; // {name: [x, y, w, h, rotate], ...} — atlas bounds
+let modifyOverlayRects = {}; // {name: [x, y, w, h], ...} — pre-computed draw rects
 let hasModImage = false;
 // Multi-page modify state
 let modifyPages = []; // ordered page filenames
@@ -119,6 +120,7 @@ function updateModifyActionButtons() {
 
 function applyModifyView(data, statusText) {
   modifyRegionBounds = data.regions || {};
+  modifyOverlayRects = data.overlayRects || {};
   setupModifyPages(data);
   modifiedRegionNames = new Set(data.modifiedRegions || []);
   renderRegionList();
@@ -167,6 +169,7 @@ async function exitModifyMode() {
   }
   setMode("extract");
   modifyRegionBounds = {};
+  modifyOverlayRects = {};
   modifyPages = [];
   modifyRegionPages = {};
   modifyActivePageIndex = 0;
@@ -207,6 +210,9 @@ function onModPreviewReceived(data) {
   // Update region bounds from merged atlas
   if (data.regions) {
     modifyRegionBounds = data.regions;
+  }
+  if (data.overlayRects) {
+    modifyOverlayRects = data.overlayRects;
   }
   if (data.modifiedRegions) {
     modifiedRegionNames = new Set(data.modifiedRegions);
@@ -661,22 +667,20 @@ function drawRegionOverlay() {
   for (const name of names) {
     if (activePage && modifyRegionPages[name] && modifyRegionPages[name] !== activePage)
       continue;
-    const bounds = modifyRegionBounds[name];
+    const bounds = modifyOverlayRects[name] || modifyRegionBounds[name];
     if (!bounds) continue;
-    const [bx, by, bw, bh, rotate] = bounds;
+    const [bx, by, bw, bh] = bounds.length >= 5
+      ? (() => {
+          const [x, y, w, h, rotate] = bounds;
+          const isRotated = rotate === 90 || rotate === 270;
+          return [x, y, isRotated ? h : w, isRotated ? w : h];
+        })()
+      : bounds;
 
-    // Bounds store ORIGINAL dimensions (before rotation)
-    // Overlay needs to show STORED dimensions (after rotation)
-    // So swap w/h when rotated
-    const isRotated = rotate === 90 || rotate === 270;
-    const drawW = isRotated ? bh : bw;
-    const drawH = isRotated ? bw : bh;
-
-    // Convert to screen coords
     const rx = topLeftX + bx * scale;
     const ry = topLeftY + by * scale;
-    const rw = drawW * scale;
-    const rh = drawH * scale;
+    const rw = bw * scale;
+    const rh = bh * scale;
 
     // Draw rect — expand outward by lineWidth
     ctx.strokeStyle = "rgba(255, 60, 60, 0.85)";
@@ -1057,6 +1061,7 @@ window.onAtlasLoadedFromPython = async () => {
   if (currentMode === "modify") {
     setMode("extract");
     modifyRegionBounds = {}; // Clear modify state
+    modifyOverlayRects = {};
     hasModImage = false;
     modifiedRegionNames = new Set();
   }
