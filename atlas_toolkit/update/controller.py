@@ -149,6 +149,12 @@ def get_relaunch_executable_path() -> Path:
     return get_running_executable_path()
 
 
+def _batch_quote(value: str) -> str:
+    """Quote and escape a value for a cmd.exe double-quoted string."""
+    escaped = value.replace("^", "^^").replace('"', '^"')
+    return f'"{escaped}"'
+
+
 def build_update_runner_script(
     installer_path: Path,
     target_exe: Path,
@@ -157,11 +163,11 @@ def build_update_runner_script(
     inno_log_path: Path,
 ) -> str:
     """Wait for app exit, run Inno, relaunch with saved command-line args."""
-    inst = str(installer_path)
-    exe = str(target_exe)
-    log_path = str(inno_log_path)
-    relaunch_suffix = " ".join(f'"{a}"' for a in relaunch_args)
-    success_launch = f'start "" "{exe}" {relaunch_suffix}'.rstrip()
+    inst = _batch_quote(str(installer_path))
+    exe = _batch_quote(str(target_exe))
+    log_path = _batch_quote(str(inno_log_path))
+    relaunch_suffix = " ".join(_batch_quote(a) for a in relaunch_args)
+    success_launch = f'start "" {exe} {relaunch_suffix}'.rstrip()
 
     lines = [
         "@echo off",
@@ -176,11 +182,13 @@ def build_update_runner_script(
         "    goto waitloop",
         ")",
         ":runinstaller",
-        f'"{inst}" {_INNO_SILENT_INSTALL_FLAGS} /LOG="{log_path}"',
-        "if errorlevel 1 exit /b 1",
+        f"{inst} {_INNO_SILENT_INSTALL_FLAGS} /LOG={log_path}",
+        "if errorlevel 1 goto cleanup",
         success_launch,
-        'del /f /q "%~f0" >nul 2>nul',
+        ":cleanup",
+        'start "" /min cmd /c del /f /q "%~f0"',
         "endlocal",
+        "exit /b 0",
     ]
     return "\r\n".join(lines) + "\r\n"
 
