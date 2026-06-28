@@ -42,7 +42,7 @@ SolidCompression=yes
 WizardStyle=modern
 ; SetupMutex prevents concurrent installers. AppMutex is intentionally omitted:
 ; with /SUPPRESSMSGBOXES Inno aborts on AppMutex before /FORCECLOSEAPPLICATIONS runs.
-; Silent self-update passes /FORCECLOSEAPPLICATIONS; relaunch argv uses the PS runner.
+; Silent self-update passes /FORCECLOSEAPPLICATIONS; relaunch argv uses relaunch_after_*.ps1.
 SetupMutex=AtlasToolkitSetupMutex
 ; CloseApplications=yes — used with /FORCECLOSEAPPLICATIONS for silent self-update.
 CloseApplications=yes
@@ -76,7 +76,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-; Interactive install only — silent self-update relaunch is handled by install_update.ps1.
+; Interactive install only — silent self-update relaunch is handled by relaunch_after_*.ps1.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
