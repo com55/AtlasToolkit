@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 GITHUB_REPO = "com55/AtlasToolkit"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
-WINDOWS_ZIP_ASSET_NAME = "AtlasToolkit-Windows-x64.zip"
+# The self-update flow downloads and silently runs the Inno Setup installer.
+WINDOWS_INSTALLER_ASSET_NAME = "AtlasToolkit-Setup-x64.exe"
 
 
 class ReleaseAsset(NamedTuple):
@@ -48,29 +49,28 @@ def is_running_as_exe() -> bool:
 
 def get_current_version() -> str:
     """Read version from VERSION file when running as exe, pyproject.toml when in dev."""
-    from pathlib import Path
+    from atlas_toolkit.paths import app_root
 
+    root = app_root()
     if is_running_as_exe():
-        # Nuitka embeds VERSION next to the exe via include-data-files
-        version_file = Path(__file__).parent / "VERSION"
+        version_file = root / "VERSION"
         try:
             if version_file.exists():
                 return version_file.read_text(encoding="utf-8-sig").strip()
         except Exception:
             pass
         return "0.0.0"
-    else:
-        # Dev mode — read from pyproject.toml
-        try:
-            toml_path = Path(__file__).parent / "pyproject.toml"
-            if toml_path.exists():
-                for line in toml_path.read_text(encoding="utf-8-sig").splitlines():
-                    line = line.strip()
-                    if line.startswith("version"):
-                        return line.split("=", 1)[1].strip().strip('"\'')
-        except Exception:
-            pass
-        return "0.0.0"
+
+    try:
+        toml_path = root / "pyproject.toml"
+        if toml_path.exists():
+            for line in toml_path.read_text(encoding="utf-8-sig").splitlines():
+                line = line.strip()
+                if line.startswith("version"):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+    except Exception:
+        pass
+    return "0.0.0"
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -131,24 +131,24 @@ def get_latest_release_info() -> ReleaseInfo:
     )
 
 
-def find_windows_asset(assets: list[ReleaseAsset]) -> ReleaseAsset:
-    """Find the exact Windows zip asset produced by CI."""
+def find_windows_installer_asset(assets: list[ReleaseAsset]) -> ReleaseAsset:
+    """Find the Windows installer (Setup.exe) asset produced by CI."""
     for asset in assets:
-        if asset.name == WINDOWS_ZIP_ASSET_NAME:
+        if asset.name == WINDOWS_INSTALLER_ASSET_NAME:
             return asset
     raise FileNotFoundError(
-        f"Release asset '{WINDOWS_ZIP_ASSET_NAME}' was not found in latest release"
+        f"Release asset '{WINDOWS_INSTALLER_ASSET_NAME}' was not found in latest release"
     )
 
 
-def download_update_zip(
+def download_update_asset(
     download_url: str,
-    target_zip_path: Path,
+    target_path: Path,
     progress_cb: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> Path:
-    """Download update zip to a target path using streaming I/O."""
-    target_zip_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = target_zip_path.with_suffix(target_zip_path.suffix + ".part")
+    """Download an update asset (the installer exe) to a target path via streaming I/O."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_path.with_suffix(target_path.suffix + ".part")
 
     downloaded = 0
     total: Optional[int] = None
@@ -179,15 +179,15 @@ def download_update_zip(
             pass
         raise
 
-    temp_path.replace(target_zip_path)
+    temp_path.replace(target_path)
 
-    if not target_zip_path.exists() or target_zip_path.stat().st_size <= 0:
-        raise IOError("Downloaded update zip is missing or empty")
+    if not target_path.exists() or target_path.stat().st_size <= 0:
+        raise IOError("Downloaded update asset is missing or empty")
 
     if progress_cb:
-        progress_cb(target_zip_path.stat().st_size, total)
+        progress_cb(target_path.stat().st_size, total)
 
-    return target_zip_path
+    return target_path
 
 
 def check_for_updates() -> UpdateInfo | None:

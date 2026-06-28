@@ -10,4 +10,4 @@ wheels/
 .venv
 .vscode
 .claude
-test*
+CONTEXT.md
