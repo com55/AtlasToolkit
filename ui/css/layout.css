@@ -1,0 +1,161 @@
+/* App Bar */
+#app-bar {
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  background-color: #252526;
+  border-bottom: 1px solid #444;
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+.app-bar-left {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.app-bar-right {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#btn-save-mod {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+#status-text {
+  font-size: 12px;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-bar-divider {
+  width: 1px;
+  height: 20px;
+  background-color: #444;
+  flex-shrink: 0;
+}
+
+.app-bar-panel-divider {
+  height: auto;
+  align-self: stretch;
+  width: 1px;
+  background-color: #444;
+  flex-shrink: 0;
+}
+
+.mode-toggle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #555;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mode-toggle-btn {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 0;
+  background-color: #3c3c3c;
+  color: #888;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mode-toggle-btn.mode-view.active {
+  background-color: #3d7a8a;
+  color: white;
+}
+
+.mode-toggle-btn.mode-edit.active {
+  background-color: #8a7344;
+  color: white;
+}
+
+.mode-toggle-btn.active {
+  color: white;
+}
+
+.mode-toggle-btn:disabled {
+  background-color: #333;
+  color: #555;
+  cursor: not-allowed;
+}
+
+.mode-toggle-btn + .mode-toggle-btn {
+  border-left: 1px solid #555;
+}
+
+/* Main Layout */
+#main-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+#left-panel {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background-color: #1e1e1e;
+  border-right: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+#sidebar-head,
+#repack-options,
+#status-bar {
+  height: var(--panel-header-h);
+  min-height: var(--panel-header-h);
+  padding: 0 15px;
+  background-color: #252526;
+  border-bottom: 1px solid #444;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+#sidebar-head {
+  font-size: 12px;
+  font-weight: bold;
+  color: #aaa;
+}
+
+#repack-options {
+  padding: 0 10px;
+}
+
+#status-bar {
+  padding: 0 12px;
+}
+
+#right-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: #333;
+  position: relative;
+}
