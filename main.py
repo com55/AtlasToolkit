@@ -604,6 +604,31 @@ class Api:
             log.error("Preview error: %s", e)
         return None
 
+    def save_preview_image(self, png_data_url: str, default_filename: str = "merged.png") -> str:
+        """Save a PNG data URL (same bytes as preview copy) via save dialog."""
+        if not self._window:
+            return "Error: Window not ready."
+        try:
+            b64 = png_data_url.split(",", 1)[1] if "," in png_data_url else png_data_url
+            data = base64.b64decode(b64)
+        except Exception as e:
+            return f"Error: Invalid image data ({e})."
+
+        default_dir = str(self._atlas_path.parent) if self._atlas_path else ""
+        result = self._window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            directory=default_dir,
+            save_filename=default_filename,
+        )
+        if not result:
+            return "Cancelled"
+        try:
+            Path(result[0]).write_bytes(data)
+            return f"Saved to {result[0]}"
+        except Exception as e:
+            log.error("Save preview image error: %s", e)
+            return f"Error: {e}"
+
     def _image_to_base64(self, img: Image) -> str:
         """Convert a PIL Image to a base64 data URI string."""
         buffered = BytesIO()

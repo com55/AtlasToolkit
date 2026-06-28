@@ -26,6 +26,15 @@ window.addEventListener("pywebviewready", async function () {
   const repackPref = await pywebview.api.get_pref("repack", false);
   document.getElementById("chk-repack").checked = repackPref;
 
+  document.getElementById("mode-extract").addEventListener("click", async () => {
+    if (currentMode === "extract") return;
+    await exitModifyMode();
+  });
+  document.getElementById("mode-modify").addEventListener("click", async () => {
+    if (currentMode === "modify") return;
+    await enterModifyMode();
+  });
+
   const loaded = await pywebview.api.startup_check();
   if (loaded) await loadRegions();
 });
@@ -33,30 +42,57 @@ window.addEventListener("pywebviewready", async function () {
 // ==========================================
 //  MODE SWITCHING
 // ==========================================
+function setStatus(text) {
+  document.getElementById("status-text").innerText = text;
+}
+
+function updateModeToggleUI() {
+  const extractBtn = document.getElementById("mode-extract");
+  const modifyBtn = document.getElementById("mode-modify");
+  extractBtn.classList.toggle("active", currentMode === "extract");
+  modifyBtn.classList.toggle("active", currentMode === "modify");
+  const count = parseInt(document.getElementById("count").innerText, 10) || 0;
+  modifyBtn.disabled = count === 0;
+}
+
+function clearRegionSelection() {
+  selectedIndices.clear();
+  lastClickIndex = -1;
+  renderSelection();
+  updateButtons();
+}
+
 function setMode(mode) {
+  if (mode !== currentMode) {
+    clearRegionSelection();
+  }
   currentMode = mode;
-  const normalHeader = document.getElementById("normal-header");
-  const modifyHeader = document.getElementById("modify-header");
   const extractControls = document.getElementById("extract-controls");
   const modifyControls = document.getElementById("modify-controls");
   const repackOptions = document.getElementById("repack-options");
+  const saveBtn = document.getElementById("btn-save-mod");
   const dropMsg = document.getElementById("drop-message-text");
 
   if (mode === "modify") {
-    normalHeader.classList.add("hidden");
-    modifyHeader.classList.remove("hidden");
     extractControls.classList.add("hidden");
     modifyControls.classList.remove("hidden");
     repackOptions.classList.remove("hidden");
+    saveBtn.classList.remove("hidden");
     dropMsg.textContent = "Drop image to modify, or .atlas to load";
   } else {
-    normalHeader.classList.remove("hidden");
-    modifyHeader.classList.add("hidden");
     extractControls.classList.remove("hidden");
     modifyControls.classList.add("hidden");
     repackOptions.classList.add("hidden");
+    saveBtn.classList.add("hidden");
     dropMsg.textContent = "Drop .atlas file here to load";
-    clearOverlay(); // Clear region overlay when exiting modify mode
+    clearOverlay();
+  }
+  updateModeToggleUI();
+
+  if (mode === "extract") {
+    updatePreview(getSelectedNames());
+  } else {
+    updateModifyPreview(getSelectedNames());
   }
 }
 
@@ -86,7 +122,7 @@ function applyModifyView(data, statusText) {
   setupModifyPages(data);
   modifiedRegionNames = new Set(data.modifiedRegions || []);
   renderRegionList();
-  document.getElementById("modify-status-text").innerText = statusText;
+  setStatus(statusText);
   updateModifyActionButtons();
   previewImg.src = data.image;
   previewImg.style.display = "block";
@@ -142,8 +178,7 @@ async function exitModifyMode() {
   // Restore preview from current selection
   previewImg.style.display = "none";
   resetPreview();
-  document.getElementById("status-text").innerText = "Ready";
-  updatePreview(getSelectedNames());
+  setStatus("Ready");
 }
 
 async function modifySelected() {
@@ -153,15 +188,13 @@ async function modifySelected() {
     return;
   }
   try {
-    document.getElementById("modify-status-text").innerText =
-      "Selecting mod image...";
+    setStatus("Selecting mod image...");
     const repack = document.getElementById("chk-repack").checked;
     const result = await pywebview.api.select_mod_image(names, repack);
     if (result) {
       onModPreviewReceived(result);
     } else {
-      document.getElementById("modify-status-text").innerText =
-        "Cancelled or no image selected.";
+      setStatus("Cancelled or no image selected.");
     }
   } catch (e) {
     console.error(e);
@@ -183,8 +216,7 @@ function onModPreviewReceived(data) {
   setupModifyPages(data);
   previewImg.src = data.image;
   previewImg.style.display = "block";
-  document.getElementById("modify-status-text").innerText =
-    "Mod image merged. Ready to save.";
+  setStatus("Mod image merged. Ready to save.");
   updateModifyActionButtons();
 
   previewImg.onload = function () {
@@ -194,8 +226,7 @@ function onModPreviewReceived(data) {
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
 
-    document.getElementById("modify-status-text").innerText =
-      `Merged preview (${imgW}x${imgH}). Ready to save.`;
+    setStatus(`Merged preview (${imgW}x${imgH}). Ready to save.`);
 
     if (imgW > containerW || imgH > containerH) {
       const scaleW = containerW / imgW;
@@ -209,14 +240,14 @@ function onModPreviewReceived(data) {
 
 async function saveModified() {
   try {
-    document.getElementById("modify-status-text").innerText = "Saving...";
+    setStatus("Saving...");
     const result = await pywebview.api.save_modified();
     if (result.startsWith("Error") || result === "Cancelled") {
       showToast(result, result === "Cancelled" ? "info" : "error");
     } else {
       showToast(result, "success");
     }
-    document.getElementById("modify-status-text").innerText = result;
+    setStatus(result);
   } catch (e) {
     console.error(e);
     showToast("Save failed.", "error");
@@ -289,10 +320,9 @@ function modifyPageNext() {
 document.getElementById("chk-repack").addEventListener("change", async (e) => {
   pywebview.api.set_pref("repack", e.target.checked);
   if (!hasModImage) return;
-  const statusEl = document.getElementById("modify-status-text");
-  statusEl.innerText = e.target.checked
-    ? "Applying repack..."
-    : "Reverting repack...";
+  setStatus(
+    e.target.checked ? "Applying repack..." : "Reverting repack...",
+  );
   try {
     const result = await pywebview.api.toggle_repack(e.target.checked);
     if (result) {
@@ -331,13 +361,12 @@ async function loadRegions() {
   document.getElementById("count").innerText = regionsData.length;
   renderRegionList();
   if (regionsData.length > 0) {
-    document.getElementById("status-text").innerText = "Atlas loaded.";
-    document.getElementById("btn-enter-modify").disabled = false;
+    setStatus("Atlas loaded.");
     document.getElementById("btn-extract-all").disabled = false;
   } else {
-    document.getElementById("btn-enter-modify").disabled = true;
     document.getElementById("btn-extract-all").disabled = true;
   }
+  updateModeToggleUI();
 }
 
 function regionDisplayName(name) {
@@ -483,13 +512,17 @@ function updateModifyPreview(names) {
   // Pure client-side: just redraw overlay canvas
   drawRegionOverlay();
   if (!names || names.length === 0) {
-    document.getElementById("modify-status-text").innerText = hasModImage
-      ? "Mod image merged. Ready to save."
-      : "Select regions and click Modify Selected";
+    setStatus(
+      hasModImage
+        ? "Mod image merged. Ready to save."
+        : "Select regions and click Modify Selected",
+    );
   } else {
-    document.getElementById("modify-status-text").innerText = hasModImage
-      ? `Merged preview. ${names.length} region(s) selected.`
-      : `${names.length} region(s) selected`;
+    setStatus(
+      hasModImage
+        ? `Merged preview. ${names.length} region(s) selected.`
+        : `${names.length} region(s) selected`,
+    );
   }
 }
 
@@ -685,6 +718,7 @@ async function updatePreview(names) {
   if (!names || names.length === 0) {
     previewImg.style.display = "none";
     status.innerText = "No selection";
+    updateButtons();
     return;
   }
 
@@ -717,11 +751,13 @@ async function updatePreview(names) {
         viewState.scale = Math.min(scaleW, scaleH);
         applyTransform();
       }
+      updateButtons();
       previewImg.onload = null;
     };
   } else {
     previewImg.style.display = "none";
     status.innerText = "Preview failed";
+    updateButtons();
   }
 }
 
@@ -768,22 +804,81 @@ function updateButtons() {
   btnSel.disabled = selectedIndices.size === 0;
   btnSel.innerText = `Extract Selected (${selectedIndices.size})`;
 
-  // Update modify button state too
   const btnModSel = document.getElementById("btn-modify-sel");
   if (btnModSel) {
     btnModSel.disabled = selectedIndices.size === 0;
     btnModSel.innerText = `Modify Selected (${selectedIndices.size})`;
+  }
+
+  const btnSaveMerged = document.getElementById("btn-save-merged");
+  if (btnSaveMerged) {
+    const hasPreview =
+      previewImg.style.display !== "none" &&
+      previewImg.naturalWidth > 0 &&
+      previewImg.naturalHeight > 0;
+    btnSaveMerged.disabled = !hasPreview;
+  }
+}
+
+function getPreviewPngBlob() {
+  const img = previewImg;
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext("2d").drawImage(img, 0, 0);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+function previewSaveDefaultName(names) {
+  if (!names || names.length === 0) return "image.png";
+  const safe = names.map((n) => n.replace(/[<>:"/\\|?*]/g, "_"));
+  if (safe.length === 1) return `${safe[0]}.png`;
+  if (safe.length <= 5) return `${safe.join("+")}.png`;
+  const more = safe.length - 5;
+  return `${safe.slice(0, 5).join("+")}+ ${more} more.png`;
+}
+
+async function saveMergedImage() {
+  try {
+    const blob = await getPreviewPngBlob();
+    if (!blob) {
+      showToast("No image to save.", "error");
+      return;
+    }
+
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    const defaultName = previewSaveDefaultName(getSelectedNames());
+    const result = await pywebview.api.save_preview_image(dataUrl, defaultName);
+    if (result === "Cancelled") {
+      showToast(result, "info");
+    } else if (result.startsWith("Error")) {
+      showToast(result, "error");
+    } else {
+      showToast(result, "success");
+    }
+  } catch (e) {
+    console.error(e);
+    showToast("Failed to save image.", "error");
   }
 }
 
 async function extractSelected() {
   if (selectedIndices.size === 0) return;
   const names = Array.from(selectedIndices).map((i) => regionsData[i]);
-  document.getElementById("status-text").innerText = "Extracting...";
+  setStatus("Extracting...");
   const result = await pywebview.api.extract_files(names);
 
   showToast(result, result.includes("Error") ? "error" : "success");
-  document.getElementById("status-text").innerText = "Ready";
+  setStatus("Ready");
 }
 
 async function extractAll() {
@@ -795,11 +890,11 @@ async function extractAll() {
   );
   if (!confirmed) return;
 
-  document.getElementById("status-text").innerText = "Extracting ALL...";
+  setStatus("Extracting ALL...");
   const result = await pywebview.api.extract_files(null);
 
   showToast(result, result.includes("Error") ? "error" : "success");
-  document.getElementById("status-text").innerText = "Ready";
+  setStatus("Ready");
 }
 
 // --- Modal Logic ---
@@ -1011,24 +1106,9 @@ window.addEventListener("keydown", (e) => {
 async function copyPreviewImage() {
   contextMenu.classList.add("hidden");
   try {
-    // Draw the preview img onto an offscreen canvas and copy as PNG
-    const img = previewImg;
-    if (!img.naturalWidth || !img.naturalHeight) {
-      showToast("No image to copy.", "error");
-      return;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0);
-
-    const blob = await new Promise((resolve) =>
-      canvas.toBlob(resolve, "image/png"),
-    );
+    const blob = await getPreviewPngBlob();
     if (!blob) {
-      showToast("Failed to copy image.", "error");
+      showToast("No image to copy.", "error");
       return;
     }
 
