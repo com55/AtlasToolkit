@@ -1,0 +1,122 @@
+"""Desktop application entry — window creation and pywebview startup."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from typing import Optional
+
+import webview
+
+from atlas_toolkit.app.bridge import Api, setup_drop
+from atlas_toolkit.paths import resource_path
+from atlas_toolkit.update.updater import get_current_version
+
+log = logging.getLogger(__name__)
+
+
+def _consume_launch_flags(argv: list[str]) -> tuple[list[str], Optional[dict[str, str]]]:
+    clean_args: list[str] = []
+    failed = False
+    failed_log = ""
+    failed_release_url = ""
+    failed_message = ""
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--update-install-failed":
+            failed = True
+            i += 1
+            continue
+        if arg == "--update-failed-log" and i + 1 < len(argv):
+            failed_log = argv[i + 1]
+            i += 2
+            continue
+        if arg == "--update-release-url" and i + 1 < len(argv):
+            failed_release_url = argv[i + 1]
+            i += 2
+            continue
+        if arg == "--update-failed-message" and i + 1 < len(argv):
+            failed_message = argv[i + 1]
+            i += 2
+            continue
+        clean_args.append(arg)
+        i += 1
+
+    payload: Optional[dict[str, str]] = None
+    if failed:
+        payload = {
+            "message": failed_message or "Update installation failed. The app was relaunched.",
+            "logPath": failed_log,
+            "releaseUrl": failed_release_url,
+        }
+    return clean_args, payload
+
+
+def configure_stdio() -> None:
+    if sys.stdout:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    if sys.stderr:
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stdout,
+    )
+
+
+def run() -> None:
+    configure_stdio()
+    configure_logging()
+
+    clean_argv, pending_failure = _consume_launch_flags(sys.argv[1:])
+    sys.argv = [sys.argv[0], *clean_argv]
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.CreateMutexW(  # type: ignore[attr-defined]
+                None, False, "AtlasToolkitSingleInstanceMutex"
+            )
+        except Exception:
+            pass
+
+    api = Api(pending_update_failure=pending_failure)
+
+    window_width, window_height = 1200, 800
+    if sys.platform == "win32":
+        import ctypes
+
+        screen_width = ctypes.windll.user32.GetSystemMetrics(0)
+        screen_height = ctypes.windll.user32.GetSystemMetrics(1)
+    else:
+        _scr = webview.screens[0]
+        screen_width, screen_height = _scr.width, _scr.height
+    center_x = (screen_width - window_width) // 2
+    center_y = (screen_height - window_height) // 2
+
+    gui_path = resource_path("ui/index.html")
+    window = webview.create_window(
+        f"Atlas Toolkit v{get_current_version()}",
+        url=str(gui_path.absolute().as_uri()),
+        width=window_width,
+        height=window_height,
+        min_size=(800, 500),
+        x=center_x,
+        y=center_y,
+        resizable=True,
+        js_api=api,
+        background_color="#2b2b2b",
+    )
+
+    if window:
+        api.set_window(window)
+    else:
+        sys.exit(1)
+
+    webview.start(func=setup_drop, args=(window, api))

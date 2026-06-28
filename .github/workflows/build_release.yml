@@ -84,6 +84,7 @@ jobs:
           include-data-files: |
             VERSION=VERSION
           include-package-data: webview
+          include-package: atlas_toolkit
           nofollow-import-to: |
             PyQt5
             PyQt6

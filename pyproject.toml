@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "AtlasToolkit"
 version = "0.2.2"
@@ -9,3 +13,6 @@ dependencies = [
     "pywebview==6.1",
     "requests==2.32.5",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["atlas_toolkit"]

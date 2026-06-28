@@ -49,29 +49,28 @@ def is_running_as_exe() -> bool:
 
 def get_current_version() -> str:
     """Read version from VERSION file when running as exe, pyproject.toml when in dev."""
-    from pathlib import Path
+    from atlas_toolkit.paths import app_root
 
+    root = app_root()
     if is_running_as_exe():
-        # Nuitka embeds VERSION next to the exe via include-data-files
-        version_file = Path(__file__).parent / "VERSION"
+        version_file = root / "VERSION"
         try:
             if version_file.exists():
                 return version_file.read_text(encoding="utf-8-sig").strip()
         except Exception:
             pass
         return "0.0.0"
-    else:
-        # Dev mode — read from pyproject.toml
-        try:
-            toml_path = Path(__file__).parent / "pyproject.toml"
-            if toml_path.exists():
-                for line in toml_path.read_text(encoding="utf-8-sig").splitlines():
-                    line = line.strip()
-                    if line.startswith("version"):
-                        return line.split("=", 1)[1].strip().strip('"\'')
-        except Exception:
-            pass
-        return "0.0.0"
+
+    try:
+        toml_path = root / "pyproject.toml"
+        if toml_path.exists():
+            for line in toml_path.read_text(encoding="utf-8-sig").splitlines():
+                line = line.strip()
+                if line.startswith("version"):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+    except Exception:
+        pass
+    return "0.0.0"
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:

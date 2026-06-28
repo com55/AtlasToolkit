@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 [[package]]
 name = "atlastoolkit"
 version = "0.2.2"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pillow" },
     { name = "pywebview" },
