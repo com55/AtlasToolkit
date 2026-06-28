@@ -118,6 +118,15 @@
           </button>
           <span id="modify-status-text">No mod image loaded</span>
           <button
+            class="action-btn btn-reset"
+            id="btn-reset-mod"
+            onclick="resetModify()"
+            disabled
+            title="Discard all modifications and restore the original atlas"
+          >
+            Reset
+          </button>
+          <button
             class="action-btn btn-save"
             id="btn-save-mod"
             onclick="saveModified()"

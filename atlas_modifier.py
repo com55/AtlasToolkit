@@ -343,12 +343,18 @@ class AtlasModifier:
         self.atlas_text = self._scale_atlas_text(atlas_text)
         _, self.region_names, self.regions = parse_atlas(self.atlas_text)
 
+    def adopt_merge_result(self, image: Image.Image, atlas_text: str) -> None:
+        """Use a merge/repack output as the base for subsequent modifications."""
+        self.base_image = image.convert("RGBA")
+        self.atlas_text = atlas_text
+        _, self.region_names, self.regions = parse_atlas(self.atlas_text)
+
     def _scale_atlas_text(self, atlas_text: str) -> str:
         """If image size differs from atlas page size, return atlas text
         with all coordinates scaled to match the real image."""
         page_info, _, regions = parse_atlas(atlas_text)
         size_str = page_info.get("size")
-        if not size_str:
+        if not isinstance(size_str, str):
             return atlas_text
 
         atlas_w, atlas_h = (int(v.strip()) for v in size_str.split(","))
@@ -382,7 +388,12 @@ class AtlasModifier:
 
     @staticmethod
     def _find_best_placement(
-        base_w: int, base_h: int, mod_w: int, mod_h: int
+        base_w: int,
+        base_h: int,
+        mod_w: int,
+        mod_h: int,
+        *,
+        allow_rotate: bool = True,
     ) -> _PlacementOption:
         """
         Evaluate 4 placement strategies and return the one with the
@@ -432,6 +443,9 @@ class AtlasModifier:
             ),
         ]
 
+        if not allow_rotate:
+            candidates = [c for c in candidates if not c.rotated]
+
         best = min(candidates, key=lambda c: c.canvas_w * c.canvas_h)
 
         for c in candidates:
@@ -442,6 +456,112 @@ class AtlasModifier:
             )
 
         return best
+
+    @staticmethod
+    def _canvas_size_match(
+        mod_w: int,
+        mod_h: int,
+        canvas_w: int,
+        canvas_h: int,
+        tolerance: float = 0.02,
+    ) -> bool:
+        """True when *mod* dimensions match *canvas* within rounding tolerance."""
+        if canvas_w <= 0 or canvas_h <= 0:
+            return False
+        dw = abs(mod_w - canvas_w)
+        dh = abs(mod_h - canvas_h)
+        return (
+            dw <= max(2, round(canvas_w * tolerance))
+            and dh <= max(2, round(canvas_h * tolerance))
+        )
+
+    def _resolve_mod_canvas(
+        self,
+        selected_regions: List[str],
+        mod_w: int,
+        mod_h: int,
+    ) -> Tuple[int, int, int, int, int, int, bool]:
+        """
+        Derive target canvas size and padding anchor for a mod image.
+
+        Returns:
+            (orig_canvas_w, orig_canvas_h, base_orig_w, base_orig_h,
+             off_x, off_y, is_full_canvas)
+        """
+        canvas_sizes: set[Tuple[int, int]] = set()
+        regions_with_offsets: List[RegionInfo] = []
+        for name in selected_regions:
+            region = self.regions.get(name)
+            if region and region.offsets:
+                canvas_sizes.add((region.offsets[2], region.offsets[3]))
+                regions_with_offsets.append(region)
+
+        if regions_with_offsets:
+
+            def _anchor_key(r: RegionInfo) -> tuple[int, int, int]:
+                o = r.offsets
+                assert o is not None
+                return (o[0] + o[1], o[0], o[1])
+
+            base_orig_w, base_orig_h = next(iter(canvas_sizes))
+            anchor = min(regions_with_offsets, key=_anchor_key)
+            anchor_off = anchor.offsets
+            assert anchor_off is not None
+            off_x, off_y = anchor_off[0], anchor_off[1]
+            orig_canvas_w, orig_canvas_h = base_orig_w, base_orig_h
+        else:
+            base_orig_w, base_orig_h = mod_w, mod_h
+            off_x, off_y = 0, 0
+            orig_canvas_w, orig_canvas_h = mod_w, mod_h
+
+        shared_canvas = len(canvas_sizes) == 1 and len(selected_regions) > 1
+
+        # Detect proportional scale (e.g. mod is 2x the expected canvas)
+        if (
+            orig_canvas_w > 0
+            and orig_canvas_h > 0
+            and (mod_w != orig_canvas_w or mod_h != orig_canvas_h)
+        ):
+            ratio_w = mod_w / orig_canvas_w
+            ratio_h = mod_h / orig_canvas_h
+            if abs(ratio_w - ratio_h) < 0.05 and not (0.95 < ratio_w < 1.05):
+                mod_scale = (ratio_w + ratio_h) / 2
+                orig_canvas_w = round(orig_canvas_w * mod_scale)
+                orig_canvas_h = round(orig_canvas_h * mod_scale)
+                logging.info(
+                    f"Mod image scale: {mod_scale:.3f}x "
+                    f"(canvas → {orig_canvas_w}x{orig_canvas_h})"
+                )
+            else:
+                orig_canvas_w = mod_w
+                orig_canvas_h = mod_h
+
+        is_full_canvas = shared_canvas or self._canvas_size_match(
+            mod_w, mod_h, orig_canvas_w, orig_canvas_h
+        )
+        if is_full_canvas:
+            orig_canvas_w, orig_canvas_h = mod_w, mod_h
+            off_x, off_y = 0, 0
+
+        return (
+            orig_canvas_w,
+            orig_canvas_h,
+            base_orig_w,
+            base_orig_h,
+            off_x,
+            off_y,
+            is_full_canvas,
+        )
+
+    def _selected_share_canvas(self, selected_regions: List[str]) -> bool:
+        """True when every selected region shares one logical canvas size."""
+        sizes: set[Tuple[int, int]] = set()
+        for name in selected_regions:
+            region = self.regions.get(name)
+            if not region or not region.offsets:
+                return False
+            sizes.add((region.offsets[2], region.offsets[3]))
+        return len(sizes) == 1 and len(selected_regions) > 1
 
     # ------------------------------------------------------------------ #
     #  Merge                                                               #
@@ -469,47 +589,26 @@ class AtlasModifier:
 
         logging.info(f"Base: {base_w}x{base_h}, Mod: {mod_w}x{mod_h}")
 
-        # Determine original canvas dimensions from the first selected region.
         # offsets format: [left, bottom, originalWidth, originalHeight] (Spine spec)
-        orig_canvas_w, orig_canvas_h = mod_w, mod_h
+        (
+            orig_canvas_w,
+            orig_canvas_h,
+            base_orig_w,
+            base_orig_h,
+            off_x_orig,
+            off_y_orig,
+            is_full_canvas,
+        ) = self._resolve_mod_canvas(selected_regions, mod_w, mod_h)
 
-        first_region = self.regions.get(selected_regions[0])
-        has_offsets = bool(first_region and first_region.offsets)
-        off_x_orig = first_region.offsets[0] if has_offsets else 0
-        off_y_orig = first_region.offsets[1] if has_offsets else 0
-        base_orig_w = first_region.offsets[2] if has_offsets else mod_w
-        base_orig_h = first_region.offsets[3] if has_offsets else mod_h
-        if has_offsets:
-            orig_canvas_w = base_orig_w
-            orig_canvas_h = base_orig_h
+        if is_full_canvas:
+            logging.info("Mod image treated as full canvas replacement")
 
-        # Detect proportional scale (e.g. mod is 2x the expected canvas)
-        if (
-            orig_canvas_w > 0
-            and orig_canvas_h > 0
-            and (mod_w != orig_canvas_w or mod_h != orig_canvas_h)
+        # Pad trimmed sprite mods onto the logical canvas.
+        # Full-canvas mods (combined multi-region sheets, or mod ≈ canvas size)
+        # are pasted at (0, 0) — trim offsets only apply to partial sprites.
+        if not is_full_canvas and (
+            mod_w != orig_canvas_w or mod_h != orig_canvas_h
         ):
-            ratio_w = mod_w / orig_canvas_w
-            ratio_h = mod_h / orig_canvas_h
-            # Uniform scale and not ~1:1 → scale canvas target to match mod
-            if abs(ratio_w - ratio_h) < 0.05 and not (0.95 < ratio_w < 1.05):
-                mod_scale = (ratio_w + ratio_h) / 2
-                orig_canvas_w = round(orig_canvas_w * mod_scale)
-                orig_canvas_h = round(orig_canvas_h * mod_scale)
-                logging.info(
-                    f"Mod image scale: {mod_scale:.3f}x "
-                    f"(canvas → {orig_canvas_w}x{orig_canvas_h})"
-                )
-            else:
-                # Non-proportional scale: treat the mod as a brand-new full
-                # canvas at its own dimensions so it is never clipped. [A1]
-                orig_canvas_w = mod_w
-                orig_canvas_h = mod_h
-
-        # Pad mod image to (possibly scaled) canvas size if needed.
-        # Place the sprite at (left, origH - bottom - spriteH) per the Spine
-        # offset convention so whitespace-trimmed sprites stay aligned. [A2]
-        if mod_w != orig_canvas_w or mod_h != orig_canvas_h:
             scale_x = (orig_canvas_w / base_orig_w) if base_orig_w > 0 else 1
             scale_y = (orig_canvas_h / base_orig_h) if base_orig_h > 0 else 1
             paste_x = round(off_x_orig * scale_x)
@@ -525,8 +624,22 @@ class AtlasModifier:
             mod_img = padded_mod
             mod_w, mod_h = orig_canvas_w, orig_canvas_h
 
+        shared_canvas_mod = (
+            is_full_canvas and self._selected_share_canvas(selected_regions)
+        )
+        if shared_canvas_mod:
+            logging.info(
+                "Shared logical canvas: all selected regions use one atlas area"
+            )
+
         # --- Find the best placement ---
-        best = self._find_best_placement(base_w, base_h, mod_w, mod_h)
+        best = self._find_best_placement(
+            base_w,
+            base_h,
+            mod_w,
+            mod_h,
+            allow_rotate=not shared_canvas_mod,
+        )
         logging.info(f"Chosen placement: {best.label}")
 
         # Rotate the mod image if the best strategy requires it
@@ -562,8 +675,14 @@ class AtlasModifier:
                 atlas_bounds_w,
                 atlas_bounds_h,
             )
+            # Full-canvas mod (typical extract output): packed size equals
+            # original size — no whitespace stripping, omit offsets in atlas.
             new_offsets = (0, 0, atlas_bounds_w, atlas_bounds_h)
-            updated_regions_data[name] = (new_bounds, new_offsets, rotate_val)
+            updated_regions_data[name] = (
+                new_bounds,
+                new_offsets,
+                rotate_val,
+            )
 
         new_atlas_text = update_atlas_text(
             self.atlas_text,

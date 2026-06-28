@@ -345,6 +345,7 @@ class Api:
         # Pre-repack state (merge output before repack was applied)
         self._pre_repack_image: Optional[Image] = None
         self._pre_repack_text: Optional[str] = None
+        self._modified_regions: set[str] = set()
         # Persistent config
         self._config: dict[str, Any] = self._load_config()
         # Update state
@@ -500,6 +501,66 @@ class Api:
         self._merged_pages = None
         self._pre_repack_image = None
         self._pre_repack_text = None
+        self._modified_regions = set()
+
+    def _mark_regions_modified(self, names: List[str]) -> None:
+        self._modified_regions.update(names)
+
+    def _build_modify_response(
+        self,
+        image: Image,
+        atlas_text: str,
+        extra: Optional[dict[str, object]] = None,
+    ) -> dict[str, object]:
+        from atlas_modifier import parse_atlas
+
+        _, _, merged_regions = parse_atlas(atlas_text)
+        region_bounds: dict[str, list[int]] = {}
+        for name, info in merged_regions.items():
+            region_bounds[name] = [*info.bounds, info.rotate]
+
+        payload: dict[str, object] = {
+            "image": self._image_to_base64(image),
+            "regions": region_bounds,
+            "modifiedRegions": sorted(self._modified_regions),
+        }
+        if extra:
+            payload.update(extra)
+        return payload
+
+    @staticmethod
+    def _parse_atlas_page_names(atlas_text: str) -> List[str]:
+        names: List[str] = []
+        for line in atlas_text.splitlines():
+            stripped = line.strip()
+            if (
+                stripped
+                and ":" not in stripped
+                and stripped.lower().endswith(".png")
+            ):
+                names.append(stripped)
+        return names
+
+    def _extract_sprites_from_merged_pages(self) -> dict[str, Image]:
+        from atlas_modifier import AtlasModifier, parse_atlas
+
+        if not self._merged_pages or not self._merged_atlas_text:
+            return {}
+
+        page_names = self._parse_atlas_page_names(self._merged_atlas_text)
+        page_images = {
+            name: self._merged_pages[i]
+            for i, name in enumerate(page_names)
+            if i < len(self._merged_pages)
+        }
+
+        _, _, regions = parse_atlas(self._merged_atlas_text)
+        sprites: dict[str, Image] = {}
+        for name, info in regions.items():
+            page_img = page_images.get(info.page)
+            if page_img is not None:
+                sprites[name] = AtlasModifier._extract_raw_sprite(page_img, info)
+        return sprites
 
     def get_region_names(self) -> List[str]:
         if not self._processor: return []
@@ -594,38 +655,35 @@ class Api:
     #  MODIFY MODE API
     # ==========================================
 
-    def enter_modify_mode(self) -> Optional[dict[str, object]]:
-        """Prepare the AtlasModifier from the current loaded atlas.
-        
-        Returns:
-            Dict with 'image' (base64) and 'regions' ({name: [x,y,w,h]}), or None.
-        """
+    def _build_modify_view(self, *, clear_modified: bool = False) -> Optional[dict[str, object]]:
+        """Rebuild modify mode from the originally-loaded atlas."""
         if not self._processor or not self._atlas_path:
             return None
-        
+
         try:
             atlas_text = self._atlas_path.read_text(encoding='utf-8')
-            
-            # Get the first loaded page image as the base
             base_image = self._processor.get_page_image()
             if not base_image:
                 log.error("No loaded images in processor")
                 return None
-            
-            self._modifier = AtlasModifier(auto_convert_atlas(atlas_text), self._atlas_path, base_image)
+
+            if clear_modified:
+                self._modified_regions = set()
+
             self._merged_image = None
             self._merged_atlas_text = None
             self._merged_pages = None
-            log.debug("Entered modify mode")
+            self._pre_repack_image = None
+            self._pre_repack_text = None
 
-            # Build region bounds dict for client-side overlay
-            # Each value: [x, y, w, h, rotate]
+            self._modifier = AtlasModifier(
+                auto_convert_atlas(atlas_text), self._atlas_path, base_image
+            )
+
             region_bounds: dict[str, list[int]] = {}
             for name, info in self._modifier.regions.items():
                 region_bounds[name] = [*info.bounds, info.rotate]
 
-            # Multi-page metadata (consumed by the page switcher UI). For a
-            # single-page atlas these are a 1-element list / trivial map.
             pages = [p.filename for p in self._processor.pages]
             region_pages = {
                 name: r.page_filename
@@ -638,11 +696,29 @@ class Api:
                 "pages": pages,
                 "regionPages": region_pages,
                 "activePage": pages[0] if pages else None,
+                "modifiedRegions": sorted(self._modified_regions),
             }
-            
         except Exception as e:
-            log.error("Entering modify mode: %s", e)
+            log.error("Building modify view: %s", e)
             return None
+
+    def enter_modify_mode(self) -> Optional[dict[str, object]]:
+        """Prepare the AtlasModifier from the current loaded atlas.
+        
+        Returns:
+            Dict with 'image' (base64) and 'regions' ({name: [x,y,w,h]}), or None.
+        """
+        data = self._build_modify_view(clear_modified=False)
+        if data is not None:
+            log.debug("Entered modify mode")
+        return data
+
+    def reset_modify_mode(self) -> Optional[dict[str, object]]:
+        """Discard all in-session modifications and restore the original atlas view."""
+        data = self._build_modify_view(clear_modified=True)
+        if data is not None:
+            log.debug("Reset modify mode to original atlas")
+        return data
 
     def exit_modify_mode(self) -> None:
         """Clean up modify mode state."""
@@ -701,18 +777,14 @@ class Api:
             
             self._merged_image = merged_image
             self._merged_atlas_text = merged_atlas_text
-            
-            # Parse updated bounds from merged atlas text
-            from atlas_modifier import parse_atlas
-            _, _, merged_regions = parse_atlas(merged_atlas_text)
-            region_bounds: dict[str, list[int]] = {}
-            for name, info in merged_regions.items():
-                region_bounds[name] = [*info.bounds, info.rotate]
-            
-            return {
-                "image": self._image_to_base64(merged_image),
-                "regions": region_bounds,
-            }
+            self._mark_regions_modified(selected_names)
+            # Continue subsequent merges from the pre-repack canvas so toggling
+            # repack off still reflects every mod, not an earlier repacked layout.
+            self._modifier.adopt_merge_result(
+                self._pre_repack_image, self._pre_repack_text
+            )
+
+            return self._build_modify_response(merged_image, merged_atlas_text)
             
         except Exception as e:
             log.error("Processing mod image: %s", e)
@@ -732,12 +804,15 @@ class Api:
             from PIL import Image
             from atlas_modifier import parse_atlas, repack_multi_page
 
-            # 1. Extract every region from every page (offset padding restored).
-            all_sprites: dict[str, Image] = {}
-            for name in self._processor.regions:
-                sprite = self._processor.extract_region(name)
-                if sprite is not None:
-                    all_sprites[name] = sprite
+            # 1. Extract every region (from merged output if continuing a session).
+            if self._merged_pages and self._merged_atlas_text:
+                all_sprites = self._extract_sprites_from_merged_pages()
+            else:
+                all_sprites = {}
+                for name in self._processor.regions:
+                    sprite = self._processor.extract_region(name)
+                    if sprite is not None:
+                        all_sprites[name] = sprite
 
             # 2. Replace the selected regions' sprites with the mod image.
             mod_img = Image.open(Path(path_str)).convert("RGBA")
@@ -777,10 +852,8 @@ class Api:
             self._merged_image = None
             self._pre_repack_image = None
             self._pre_repack_text = None
+            self._mark_regions_modified(selected_names)
 
-            # 5. Region bounds for overlay (all regions across all pages) plus
-            #    the MERGED region→page map (repack redistributed them, so the
-            #    enter_modify_mode map is now stale).
             _, _, merged_regions = parse_atlas(atlas_text)
             region_bounds: dict[str, list[int]] = {}
             region_pages: dict[str, str] = {}
@@ -788,14 +861,16 @@ class Api:
                 region_bounds[name] = [*info.bounds, info.rotate]
                 region_pages[name] = info.page
 
-            return {
-                "image": self._image_to_base64(pages[0]) if pages else None,
-                "regions": region_bounds,
-                "regionPages": region_pages,
-                "pages": [str(pi["page"]) for pi in page_infos],
-                "pageCount": len(pages),
-                "previewPage": str(page_infos[0]["page"]) if page_infos else None,
-            }
+            return self._build_modify_response(
+                pages[0] if pages else Image.new("RGBA", (1, 1)),
+                atlas_text,
+                extra={
+                    "regionPages": region_pages,
+                    "pages": [str(pi["page"]) for pi in page_infos],
+                    "pageCount": len(pages),
+                    "previewPage": str(page_infos[0]["page"]) if page_infos else None,
+                },
+            )
 
         except Exception as e:
             log.error("Processing multi-page mod image: %s", e)
@@ -848,6 +923,8 @@ class Api:
             if self._merged_pages is not None:
                 self._save_multi_page(output_dir)
             else:
+                if not self._modifier or self._merged_image is None:
+                    return "Error: No merged data to save."
                 self._modifier.save(output_dir, self._merged_image, self._merged_atlas_text)
             return f"Saved to: {output_dir}"
         except Exception as e:
@@ -894,17 +971,11 @@ class Api:
 
             self._merged_image = image
             self._merged_atlas_text = text
+            self._modifier.adopt_merge_result(
+                self._pre_repack_image, self._pre_repack_text
+            )
 
-            from atlas_modifier import parse_atlas
-            _, _, merged_regions = parse_atlas(text)
-            region_bounds: dict[str, list[int]] = {}
-            for name, info in merged_regions.items():
-                region_bounds[name] = [*info.bounds, info.rotate]
-
-            return {
-                "image": self._image_to_base64(image),
-                "regions": region_bounds,
-            }
+            return self._build_modify_response(image, text)
         except Exception as e:
             log.error("toggle_repack: %s", e)
             return None
@@ -1216,7 +1287,7 @@ if __name__ == '__main__':
     api = Api()
 
     # Calculate center position for primary monitor
-    window_width, window_height = 900, 600
+    window_width, window_height = 1200, 800
     if sys.platform == 'win32':
         import ctypes
         screen_width = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN

@@ -11,6 +11,7 @@ let hasModImage = false;
 let modifyPages = []; // ordered page filenames
 let modifyActivePageIndex = 0;
 let modifyRegionPages = {}; // {name: pageFilename}
+let modifiedRegionNames = new Set(); // regions already modified this session
 let viewState = {
   scale: 1,
   x: 0,
@@ -64,33 +65,61 @@ async function enterModifyMode() {
     const data = await pywebview.api.enter_modify_mode();
     if (data) {
       setMode("modify");
-      modifyRegionBounds = data.regions || {};
-      setupModifyPages(data);
       hasModImage = false;
-      document.getElementById("modify-status-text").innerText =
-        "Select regions and click Modify Selected";
-      document.getElementById("btn-save-mod").disabled = true;
-      // Show the original atlas PNG
-      previewImg.src = data.image;
-      previewImg.style.display = "block";
-      previewImg.onload = function () {
-        resetPreview();
-        const containerW = previewContainer.clientWidth - 40;
-        const containerH = previewContainer.clientHeight - 40;
-        const imgW = previewImg.naturalWidth;
-        const imgH = previewImg.naturalHeight;
-        if (imgW > containerW || imgH > containerH) {
-          viewState.scale = Math.min(containerW / imgW, containerH / imgH);
-          applyTransform();
-        }
-        previewImg.onload = null;
-      };
+      applyModifyView(data, "Select regions and click Modify Selected");
     } else {
       showToast("Load an atlas first.", "error");
     }
   } catch (e) {
     console.error(e);
     showToast("Failed to enter modify mode.", "error");
+  }
+}
+
+function updateModifyActionButtons() {
+  document.getElementById("btn-save-mod").disabled = !hasModImage;
+  document.getElementById("btn-reset-mod").disabled = !hasModImage;
+}
+
+function applyModifyView(data, statusText) {
+  modifyRegionBounds = data.regions || {};
+  setupModifyPages(data);
+  modifiedRegionNames = new Set(data.modifiedRegions || []);
+  renderRegionList();
+  document.getElementById("modify-status-text").innerText = statusText;
+  updateModifyActionButtons();
+  previewImg.src = data.image;
+  previewImg.style.display = "block";
+  previewImg.onload = function () {
+    resetPreview();
+    const containerW = previewContainer.clientWidth - 40;
+    const containerH = previewContainer.clientHeight - 40;
+    const imgW = previewImg.naturalWidth;
+    const imgH = previewImg.naturalHeight;
+    if (imgW > containerW || imgH > containerH) {
+      viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+      applyTransform();
+    } else {
+      applyTransform();
+    }
+    previewImg.onload = null;
+  };
+}
+
+async function resetModify() {
+  if (!hasModImage) return;
+  try {
+    const data = await pywebview.api.reset_modify_mode();
+    if (data) {
+      hasModImage = false;
+      applyModifyView(data, "Select regions and click Modify Selected");
+      showToast("Modifications reset.", "success");
+    } else {
+      showToast("Failed to reset modifications.", "error");
+    }
+  } catch (e) {
+    console.error(e);
+    showToast("Failed to reset modifications.", "error");
   }
 }
 
@@ -107,6 +136,8 @@ async function exitModifyMode() {
   modifyActivePageIndex = 0;
   document.getElementById("modify-page-switcher").classList.add("hidden");
   hasModImage = false;
+  modifiedRegionNames = new Set();
+  renderRegionList();
   clearOverlay();
   // Restore preview from current selection
   previewImg.style.display = "none";
@@ -144,13 +175,17 @@ function onModPreviewReceived(data) {
   if (data.regions) {
     modifyRegionBounds = data.regions;
   }
+  if (data.modifiedRegions) {
+    modifiedRegionNames = new Set(data.modifiedRegions);
+    renderRegionList();
+  }
   // Refresh multi-page state (regions were redistributed across pages by repack)
   setupModifyPages(data);
   previewImg.src = data.image;
   previewImg.style.display = "block";
   document.getElementById("modify-status-text").innerText =
     "Mod image merged. Ready to save.";
-  document.getElementById("btn-save-mod").disabled = false;
+  updateModifyActionButtons();
 
   previewImg.onload = function () {
     resetPreview();
@@ -293,18 +328,8 @@ async function openFile() {
 async function loadRegions() {
   regionsData = await pywebview.api.get_region_names();
   if (!regionsData) return;
-  const listEl = document.getElementById("region-list");
-  listEl.innerHTML = "";
   document.getElementById("count").innerText = regionsData.length;
-  regionsData.forEach((name, index) => {
-    const li = document.createElement("li");
-    li.className = "region-item";
-    li.innerText = name;
-    li.dataset.index = index;
-    li.addEventListener("mousedown", (e) => onRegionMouseDown(e, index, name));
-    li.addEventListener("mouseenter", (e) => onRegionMouseEnter(e, index));
-    listEl.appendChild(li);
-  });
+  renderRegionList();
   if (regionsData.length > 0) {
     document.getElementById("status-text").innerText = "Atlas loaded.";
     document.getElementById("btn-enter-modify").disabled = false;
@@ -313,6 +338,28 @@ async function loadRegions() {
     document.getElementById("btn-enter-modify").disabled = true;
     document.getElementById("btn-extract-all").disabled = true;
   }
+}
+
+function regionDisplayName(name) {
+  return modifiedRegionNames.has(name) ? `${name}*` : name;
+}
+
+function renderRegionList() {
+  const listEl = document.getElementById("region-list");
+  listEl.innerHTML = "";
+  regionsData.forEach((name, index) => {
+    const li = document.createElement("li");
+    li.className = "region-item";
+    if (modifiedRegionNames.has(name)) {
+      li.classList.add("modified");
+    }
+    li.innerText = regionDisplayName(name);
+    li.dataset.index = index;
+    li.addEventListener("mousedown", (e) => onRegionMouseDown(e, index, name));
+    li.addEventListener("mouseenter", (e) => onRegionMouseEnter(e, index));
+    listEl.appendChild(li);
+  });
+  renderSelection();
 }
 
 function getSelectedNames() {
@@ -916,6 +963,7 @@ window.onAtlasLoadedFromPython = async () => {
     setMode("extract");
     modifyRegionBounds = {}; // Clear modify state
     hasModImage = false;
+    modifiedRegionNames = new Set();
   }
   selectedIndices.clear();
   lastClickIndex = -1;
