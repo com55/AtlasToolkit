@@ -23,16 +23,13 @@ from atlas_toolkit.update.updater import (
 
 log = logging.getLogger(__name__)
 
-# Inno closes the running app (Restart Manager + AppMutex) and relaunches when done.
-# /RESTARTAPPLICATIONS overrides RestartApplications=no in AtlasToolkit.iss so the
-# interactive [Run] entry (skipifsilent) is not used for silent self-update.
-_INNO_SILENT_INSTALL_ARGS = (
-    "/VERYSILENT",
-    "/SUPPRESSMSGBOXES",
-    "/NORESTART",
-    "/CLOSEAPPLICATIONS",
-    "/RESTARTAPPLICATIONS",
+# Runner invokes Inno after this process exits (AppMutex blocks while we are alive).
+# Relaunch with preserved argv is done by the runner — not Inno Restart Manager.
+_INNO_SILENT_INSTALL_FLAGS = (
+    "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
+    "/CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
 )
+_PID_WAIT_MAX_ITERATIONS = 90
 
 
 def get_update_dir() -> Path:
@@ -144,16 +141,48 @@ def is_installed_build() -> bool:
         return False
 
 
-def build_inno_install_command(
+def get_relaunch_executable_path() -> Path:
+    if is_installed_build():
+        installed = install_dir() / "AtlasToolkit.exe"
+        if installed.exists():
+            return installed.resolve()
+    return get_running_executable_path()
+
+
+def build_update_runner_script(
     installer_path: Path,
+    target_exe: Path,
+    pid: int,
+    relaunch_args: list[str],
     inno_log_path: Path,
-) -> list[str]:
-    """Argv to run the downloaded Inno Setup installer for silent self-update."""
-    return [
-        str(installer_path),
-        *_INNO_SILENT_INSTALL_ARGS,
-        f"/LOG={inno_log_path}",
+) -> str:
+    """Wait for app exit, run Inno, relaunch with saved command-line args."""
+    inst = str(installer_path)
+    exe = str(target_exe)
+    log_path = str(inno_log_path)
+    relaunch_suffix = " ".join(f'"{a}"' for a in relaunch_args)
+    success_launch = f'start "" "{exe}" {relaunch_suffix}'.rstrip()
+
+    lines = [
+        "@echo off",
+        "setlocal",
+        "set /a wait_count=0",
+        ":waitloop",
+        f'tasklist /FI "PID eq {pid}" 2>nul | find /I " {pid} " >nul',
+        "if not errorlevel 1 (",
+        "    set /a wait_count+=1",
+        f'    if %wait_count% geq {_PID_WAIT_MAX_ITERATIONS} goto runinstaller',
+        "    ping -n 2 127.0.0.1 >nul",
+        "    goto waitloop",
+        ")",
+        ":runinstaller",
+        f'"{inst}" {_INNO_SILENT_INSTALL_FLAGS} /LOG="{log_path}"',
+        "if errorlevel 1 exit /b 1",
+        success_launch,
+        'del /f /q "%~f0" >nul 2>nul',
+        "endlocal",
     ]
+    return "\r\n".join(lines) + "\r\n"
 
 
 class UpdateController:
@@ -162,6 +191,7 @@ class UpdateController:
     def __init__(self, pending_failure: Optional[dict[str, str]] = None) -> None:
         self.pending_failure = pending_failure
         self._installer_path: Optional[Path] = None
+        self._relaunch_args: list[str] = []
         self._version: Optional[str] = None
         self._release_url: Optional[str] = None
         self._ready = False
@@ -197,7 +227,6 @@ class UpdateController:
             }
 
     def check_for_notification(self) -> Optional[dict[str, Any]]:
-        """Return update notification payload for JS, or None if up to date."""
         info = check_for_updates()
         if not info:
             return None
@@ -234,6 +263,7 @@ class UpdateController:
             }
 
         self._installer_path = None
+        self._relaunch_args = []
         self._version = None
         self._release_url = None
         self._ready = False
@@ -270,8 +300,12 @@ class UpdateController:
                 progress_cb=_progress,
             )
 
+            relaunch_args = list(sys.argv[1:])
+            target_exe = get_relaunch_executable_path()
             metadata = {
                 "installer_path": str(target_installer_path),
+                "target_exe_path": str(target_exe),
+                "relaunch_args": relaunch_args,
                 "version": latest.latest_version,
                 "release_url": latest.release_url,
             }
@@ -281,6 +315,7 @@ class UpdateController:
             )
 
             self._installer_path = target_installer_path
+            self._relaunch_args = relaunch_args
             self._version = latest.latest_version
             self._release_url = latest.release_url
             self._ready = True
@@ -328,12 +363,28 @@ class UpdateController:
                 "error": "Downloaded installer is missing or invalid.",
             }
 
+        target_exe = get_relaunch_executable_path()
+        if not target_exe.exists() or not target_exe.is_file():
+            return {
+                "ok": False,
+                "error": f"Cannot locate executable for relaunch: {target_exe}",
+            }
+
         update_dir = get_update_dir()
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         inno_log_path = update_dir / f"inno_install_{timestamp}.log"
-        install_cmd = build_inno_install_command(installer_path, inno_log_path)
+        script_text = build_update_runner_script(
+            installer_path=installer_path,
+            target_exe=target_exe,
+            pid=os.getpid(),
+            relaunch_args=self._relaunch_args,
+            inno_log_path=inno_log_path,
+        )
+        script_path = update_dir / f"install_update_{timestamp}_{os.getpid()}.cmd"
 
         try:
+            script_path.write_text(script_text, encoding="utf-8")
+            cmd_exe = os.environ.get("COMSPEC") or "cmd"
             popen_kwargs: dict[str, Any] = {
                 "cwd": str(update_dir),
                 "close_fds": True,
@@ -347,8 +398,10 @@ class UpdateController:
             else:
                 popen_kwargs["start_new_session"] = True
 
-            subprocess.Popen(install_cmd, **popen_kwargs)
-            log.info("Launched silent installer: %s", installer_path.name)
+            # Runner waits for this PID; exit immediately so Inno AppMutex is released.
+            subprocess.Popen([cmd_exe, "/d", "/c", str(script_path)], **popen_kwargs)
+            threading.Timer(0.25, lambda: os._exit(0)).start()
+            log.info("Launched update runner (pid=%s): %s", os.getpid(), script_path.name)
             return {"ok": True}
         except Exception as e:
             return {
