@@ -509,7 +509,9 @@ def setup_drop(window: webview.Window, api: Api) -> None:
 
         log.debug("Binding drop events...")
         doc = window.dom.document
-        doc.events.dragover += DOMEventHandler(_drag_over_no_op, True, True)  # type: ignore[operator]
+        doc.events.dragover += DOMEventHandler(
+            _drag_over_no_op, True, True, debounce=500
+        )  # type: ignore[operator]
         doc.events.drop += DOMEventHandler(api.on_drop, True, True)  # type: ignore[operator]
         log.debug("Drop events bound.")
     except Exception as e:

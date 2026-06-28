@@ -8,7 +8,10 @@ from typing import Dict, List, Mapping, Optional, Tuple, Union
 from PIL import Image
 
 from atlas_toolkit.core.document import AtlasDocument, Page, Region
-from atlas_toolkit.core.region_ops import extract_region_from_page
+from atlas_toolkit.core.region_ops import (
+    crop_and_rotate as _crop_and_rotate,
+    extract_region_from_page,
+)
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -94,9 +97,7 @@ class AtlasProcessor:
     def crop_and_rotate(
         image: Image.Image, x: int, y: int, w: int, h: int, rotate: int
     ) -> Image.Image:
-        from region_ops import crop_and_rotate
-
-        return crop_and_rotate(image, x, y, w, h, rotate)
+        return _crop_and_rotate(image, x, y, w, h, rotate)
 
     def get_page_image(self, page_filename: Optional[str] = None) -> Optional[Image.Image]:
         if page_filename:
