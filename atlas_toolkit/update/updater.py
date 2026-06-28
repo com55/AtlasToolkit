@@ -44,7 +44,12 @@ class UpdateInfo(NamedTuple):
 
 def is_running_as_exe() -> bool:
     """Check if running as Nuitka-compiled executable."""
-    return "__compiled__" in globals()
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return True
+    main = sys.modules.get("__main__")
+    return main is not None and getattr(main, "__compiled__", None) is not None
 
 
 def get_current_version() -> str:
