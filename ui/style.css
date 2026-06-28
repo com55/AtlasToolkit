@@ -134,6 +134,20 @@ button {
   border-color: #444;
 }
 
+.btn-reset {
+  background-color: #5d4037;
+  color: white;
+}
+.btn-reset:hover:not(:disabled) {
+  background-color: #795548;
+}
+.btn-reset:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
 /* Icon Style */
 .btn-icon {
   width: 16px;
@@ -163,10 +177,20 @@ button {
   background-color: #2a2d2e;
 }
 
+.region-item.modified {
+  font-weight: 700;
+  color: #89cfff;
+}
+
 /* Highlight Styles */
 .region-item.selected {
   background-color: #094771;
   color: white;
+}
+
+.region-item.modified.selected {
+  font-weight: 700;
+  color: #b8e8ff;
 }
 
 /* Right Panel Controls */
