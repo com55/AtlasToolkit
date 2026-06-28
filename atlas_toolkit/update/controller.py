@@ -22,11 +22,12 @@ from atlas_toolkit.update.updater import (
 
 log = logging.getLogger(__name__)
 
-# Inno closes the running app via Restart Manager; relaunch argv is handled in the PS runner.
+# Inno closes the running app via Restart Manager; relaunch argv is handled by a watcher script.
 _INNO_SILENT_INSTALL_ARGS = (
     "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
     "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
 )
+_SETUP_EXE_BASENAME = "AtlasToolkit-Setup-x64"
 
 
 def get_update_dir() -> Path:
@@ -150,18 +151,33 @@ def _ps_single_quoted(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def build_update_runner_ps1(inno_log_path: Path, pending_json_path: Path) -> str:
-    """PowerShell runner: Inno silent install (force-close app) then relaunch with saved argv."""
-    log_literal = _ps_single_quoted(str(inno_log_path))
+def _unblock_downloaded_file(path: Path) -> None:
+    """Remove Mark-of-the-Web so Windows does not prompt when the app launches the installer."""
+    zone_stream = Path(f"{path}:Zone.Identifier")
+    try:
+        zone_stream.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _inno_install_params(inno_log_path: Path) -> str:
+    return f'{_INNO_SILENT_INSTALL_ARGS} /LOG="{inno_log_path}"'
+
+
+def build_relaunch_watcher_ps1(pending_json_path: Path, installer_process_name: str) -> str:
+    """Wait for the setup process (started by the app) to finish, then relaunch with saved argv."""
     pending_literal = _ps_single_quoted(str(pending_json_path))
-    inno_args_literal = _ps_single_quoted(_INNO_SILENT_INSTALL_ARGS)
+    process_literal = _ps_single_quoted(installer_process_name)
 
     lines = [
         "$ErrorActionPreference = 'Stop'",
         f"$Meta = Get-Content -LiteralPath {pending_literal} -Raw | ConvertFrom-Json",
-        f"$InnoArgs = ({inno_args_literal} -split ' ') + @('/LOG=' + {log_literal})",
-        "$Proc = Start-Process -FilePath $Meta.installer_path -ArgumentList $InnoArgs -Wait -PassThru",
-        "if ($Proc.ExitCode -ne 0) { exit $Proc.ExitCode }",
+        f"$SetupName = {process_literal}",
+        "for ($i = 0; $i -lt 60; $i++) {",
+        "    if (Get-Process -Name $SetupName -ErrorAction SilentlyContinue) { break }",
+        "    Start-Sleep -Milliseconds 500",
+        "}",
+        "Wait-Process -Name $SetupName -ErrorAction SilentlyContinue",
         "if ($Meta.relaunch_args -and @($Meta.relaunch_args).Count -gt 0) {",
         "    Start-Process -FilePath $Meta.target_exe_path -ArgumentList @($Meta.relaunch_args)",
         "} else {",
@@ -302,11 +318,13 @@ class UpdateController:
                 target_path=target_installer_path,
                 progress_cb=_progress,
             )
+            _unblock_downloaded_file(target_installer_path)
 
             relaunch_args = list(sys.argv[1:])
             target_exe = get_relaunch_executable_path()
             metadata = {
                 "installer_path": str(target_installer_path),
+                "installer_process_name": _SETUP_EXE_BASENAME,
                 "target_exe_path": str(target_exe),
                 "relaunch_args": relaunch_args,
                 "version": latest.latest_version,
@@ -379,6 +397,7 @@ class UpdateController:
             json.dumps(
                 {
                     "installer_path": str(installer_path),
+                    "installer_process_name": _SETUP_EXE_BASENAME,
                     "target_exe_path": str(target_exe),
                     "relaunch_args": self._relaunch_args,
                     "version": self._version or "",
@@ -392,21 +411,30 @@ class UpdateController:
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         inno_log_path = update_dir / f"inno_install_{timestamp}.log"
-        script_path = update_dir / f"install_update_{timestamp}.ps1"
-        script_path.write_text(
-            build_update_runner_ps1(inno_log_path, pending_json_path),
+        watcher_path = update_dir / f"relaunch_after_{timestamp}.ps1"
+        watcher_path.write_text(
+            build_relaunch_watcher_ps1(pending_json_path, _SETUP_EXE_BASENAME),
             encoding="utf-8",
         )
 
         try:
-            ps_params = (
+            _unblock_downloaded_file(installer_path)
+
+            watcher_params = (
                 f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass '
-                f'-File "{script_path}"'
+                f'-File "{watcher_path}"'
             )
-            _shell_execute("powershell.exe", ps_params, str(update_dir))
-            # Exit soon so Inno /FORCECLOSEAPPLICATIONS can shut us down cleanly.
+            _shell_execute("powershell.exe", watcher_params, str(update_dir))
+
+            # Launch the installer from the app (not from script) to avoid Open File Security Warning.
+            _shell_execute(
+                str(installer_path),
+                _inno_install_params(inno_log_path),
+                str(update_dir),
+            )
+
             threading.Timer(0.25, lambda: os._exit(0)).start()
-            log.info("Launched update runner via ShellExecute: %s", script_path.name)
+            log.info("Launched installer directly and relaunch watcher: %s", installer_path.name)
             return {"ok": True}
         except Exception as e:
             return {
