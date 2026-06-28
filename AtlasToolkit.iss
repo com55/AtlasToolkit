@@ -40,13 +40,11 @@ VersionInfoVersion={#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; Detect a running instance (app holds this named mutex) and block a second
-; installer from running concurrently.
-AppMutex={#MyAppMutex}
+; SetupMutex prevents concurrent installers. AppMutex is intentionally omitted:
+; with /SUPPRESSMSGBOXES Inno aborts on AppMutex before /FORCECLOSEAPPLICATIONS runs.
+; Silent self-update passes /FORCECLOSEAPPLICATIONS; relaunch argv uses relaunch_after_*.ps1.
 SetupMutex=AtlasToolkitSetupMutex
-; CloseApplications=yes lets silent self-update shut down the running app via
-; Restart Manager. RestartApplications=no keeps interactive installs on [Run];
-; self-update passes /RESTARTAPPLICATIONS on the command line to relaunch.
+; CloseApplications=yes — used with /FORCECLOSEAPPLICATIONS for silent self-update.
 CloseApplications=yes
 RestartApplications=no
 ; Notify the shell when the .atlas association changes (refreshes icons / Open With).
@@ -78,7 +76,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-; Interactive install only — the silent self-update relaunch is owned by the updater cmd.
+; Interactive install only — silent self-update relaunch is handled by relaunch_after_*.ps1.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
