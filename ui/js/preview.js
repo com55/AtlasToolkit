@@ -240,3 +240,31 @@ function updateButtons() {
     btnSaveMerged.disabled = !hasPreview;
   }
 }
+
+async function getPreviewPngBlob() {
+  const img = previewImg;
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+
+  // Use the same PNG file shown in preview — avoids canvas/toBlob re-encoding
+  // (Save Image writes PIL PNG directly; re-encoding in the browser softens edges).
+  if (img.src) {
+    try {
+      const response = await fetch(img.src);
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob && blob.size > 0) return blob;
+      }
+    } catch (e) {
+      console.warn("fetch preview PNG failed, using canvas fallback", e);
+    }
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
