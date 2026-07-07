@@ -4,7 +4,6 @@ import { loadRegions, updateButtons } from './region-list.js';
 import { setMode, onModPreviewReceived, getRepackMode } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
 import { showToast } from './dialogs.js';
-import { platform } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -64,102 +63,34 @@ async function processDroppedFiles(files) {
   }
 }
 
-// ─── Tauri drag-drop (path-based, with sibling auto-load) ─────────────────────
-// Tauri intercepts file drops at the native layer, so WebView drop events never
-// fire. We subscribe to Tauri's drag-drop event instead and synthesize File
-// objects from disk paths so the rest of the pipeline stays unchanged.
-async function processDroppedPaths(paths) {
-  if (!paths || paths.length === 0) return;
-  try {
-    const { atlasPath, droppedImageFiles } = await platform.readDroppedPaths(paths);
-
-    if (atlasPath) {
-      const ok = await AtlasAPI.load_from_path(atlasPath);
-      if (ok) {
-        if (state.currentMode === 'modify') {
-          setMode('extract');
-          state.modifyRegionBounds = {};
-          state.hasModImage = false;
-        }
-        state.selectedIndices.clear();
-        state.lastClickIndex = -1;
-        previewImg.style.display = 'none';
-        resetPreview();
-        clearOverlay();
-        updateButtons();
-        await loadRegions();
-        state.atlasPath = atlasPath;
-        showToast('Atlas loaded via drag & drop.', 'success');
-        return;
-      }
-    }
-
-    // No atlas — try mod-image flow with the dropped PNGs.
-    const pngs = Array.from(droppedImageFiles.values());
-    if (pngs.length > 0 && state.currentMode === 'modify') {
-      const names = getSelectedNames();
-      if (names.length === 0) { showToast('Select at least one region first.', 'error'); return; }
-      const repack     = document.getElementById('chk-repack').checked;
-      const repackMode = getRepackMode();
-      const result     = await AtlasAPI.process_mod_image(pngs[0], names, repack, repackMode);
-      if (result) {
-        onModPreviewReceived(result);
-        showToast('Mod image loaded via drag & drop.', 'success');
-      }
-      return;
-    }
-
-    if (pngs.length > 0) {
-      showToast('Enter Edit Mode first to drop images.', 'error');
-    } else {
-      showToast('No valid atlas-format text file found in dropped files.', 'error');
-    }
-  } catch (e) {
-    console.error('processDroppedPaths error:', e);
-    showToast(`Drop failed: ${e.message || e}`, 'error');
-  }
-}
-
 // The missing-images dialog runs its own per-row drag-drop handling while
 // open; stand down here so we don't also try to load the dropped PNG as a
 // new atlas/mod-image.
 const isMissingDialogOpen = () => document.body.dataset.missingDialogOpen === 'true';
 
-if (platform.isTauri) {
-  platform.subscribeDragDrop({
-    onEnter: () => { if (!isMissingDialogOpen()) showDropOverlay(); },
-    onLeave: () => { if (!isMissingDialogOpen()) hideDropOverlay(); },
-    onDrop: async (paths) => {
-      if (isMissingDialogOpen()) return;
-      hideDropOverlay();
-      await processDroppedPaths(paths);
-    },
-  });
-} else {
-  // ─── Browser / PWA drag & drop ───────────────────────────────────
-  ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => e.preventDefault(), false));
+// ─── Browser / PWA drag & drop ───────────────────────────────────
+['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => e.preventDefault(), false));
 
-  window.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    if (isMissingDialogOpen()) return;
-    if (e.dataTransfer.types.includes('Files')) showDropOverlay();
-  });
+window.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  if (isMissingDialogOpen()) return;
+  if (e.dataTransfer.types.includes('Files')) showDropOverlay();
+});
 
-  dropOverlay.addEventListener('dragover', e => e.preventDefault());
+dropOverlay.addEventListener('dragover', e => e.preventDefault());
 
-  dropOverlay.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    if (e.relatedTarget === null || !dropOverlay.contains(e.relatedTarget)) hideDropOverlay();
-  });
+dropOverlay.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  if (e.relatedTarget === null || !dropOverlay.contains(e.relatedTarget)) hideDropOverlay();
+});
 
-  dropOverlay.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    if (isMissingDialogOpen()) return;
-    hideDropOverlay();
-    const files = Array.from(e.dataTransfer.files);
-    await processDroppedFiles(files);
-  });
-}
+dropOverlay.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (isMissingDialogOpen()) return;
+  hideDropOverlay();
+  const files = Array.from(e.dataTransfer.files);
+  await processDroppedFiles(files);
+});
 
 // ─── Context Menu ─────────────────────────────────────────────────────────────
 previewContainer.addEventListener('contextmenu', (e) => {
