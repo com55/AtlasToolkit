@@ -670,8 +670,12 @@ export const AtlasAPI = {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
     try {
       // "Repack all pages to one" is a JS-only post-step layered on the merge
-      // result; the session itself only knows merge / per-page repack.
-      const wantAll = repack && repackMode === 'all';
+      // result; the session itself only knows merge / per-page repack. It's
+      // unsafe for multi-page atlases (see _applyRepackAllOverride) — the UI
+      // already hides that option there, but guard here too in case it's
+      // bypassed, falling back to the safe per-page repack instead.
+      const isMultiPage = !!_processor && _processor.pages.length > 1;
+      const wantAll = repack && repackMode === 'all' && !isMultiPage;
       const result = await _session.processModImage(source, selectedNames, repack && !wantAll);
       if (!result) return null;
       return wantAll ? (await _applyRepackAllOverride()) || result : result;
@@ -735,7 +739,10 @@ export const AtlasAPI = {
   async toggle_repack(repack, repackMode = 'page') {
     if (!_session || _session.modBatches.length === 0) return null;
     try {
-      const wantAll = repack && repackMode === 'all';
+      // See process_mod_image: "all" mode is unsafe for multi-page atlases,
+      // guard here too in case the UI gating is bypassed.
+      const isMultiPage = !!_processor && _processor.pages.length > 1;
+      const wantAll = repack && repackMode === 'all' && !isMultiPage;
       const result = await _session.toggleRepack(repack && !wantAll);
       if (!result) return null;
       return wantAll ? (await _applyRepackAllOverride()) || result : result;
