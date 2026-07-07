@@ -5,25 +5,21 @@
  */
 
 import { autoConvertAtlas } from './atlas-converter.js';
-import { AtlasProcessor, _loadImage } from './atlas-extracter.js';
-import { AtlasModifier, parseAtlas, rebuildAtlasText, repackMultiPage } from './atlas-modifier.js';
+import { AtlasProcessor } from './atlas-extracter.js';
+import { parseAtlas, rebuildAtlasText } from './atlas-modifier.js';
 import { platform } from './platform.js';
 import { createZip } from './zip.js';
+import { AtlasSession } from './atlas-session.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let _processor = null;
-let _modifier = null;
 let _currentAtlasFilename = '';
 let _currentAtlasText = '';
-let _mergedCanvas = null;
-let _mergedAtlasText = null;
-let _mergedPages = null;
-let _preRepackCanvas = null;
-let _preRepackText = null;
+let _session = null;               // AtlasSession — owns modify-mode state / mod batches
 let _lastSaveHandle = null;
-let _currentModifyPage = null;
 let _currentSkel = null; // { name, blob } | null
+let _previewMemo = { key: null, value: null };
 
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
@@ -100,127 +96,6 @@ function _resolveModifyPageFromSelection(selectedNames) {
   return Array.from(pages)[0];
 }
 
-function _createModifierForPage(pageName) {
-  if (!_processor || !pageName) return null;
-  const baseImg = _processor.getPageImage(pageName);
-  if (!baseImg) return null;
-
-  _modifier = new AtlasModifier(_currentAtlasText, _currentAtlasFilename, baseImg, pageName);
-  _currentModifyPage = pageName;
-  _mergedCanvas = null;
-  _mergedAtlasText = null;
-  _mergedPages = null;
-  _preRepackCanvas = null;
-  _preRepackText = null;
-  return _modifier;
-}
-
-function _resolveModifySelectionInfo(selectedNames) {
-  if (!_processor || !selectedNames || selectedNames.length === 0) {
-    return { targetPage: null, hasMultiplePages: false };
-  }
-
-  const pages = [];
-  const pageSet = new Set();
-  for (const name of selectedNames) {
-    const page = AtlasAPI.get_region_page_name(name);
-    if (!page) continue;
-    if (!pageSet.has(page)) {
-      pageSet.add(page);
-      pages.push(page);
-    }
-  }
-
-  if (pages.length === 0) return { targetPage: null, hasMultiplePages: false };
-  if (pages.length === 1) return { targetPage: pages[0], hasMultiplePages: false };
-
-  const firstPage = (_processor.pages && _processor.pages[0] && _processor.pages[0].filename) || pages[0];
-  return { targetPage: firstPage, hasMultiplePages: true };
-}
-
-function _relocateRegionsToPage(atlasText, regionNames, targetPage) {
-  if (!atlasText || !targetPage || !regionNames || regionNames.length === 0) return atlasText;
-
-  const moveSet = new Set(regionNames);
-  const lines = atlasText.split('\n');
-  const sections = [];
-  const pageRe = /\.png$/i;
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const s = line.trim();
-    if (!pageRe.test(s)) {
-      i++;
-      continue;
-    }
-
-    const section = { page: s, pageLine: line, headerLines: [], regions: [] };
-    i += 1;
-
-    while (i < lines.length) {
-      const h = lines[i].trim();
-      if (!h) { i += 1; continue; }
-      if (pageRe.test(h)) break;
-      if (!lines[i].includes(':')) break;
-      section.headerLines.push(lines[i]);
-      i += 1;
-    }
-
-    while (i < lines.length) {
-      const r = lines[i].trim();
-      if (!r) { i += 1; continue; }
-      if (pageRe.test(r)) break;
-
-      const block = [lines[i]];
-      const name = r;
-      i += 1;
-      while (i < lines.length) {
-        const body = lines[i].trim();
-        if (!body || pageRe.test(body) || !lines[i].includes(':')) break;
-        block.push(lines[i]);
-        i += 1;
-      }
-      section.regions.push({ name, lines: block });
-    }
-
-    sections.push(section);
-  }
-
-  if (sections.length === 0) return atlasText;
-
-  const targetSection = sections.find(section => section.page === targetPage);
-  if (!targetSection) return atlasText;
-
-  const moved = [];
-  for (const section of sections) {
-    if (section.page === targetPage) continue;
-    const keep = [];
-    for (const region of section.regions) {
-      if (moveSet.has(region.name)) moved.push(region);
-      else keep.push(region);
-    }
-    section.regions = keep;
-  }
-
-  const existing = new Set(targetSection.regions.map(region => region.name));
-  for (const region of moved) {
-    if (!existing.has(region.name)) {
-      targetSection.regions.push(region);
-      existing.add(region.name);
-    }
-  }
-
-  const out = [];
-  sections.forEach((section, idx) => {
-    out.push(section.pageLine);
-    section.headerLines.forEach(line => out.push(line));
-    section.regions.forEach(region => region.lines.forEach(line => out.push(line)));
-    if (idx < sections.length - 1) out.push('');
-  });
-  return out.join('\n');
-}
-
 function _packCanvasesSimple(sprites) {
   if (!sprites || sprites.length === 0) {
     const canvas = document.createElement('canvas');
@@ -274,6 +149,27 @@ function _buildRegionBoundsFromAtlasText(atlasText) {
     regionBounds[name] = [...info.bounds, info.rotate];
   }
   return regionBounds;
+}
+
+/**
+ * "Repack all pages to one" post-step: collapse the session's current merge
+ * result into a single page via the legacy _repackAllPagesToSingle path, and
+ * install it as the session's active output so save/preview see it.
+ * (Its multi-page limitations are pre-existing and scoped to Phase B.)
+ */
+async function _applyRepackAllOverride() {
+  if (!_session) return null;
+  const merged = _session.getMergedOutput();
+  if (!merged) return null;
+  const pageCanvas = merged.canvas || (merged.pages && merged.pages[0]) || null;
+  const activePage = _processor && _processor.pages.length > 0 ? _processor.pages[0].filename : null;
+  const collapsed = await _repackAllPagesToSingle(pageCanvas, merged.text, activePage);
+  if (!collapsed) return null;
+  _session.setActiveOverride(collapsed.canvas, collapsed.atlasText);
+  return {
+    image: collapsed.canvas.toDataURL('image/png'),
+    regions: _buildRegionBoundsFromAtlasText(collapsed.atlasText),
+  };
 }
 
 async function _repackAllPagesToSingle(mergedPageCanvas, atlasText, activePage) {
@@ -574,15 +470,10 @@ async function _loadAtlasFiles(atlasFile, imageFileMap) {
     _currentAtlasFilename = atlasFile.name;
     _currentAtlasText = convertedText;
     _currentSkel = null;
+    _previewMemo = { key: null, value: null };
 
-    // Clear modify state
-    _modifier = null;
-    _mergedCanvas = null;
-    _mergedAtlasText = null;
-    _mergedPages = null;
-    _preRepackCanvas = null;
-    _preRepackText = null;
-    _currentModifyPage = null;
+    // Fresh session bound to the pristine processor + atlas text.
+    _session = new AtlasSession(_processor, _currentAtlasText, _currentAtlasFilename);
 
     return true;
   } catch (e) {
@@ -645,8 +536,16 @@ export const AtlasAPI = {
 
   async get_preview(names) {
     if (!_processor || !names || names.length === 0) return null;
+    // Memoize on the selection set + mod generation. Generation stays 0 in
+    // extract mode, so identical selections short-circuit the composite;
+    // applying a mod bumps it so a stale preview is never served.
+    const gen = _session ? _session.modGeneration : 0;
+    const key = `${[...names].sort().join(',')}:${gen}`;
+    if (_previewMemo.key === key) return _previewMemo.value;
     try {
-      return _processor.getPreviewDataURL(names);
+      const url = _processor.getPreviewDataURL(names);
+      _previewMemo = { key, value: url };
+      return url;
     } catch (e) {
       console.error('get_preview error:', e);
       return null;
@@ -713,7 +612,7 @@ export const AtlasAPI = {
   // ── Modify Mode ────────────────────────────────────────────────────────────
 
   async enter_modify_mode() {
-    if (!_processor) return null;
+    if (!_processor || !_session) return null;
     try {
       const pages = _processor.pages || [];
       if (pages.length === 0) return null;
@@ -721,12 +620,8 @@ export const AtlasAPI = {
       const baseImg = _processor.getPageImage(initialPage);
       if (!baseImg) return null;
 
-      _modifier = new AtlasModifier(_currentAtlasText, _currentAtlasFilename, baseImg, initialPage);
-      _currentModifyPage = initialPage;
-      _mergedCanvas = null;
-      _mergedAtlasText = null;
-      _preRepackCanvas = null;
-      _preRepackText = null;
+      // Entering modify mode always starts from a clean batch list.
+      _session.clearModifyState();
 
       // Build region bounds for overlay: { name: [x, y, w, h, rotate] }
       const regionBounds = {};
@@ -745,7 +640,7 @@ export const AtlasAPI = {
         regions: regionBounds,
         pages: pages.map(p => p.filename),
         regionPages: _getRegionPageMap(),
-        activePage: _currentModifyPage,
+        activePage: initialPage,
       };
     } catch (e) {
       console.error('enter_modify_mode error:', e);
@@ -754,159 +649,32 @@ export const AtlasAPI = {
   },
 
   exit_modify_mode() {
-    _modifier = null;
-    _mergedCanvas = null;
-    _mergedAtlasText = null;
-    _mergedPages = null;
-    _preRepackCanvas = null;
-    _preRepackText = null;
-    _currentModifyPage = null;
+    if (_session) _session.clearModifyState();
+  },
+
+  /** True when there are unsaved modify-mode modifications. */
+  has_pending_modifications() {
+    return !!_session && _session.hasPendingModifications();
   },
 
   /** Pick a mod PNG and process it. */
   async select_mod_image(selectedNames, repack = false, repackMode = 'page') {
-    if (!_processor) return null;
-    const { targetPage } = _resolveModifySelectionInfo(selectedNames);
-    if (!targetPage) return null;
-
-    if (!_modifier || _currentModifyPage !== targetPage) {
-      const modifier = _createModifierForPage(targetPage);
-      if (!modifier) {
-        if (typeof window.showToast === 'function') {
-          window.showToast(`Failed to load atlas page image: ${targetPage}`, 'error');
-        }
-        return null;
-      }
-    }
-
+    if (!_session || !selectedNames || selectedNames.length === 0) return null;
     const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
     if (files.length === 0) return null;
     return AtlasAPI.process_mod_image(files[0], selectedNames, repack, repackMode);
   },
 
-  async _processModMultiPage(source, selectedNames) {
-    // 1. Extract all regions from all pages (whitespace restored)
-    const allSprites = {};
-    for (const name of Object.keys(_processor.regions)) {
-      const canvas = _processor.extractRegion(name);
-      if (canvas) allSprites[name] = canvas;
-    }
-
-    // 2. Load mod image and replace selected regions with it
-    const rawImg = source instanceof File ? await _loadImage(source) : source;
-    let modCanvas;
-    if (rawImg instanceof HTMLCanvasElement) {
-      modCanvas = rawImg;
-    } else {
-      modCanvas = document.createElement('canvas');
-      modCanvas.width = rawImg.naturalWidth || rawImg.width;
-      modCanvas.height = rawImg.naturalHeight || rawImg.height;
-      modCanvas.getContext('2d').drawImage(rawImg, 0, 0);
-    }
-    for (const name of selectedNames) {
-      if (name in allSprites) allSprites[name] = modCanvas;
-    }
-
-    // 3. Collect page infos and region metas
-    const numPages = _processor.pages.length;
-    const pageInfos = _processor.pages.map(p => ({
-      page: p.filename,
-      format: p.format,
-      filter: `${p.filter[0]}, ${p.filter[1]}`,
-      repeat: p.repeat,
-      pma: p.pma,
-    }));
-    const regionMetas = {};
-    for (const [name, r] of Object.entries(_processor.regions)) {
-      regionMetas[name] = {
-        atlasName: r.atlasName || r.name || name,
-        index: Number.isFinite(r.index) ? r.index : -1,
-        split: r.split,
-        pad: r.pad,
-        extraPairs: Array.isArray(r.extraPairs) ? r.extraPairs : [],
-      };
-    }
-
-    // 4. Repack across all pages
-    const { pages, atlasText } = await repackMultiPage(allSprites, numPages, pageInfos, regionMetas);
-
-    _mergedPages = pages;
-    _mergedAtlasText = atlasText;
-    _mergedCanvas = null;
-
-    // 5. Build region bounds for overlay — include all regions so selections
-    //    on any page are highlighted when that page's preview is shown.
-    const page0Filename = pageInfos.length > 0 ? pageInfos[0].page : null;
-    const proc = new AtlasProcessor(atlasText);
-    const regionBounds = {};
-    for (const [name, info] of Object.entries(proc.regions)) {
-      regionBounds[name] = [info.x, info.y, info.w, info.h, info.rotate];
-    }
-
-    const image = pages.length > 0 ? pages[0].toDataURL('image/png') : null;
-    return { image, regions: regionBounds, pageCount: numPages, previewPage: page0Filename };
-  },
-
   /** Process a mod image (File or canvas/img) for the selected regions. */
   async process_mod_image(source, selectedNames, repack = false, repackMode = 'page') {
-    if (!_processor) return null;
-
-    if (_processor.pages.length > 1) {
-      return AtlasAPI._processModMultiPage(source, selectedNames);
-    }
-
-    const { targetPage, hasMultiplePages } = _resolveModifySelectionInfo(selectedNames);
-    if (!targetPage) return null;
-
-    if (!_modifier || _currentModifyPage !== targetPage) {
-      const modifier = _createModifierForPage(targetPage);
-      if (!modifier) {
-        if (typeof window.showToast === 'function') {
-          window.showToast(`Failed to load atlas page image: ${targetPage}`, 'error');
-        }
-        return null;
-      }
-    }
-
+    if (!_session || !selectedNames || selectedNames.length === 0) return null;
     try {
-      const img = source instanceof File ? await _loadImage(source) : source;
-      const preferred = selectedNames.filter(name => _modifier.regions[name]);
-      const rest = selectedNames.filter(name => !_modifier.regions[name]);
-      const orderedSelection = [...preferred, ...rest];
-
-      const { mergedCanvas, atlasText: mergedTextRaw } = _modifier.mergeModImage(img, orderedSelection);
-
-      const mergedText = hasMultiplePages
-        ? _relocateRegionsToPage(mergedTextRaw, selectedNames, targetPage)
-        : mergedTextRaw;
-
-      _preRepackCanvas = mergedCanvas;
-      _preRepackText = mergedText;
-      _modifier = new AtlasModifier(_preRepackText, _currentAtlasFilename, _preRepackCanvas, _currentModifyPage);
-
-      let finalCanvas = mergedCanvas;
-      let finalText = mergedText;
-
-      if (repack) {
-        if (repackMode === 'all') {
-          const repackedAll = await _repackAllPagesToSingle(mergedCanvas, mergedText, targetPage);
-          if (repackedAll) {
-            finalCanvas = repackedAll.canvas;
-            finalText = repackedAll.atlasText;
-          }
-        } else {
-          const repacked = await _modifier.repack(mergedCanvas, mergedText);
-          finalCanvas = repacked.canvas;
-          finalText = repacked.atlasText;
-        }
-      }
-
-      _mergedCanvas = finalCanvas;
-      _mergedAtlasText = finalText;
-
-      const regionBounds = _buildRegionBoundsFromAtlasText(finalText);
-
-      return { image: finalCanvas.toDataURL('image/png'), regions: regionBounds };
+      // "Repack all pages to one" is a JS-only post-step layered on the merge
+      // result; the session itself only knows merge / per-page repack.
+      const wantAll = repack && repackMode === 'all';
+      const result = await _session.processModImage(source, selectedNames, repack && !wantAll);
+      if (!result) return null;
+      return wantAll ? (await _applyRepackAllOverride()) || result : result;
     } catch (e) {
       console.error('process_mod_image error:', e);
       if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
@@ -917,27 +685,28 @@ export const AtlasAPI = {
   /** Save the merged atlas files. Installed PWA: folder picker + batched
    *  write. Browser tab: zip download. */
   async save_modified() {
-    if (!_mergedAtlasText) return 'Error: No merged data to save.';
+    if (!_session || !_session.hasMergedOutput()) return 'Error: No merged data to save.';
+    const merged = _session.getMergedOutput();
     try {
       // Build the list of outputs (png(s), atlas text, optional skel) up front
       // so we can route through either the folder writer or the zip download.
       const outputs = [];
 
-      if (_mergedPages && _mergedPages.length > 0) {
-        for (let i = 0; i < _mergedPages.length; i++) {
+      if (merged.pages && merged.pages.length > 0) {
+        for (let i = 0; i < merged.pages.length; i++) {
           const pageName = (_processor && _processor.pages[i])
             ? _processor.pages[i].filename
             : `page${i}.png`;
-          outputs.push({ name: pageName, data: await _canvasToBlob(_mergedPages[i]) });
+          outputs.push({ name: pageName, data: await _canvasToBlob(merged.pages[i]) });
         }
-      } else if (_mergedCanvas) {
+      } else if (merged.canvas) {
         const base = _currentAtlasFilename.replace(/\.[^.]+$/, '');
-        outputs.push({ name: `${base}.png`, data: await _canvasToBlob(_mergedCanvas) });
+        outputs.push({ name: `${base}.png`, data: await _canvasToBlob(merged.canvas) });
       } else {
         return 'Error: No merged data to save.';
       }
 
-      outputs.push({ name: _currentAtlasFilename, data: _mergedAtlasText });
+      outputs.push({ name: _currentAtlasFilename, data: merged.text });
       if (_currentSkel) outputs.push({ name: _currentSkel.name, data: _currentSkel.blob });
 
       // Installed PWA: pick a folder and write all outputs into it.
@@ -945,6 +714,7 @@ export const AtlasAPI = {
         const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs);
+        _session.markSaved();
         const fileNames = outputs.map(o => o.name).join(', ');
         return `Saved to selected folder: ${fileNames}`;
       }
@@ -952,6 +722,7 @@ export const AtlasAPI = {
       // Browser tab: bundle all outputs into a single zip download.
       const zipBlob = await createZip(outputs);
       await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, zipBlob);
+      _session.markSaved();
       const summary = outputs.map(o => o.name).join(' and ');
       return `Saved as zip: ${summary}`;
     } catch (e) {
@@ -960,29 +731,14 @@ export const AtlasAPI = {
     }
   },
 
-  /** Toggle repack on/off using the pre-repack cached state. */
+  /** Toggle repack on/off; the session lazily rebuilds whichever result is stale. */
   async toggle_repack(repack, repackMode = 'page') {
-    if (!_modifier || !_currentModifyPage || !_preRepackCanvas || !_preRepackText) return null;
+    if (!_session || _session.modBatches.length === 0) return null;
     try {
-      let canvas = _preRepackCanvas, text = _preRepackText;
-      if (repack) {
-        if (repackMode === 'all') {
-          const repackedAll = await _repackAllPagesToSingle(_preRepackCanvas, _preRepackText, _currentModifyPage);
-          if (repackedAll) {
-            canvas = repackedAll.canvas;
-            text = repackedAll.atlasText;
-          }
-        } else {
-          const repacked = await _modifier.repack(_preRepackCanvas, _preRepackText);
-          canvas = repacked.canvas;
-          text = repacked.atlasText;
-        }
-      }
-      _mergedCanvas = canvas;
-      _mergedAtlasText = text;
-
-      const regionBounds = _buildRegionBoundsFromAtlasText(text);
-      return { image: canvas.toDataURL('image/png'), regions: regionBounds };
+      const wantAll = repack && repackMode === 'all';
+      const result = await _session.toggleRepack(repack && !wantAll);
+      if (!result) return null;
+      return wantAll ? (await _applyRepackAllOverride()) || result : result;
     } catch (e) {
       console.error('toggle_repack error:', e);
       return null;
