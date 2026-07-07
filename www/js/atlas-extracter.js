@@ -1,7 +1,17 @@
 /**
  * atlas-extracter.js
  * Port of atlas_extracter.py using Canvas API.
+ *
+ * Parsing is re-homed onto AtlasDocument (the single parse/serialize seam,
+ * ported from the Python document.py) — the AtlasPage/AtlasRegion classes
+ * below are now thin data-holders populated from AtlasDocument.parse(), kept
+ * so the rest of the JS pipeline sees the same object shape it always has
+ * (page.width/height, region.pageFilename, extraPairs as {key, values}).
+ * Rotation/offset math is re-homed onto core-region-ops.js.
  */
+
+import { AtlasDocument } from './atlas-document.js';
+import { cropAndRotate as coreCropAndRotate, extractRegionFromPage } from './core-region-ops.js';
 
 class AtlasPage {
   constructor(filename) {
@@ -46,85 +56,36 @@ export class AtlasProcessor {
   }
 
   _parse() {
-    const lines = this.atlasContent.split('\n').map(l => l.trim());
-    let currentPage = null;
-    let currentRegion = null;
-    const regionNameCounts = new Map();
+    // Delegate to the single parse seam, then adapt AtlasDocument's Page/Region
+    // into the AtlasPage/AtlasRegion shapes the rest of this module exposes.
+    const doc = AtlasDocument.parse(this.atlasContent);
+    for (const dp of doc.pages) {
+      const page = new AtlasPage(dp.filename);
+      page.width = dp.size[0];
+      page.height = dp.size[1];
+      page.format = dp.format;
+      page.filter = [dp.filter[0], dp.filter[1]];
+      page.repeat = dp.repeat;
+      page.pma = dp.pma;
+      this.pages.push(page);
+      this._pageMap[dp.filename] = page;
 
-    const getUniqueRegionKey = (atlasName) => {
-      const next = (regionNameCounts.get(atlasName) || 0) + 1;
-      regionNameCounts.set(atlasName, next);
-      return next === 1 ? atlasName : `${atlasName}#${next}`;
-    };
-
-    for (const line of lines) {
-      if (!line) continue;
-
-      if (/\.png$/i.test(line)) {
-        currentPage = new AtlasPage(line);
-        this.pages.push(currentPage);
-        this._pageMap[line] = currentPage;
-        currentRegion = null;
-        continue;
+      for (const dr of dp.regions) {
+        const region = new AtlasRegion(dr.name, dr.atlasName, dr.pageFilename);
+        region.index = dr.index;
+        region.x = dr.x;
+        region.y = dr.y;
+        region.w = dr.w;
+        region.h = dr.h;
+        region.offsets = dr.offsets ? [...dr.offsets] : null;
+        region.rotate = dr.rotate;
+        region.split = dr.split ? [...dr.split] : null;
+        region.pad = dr.pad ? [...dr.pad] : null;
+        // Document stores extraPairs as [key, values] tuples; this module has
+        // always exposed them as {key, values} objects — keep that contract.
+        region.extraPairs = dr.extraPairs.map(([key, values]) => ({ key, values: [...values] }));
+        this.regions[dr.name] = region;
       }
-
-      if (line.includes(':')) {
-        const idx = line.indexOf(':');
-        const key = line.slice(0, idx).trim().toLowerCase();
-        const vals = line.slice(idx + 1).split(',').map(v => v.trim());
-
-        if (currentRegion) {
-          if (key === 'bounds' && vals.length >= 4) {
-            currentRegion.x = parseInt(vals[0]);
-            currentRegion.y = parseInt(vals[1]);
-            currentRegion.w = parseInt(vals[2]);
-            currentRegion.h = parseInt(vals[3]);
-          } else if (key === 'xy') {
-            currentRegion.x = parseInt(vals[0]);
-            currentRegion.y = parseInt(vals[1]);
-          } else if (key === 'size' && currentRegion.w === 0) {
-            // Only apply size to region if we haven't got bounds yet
-            currentRegion.w = parseInt(vals[0]);
-            currentRegion.h = parseInt(vals[1]);
-          } else if (key === 'rotate') {
-            const v = vals[0].toLowerCase();
-            if (v === 'true') currentRegion.rotate = 90;
-            else if (v === 'false') currentRegion.rotate = 0;
-            else { const n = parseInt(v); currentRegion.rotate = isNaN(n) ? 0 : n; }
-          } else if (key === 'offsets' && vals.length >= 4) {
-            currentRegion.offsets = vals.map(Number);
-          } else if (key === 'index') {
-            currentRegion.index = parseInt(vals[0]);
-          } else if (key === 'split' && vals.length >= 4) {
-            currentRegion.split = vals.map(Number);
-          } else if (key === 'pad' && vals.length >= 4) {
-            currentRegion.pad = vals.map(Number);
-          } else {
-            currentRegion.extraPairs.push({ key, values: vals.slice() });
-          }
-        } else if (currentPage) {
-          if (key === 'size') {
-            currentPage.width = parseInt(vals[0]);
-            currentPage.height = parseInt(vals[1]);
-          } else if (key === 'format') {
-            currentPage.format = vals[0];
-          } else if (key === 'filter') {
-            currentPage.filter = [vals[0], vals[1]];
-          } else if (key === 'repeat') {
-            currentPage.repeat = vals[0];
-          } else if (key === 'pma') {
-            currentPage.pma = String(vals[0]).toLowerCase() === 'true';
-          }
-        }
-        continue;
-      }
-
-      // No colon and not a .png line → region name
-      if (!currentPage) continue;
-      const atlasName = line;
-      const regionKey = getUniqueRegionKey(atlasName);
-      currentRegion = new AtlasRegion(regionKey, atlasName, currentPage.filename);
-      this.regions[regionKey] = currentRegion;
     }
   }
 
@@ -159,36 +120,10 @@ export class AtlasProcessor {
   /**
    * Crop a region from img (HTMLImageElement or canvas) and undo atlas rotation.
    * Returns a canvas element (w × h) with the sprite in its original orientation.
+   * Delegates to the single rotation seam in core-region-ops.js.
    */
   static cropAndRotate(img, x, y, w, h, rotate) {
-    const isSwapped = rotate === 90 || rotate === 270;
-    const cropW = isSwapped ? h : w;
-    const cropH = isSwapped ? w : h;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-
-    if (rotate === 0) {
-      ctx.drawImage(img, x, y, cropW, cropH, 0, 0, w, h);
-    } else if (rotate === 90) {
-      // Stored in atlas as h×w; un-rotate 90° CW → w×h
-      ctx.translate(w, 0);
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(img, x, y, cropW, cropH, 0, 0, cropW, cropH);
-    } else if (rotate === 270) {
-      // Stored in atlas as h×w; un-rotate 90° CCW → w×h
-      ctx.translate(0, h);
-      ctx.rotate(-Math.PI / 2);
-      ctx.drawImage(img, x, y, cropW, cropH, 0, 0, cropW, cropH);
-    } else if (rotate === 180) {
-      ctx.translate(w, h);
-      ctx.rotate(Math.PI);
-      ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
-    }
-
-    return canvas;
+    return coreCropAndRotate(img, x, y, w, h, rotate);
   }
 
   /** Extract a single region as a canvas (includes offset padding). */
@@ -197,38 +132,8 @@ export class AtlasProcessor {
     if (!region) return null;
     const baseImg = this._loadedImages[region.pageFilename];
     if (!baseImg) return null;
-
-    let { x, y, w, h, rotate, offsets } = region;
     const page = this._pageMap[region.pageFilename];
-
-    if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
-      x = Math.round(x * page.scaleX);
-      y = Math.round(y * page.scaleY);
-      w = Math.round(w * page.scaleX);
-      h = Math.round(h * page.scaleY);
-    }
-
-    const sprite = AtlasProcessor.cropAndRotate(baseImg, x, y, w, h, rotate);
-    const currentW = sprite.width;
-    const currentH = sprite.height;
-
-    if (offsets) {
-      let [offX, offY, origW, origH] = offsets;
-      if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
-        offX = Math.round(offX * page.scaleX);
-        offY = Math.round(offY * page.scaleY);
-        origW = Math.round(origW * page.scaleX);
-        origH = Math.round(origH * page.scaleY);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = origW;
-      canvas.height = origH;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(sprite, offX, origH - offY - currentH);
-      return canvas;
-    }
-
-    return sprite;
+    return extractRegionFromPage(baseImg, region, page);
   }
 
   /** Extract a single region as a base64 PNG data URI. */

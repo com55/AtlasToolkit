@@ -4,6 +4,8 @@
  */
 
 import { AtlasProcessor } from './atlas-extracter.js';
+import { AtlasDocument } from './atlas-document.js';
+import { cropAndRotate, roundHalfEven } from './core-region-ops.js';
 
 // ─── Parse atlas text using AtlasProcessor ──────────────────────────────────
 
@@ -47,11 +49,6 @@ function _formatRotate(val) {
   return null;
 }
 
-function _isDefaultOffsets(offsets, bounds) {
-  if (!offsets || !bounds) return true;
-  return offsets[0] === 0 && offsets[1] === 0 && offsets[2] === bounds[2] && offsets[3] === bounds[3];
-}
-
 function _isDefaultPageFormat(format) {
   return String(format || '').toUpperCase() === 'RGBA8888';
 }
@@ -68,101 +65,34 @@ function _isDefaultPageRepeat(repeat) {
 /**
  * Rebuild atlas text with updated bounds/offsets for specific regions.
  * updatedRegions: { name: [[x,y,w,h], offsets|null, rotateVal] }
+ *
+ * Re-homed onto AtlasDocument: parse -> apply the new page size to the target
+ * page(s) -> withUpdates(regions) -> serialize. The target-page size scoping
+ * (only the matching page, or every page when targetPage is null) replicates
+ * the original line-patcher's `!targetPage || currentPage === targetPage`
+ * rule; the updatedRegions map shape ({name: [bounds, offsets|null, rotate]})
+ * already matches AtlasDocument.withUpdates. Output is canonically serialized
+ * (see AtlasDocument.serialize) rather than byte-preserved — the text is only
+ * ever re-parsed downstream, never diffed.
  */
 export function updateAtlasText(atlasText, newSize, updatedRegions, targetPage = null) {
-  const lines = atlasText.split('\n');
-  const result = [];
-  let currentRegion = null;
-  let currentPage = null;
-  let inPageHeader = false;
-  let rotateWritten = false;
-  let offsetsWritten = false;
-
-  function flushPendingRotate() {
-    if (!currentRegion || !(currentRegion in updatedRegions) || rotateWritten) return;
-    const [, , rv] = updatedRegions[currentRegion];
-    const rs = _formatRotate(rv);
-    if (rs !== null) result.push(`  rotate: ${rs}`);
+  const doc = AtlasDocument.parse(atlasText);
+  for (const page of doc.pages) {
+    if (!targetPage || page.filename === targetPage) {
+      page.size = [newSize[0], newSize[1]];
+    }
   }
-
-  function flushPendingOffsets() {
-    if (!currentRegion || !(currentRegion in updatedRegions) || offsetsWritten) return;
-    const [, off] = updatedRegions[currentRegion];
-    if (off) result.push(`  offsets: ${off[0]}, ${off[1]}, ${off[2]}, ${off[3]}`);
-  }
-
-  for (const line of lines) {
-    const s = line.trim();
-
-    if (/\.png$/i.test(s)) {
-      flushPendingOffsets();
-      flushPendingRotate();
-      result.push(line);
-      currentPage = s;
-      inPageHeader = true;
-      currentRegion = null;
-      rotateWritten = false;
-      offsetsWritten = false;
-      continue;
-    }
-
-    if (inPageHeader) {
-      if (s.startsWith('size:')) {
-        if (!targetPage || currentPage === targetPage) {
-          result.push(`size: ${newSize[0]},${newSize[1]}`);
-        } else {
-          result.push(line);
-        }
-        continue;
-      }
-      if (!s.includes(':') && s) inPageHeader = false;
-    }
-
-    if (!s.includes(':') && s && !/\.png$/i.test(s)) {
-      flushPendingOffsets();
-      flushPendingRotate();
-      currentRegion = s;
-      rotateWritten = false;
-      offsetsWritten = false;
-      result.push(line);
-      continue;
-    }
-
-    if (currentRegion && currentRegion in updatedRegions) {
-      const [nb, no, rv] = updatedRegions[currentRegion];
-      if (s.startsWith('bounds:')) {
-        result.push(`  bounds: ${nb[0]}, ${nb[1]}, ${nb[2]}, ${nb[3]}`);
-        continue;
-      }
-      if (s.startsWith('offsets:')) {
-        if (no) result.push(`  offsets: ${no[0]}, ${no[1]}, ${no[2]}, ${no[3]}`);
-        offsetsWritten = true;
-        continue;
-      }
-      if (s.startsWith('rotate:')) {
-        const rs = _formatRotate(rv);
-        if (rs !== null) result.push(`  rotate: ${rs}`);
-        rotateWritten = true;
-        continue;
-      }
-    }
-
-    result.push(line);
-  }
-
-  flushPendingOffsets();
-  flushPendingRotate();
-  return result.join('\n');
+  return doc.withUpdates(updatedRegions).serialize();
 }
 
-/** Build a complete atlas text from scratch. */
+/**
+ * Build a complete atlas text from scratch.
+ * Re-homed onto AtlasDocument.fromRebuildArgs + serialize. The only bridging
+ * needed is extraPairs shape: this pipeline carries them as {key, values}
+ * objects, while fromRebuildArgs expects [key, values] tuples.
+ */
 export function rebuildAtlasText(pageInfo, newSize, regionNames, regionData) {
-  const lines = [pageInfo.page || 'atlas.png', `size: ${newSize[0]},${newSize[1]}`];
-  if (!_isDefaultPageFormat(pageInfo.format)) lines.push(`format: ${pageInfo.format}`);
-  if (!_isDefaultPageFilter(pageInfo.filter)) lines.push(`filter: ${pageInfo.filter}`);
-  if (!_isDefaultPageRepeat(pageInfo.repeat)) lines.push(`repeat: ${pageInfo.repeat}`);
-  if (pageInfo.pma === true) lines.push('pma: true');
-
+  const normalized = {};
   for (const name of regionNames) {
     if (!(name in regionData)) continue;
     const entry = regionData[name];
@@ -170,26 +100,26 @@ export function rebuildAtlasText(pageInfo, newSize, regionNames, regionData) {
       ? entry
       : [entry.bounds, entry.offsets, entry.rotate, entry.meta || {}];
 
-    const atlasName = meta.atlasName || meta.name || name;
-    lines.push(atlasName);
-    if (Number.isFinite(meta.index) && meta.index !== -1) lines.push(`  index: ${meta.index}`);
-    const rs = _formatRotate(rv);
-    if (rs) lines.push(`  rotate: ${rs}`);
-    lines.push(`  bounds: ${bounds[0]}, ${bounds[1]}, ${bounds[2]}, ${bounds[3]}`);
-    if (offsets && !_isDefaultOffsets(offsets, bounds)) {
-      lines.push(`  offsets: ${offsets[0]}, ${offsets[1]}, ${offsets[2]}, ${offsets[3]}`);
-    }
-    if (Array.isArray(meta.split) && meta.split.length >= 4) lines.push(`  split: ${meta.split.join(', ')}`);
-    if (Array.isArray(meta.pad) && meta.pad.length >= 4) lines.push(`  pad: ${meta.pad.join(', ')}`);
-    if (Array.isArray(meta.extraPairs)) {
-      for (const pair of meta.extraPairs) {
-        if (!pair || !pair.key) continue;
-        const vals = Array.isArray(pair.values) ? pair.values : [];
-        lines.push(`  ${pair.key}: ${vals.join(', ')}`);
-      }
-    }
+    const extraPairs = Array.isArray(meta.extraPairs)
+      ? meta.extraPairs
+          .filter(pair => pair && pair.key)
+          .map(pair => [pair.key, Array.isArray(pair.values) ? pair.values : []])
+      : [];
+
+    normalized[name] = [
+      bounds,
+      offsets,
+      rv,
+      {
+        atlasName: meta.atlasName || meta.name || name,
+        index: meta.index,
+        split: meta.split,
+        pad: meta.pad,
+        extraPairs,
+      },
+    ];
   }
-  return lines.join('\n');
+  return AtlasDocument.fromRebuildArgs(pageInfo, [newSize[0], newSize[1]], regionNames, normalized).serialize();
 }
 
 // ─── Placement strategy ──────────────────────────────────────────────────────
@@ -323,11 +253,11 @@ export class AtlasModifier {
       const y = info.y;
       const w = info.w;
       const h = info.h;
-      const nb = [Math.round(x * sx), Math.round(y * sy), Math.round(w * sx), Math.round(h * sy)];
+      const nb = [roundHalfEven(x * sx), roundHalfEven(y * sy), roundHalfEven(w * sx), roundHalfEven(h * sy)];
       let no = null;
       if (info.offsets) {
         const [ox, oy, ow, oh] = info.offsets;
-        no = [Math.round(ox * sx), Math.round(oy * sy), Math.round(ow * sx), Math.round(oh * sy)];
+        no = [roundHalfEven(ox * sx), roundHalfEven(oy * sy), roundHalfEven(ow * sx), roundHalfEven(oh * sy)];
       }
       updated[name] = [nb, no, info.rotate];
     }
@@ -364,8 +294,8 @@ export class AtlasModifier {
       const ratioW = modW / origCanvasW, ratioH = modH / origCanvasH;
       if (Math.abs(ratioW - ratioH) < 0.05 && !(0.95 < ratioW && ratioW < 1.05)) {
         const scale = (ratioW + ratioH) / 2;
-        origCanvasW = Math.round(origCanvasW * scale);
-        origCanvasH = Math.round(origCanvasH * scale);
+        origCanvasW = roundHalfEven(origCanvasW * scale);
+        origCanvasH = roundHalfEven(origCanvasH * scale);
       } else {
         // Non-proportional scale: treat mod as new full canvas at its actual dimensions
         origCanvasW = modW;
@@ -379,8 +309,8 @@ export class AtlasModifier {
     if (modW !== origCanvasW || modH !== origCanvasH) {
       const scaleX = baseOrigW > 0 ? origCanvasW / baseOrigW : 1;
       const scaleY = baseOrigH > 0 ? origCanvasH / baseOrigH : 1;
-      const pasteX = Math.round(offX_orig * scaleX);
-      const pasteY = origCanvasH - modH - Math.round(offY_orig * scaleY);
+      const pasteX = roundHalfEven(offX_orig * scaleX);
+      const pasteY = origCanvasH - modH - roundHalfEven(offY_orig * scaleY);
       finalMod = document.createElement('canvas');
       finalMod.width = origCanvasW;
       finalMod.height = origCanvasH;
@@ -393,13 +323,7 @@ export class AtlasModifier {
     // Rotate mod if best strategy requires it (PIL ROTATE_90 = 90° CCW)
     let pastedMod = finalMod;
     if (best.rotated) {
-      pastedMod = document.createElement('canvas');
-      pastedMod.width = modH; // after 90° CCW: width=oldHeight
-      pastedMod.height = modW;
-      const rCtx = pastedMod.getContext('2d');
-      rCtx.translate(0, modW);
-      rCtx.rotate(-Math.PI / 2);
-      rCtx.drawImage(finalMod, 0, 0);
+      pastedMod = _rotate90CCW(finalMod);
     }
 
     // Create merged canvas
@@ -488,14 +412,7 @@ export class AtlasModifier {
       const { x, y, rotated } = placementMap[name];
       const sprite = sprites[name];
       if (rotated) {
-        // PIL ROTATE_90 = 90° CCW
-        const rotCanvas = document.createElement('canvas');
-        rotCanvas.width = sprite.height; rotCanvas.height = sprite.width;
-        const rCtx = rotCanvas.getContext('2d');
-        rCtx.translate(0, sprite.width);
-        rCtx.rotate(-Math.PI / 2);
-        rCtx.drawImage(sprite, 0, 0);
-        ctx.drawImage(rotCanvas, x, y);
+        ctx.drawImage(_rotate90CCW(sprite), x, y); // PIL ROTATE_90 (90° CCW)
       } else {
         ctx.drawImage(sprite, x, y);
       }
@@ -592,13 +509,7 @@ export async function repackMultiPage(allSprites, numPages, pageInfos, regionMet
       if (!p) continue;
       const sprite = allSprites[name];
       if (p.rotated) {
-        const rc = document.createElement('canvas');
-        rc.width = sprite.height; rc.height = sprite.width;
-        const rCtx = rc.getContext('2d');
-        rCtx.translate(0, sprite.width);
-        rCtx.rotate(-Math.PI / 2);
-        rCtx.drawImage(sprite, 0, 0);
-        ctx.drawImage(rc, p.x, p.y);
+        ctx.drawImage(_rotate90CCW(sprite), p.x, p.y); // PIL ROTATE_90 (90° CCW)
       } else {
         ctx.drawImage(sprite, p.x, p.y);
       }
@@ -638,6 +549,15 @@ export async function repackMultiPage(allSprites, numPages, pageInfos, regionMet
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Rotate a whole canvas 90° CCW (PIL ROTATE_90) for packing, via the single
+ * rotation seam in core-region-ops. Equivalent to un-rotating a rotate==270
+ * region whose footprint is the source canvas.
+ */
+function _rotate90CCW(src) {
+  return cropAndRotate(src, 0, 0, src.height, src.width, 270);
+}
 
 function _toCanvas(img) {
   if (img instanceof HTMLCanvasElement) return img;
