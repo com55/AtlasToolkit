@@ -5,8 +5,6 @@
 # Test files
 test*
 
-# Tauri build output
-src-tauri/target/
 CLAUDE.md
 # Superpowers SDD scratch (local only)
 .superpowers
