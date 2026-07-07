@@ -168,6 +168,18 @@ export function updateRepackModeAvailability() {
   modeGroup.classList.toggle('hidden', !showMode);
   select.disabled = !showMode;
 
+  // "Repack All Pages To One" only carries the active page's modded pixels
+  // into the combined canvas — mods on other pages of a multi-page atlas fall
+  // back to unmodified image data (see _applyRepackAllOverride in
+  // atlas-api.js). Keep that option unavailable for multi-page atlases; the
+  // per-page "Repack for Each Page" mode remains available and correct.
+  const allOption = select.querySelector('option[value="all"]');
+  if (allOption) allOption.disabled = hasMultiPage;
+  if (hasMultiPage && select.value === 'all') {
+    select.value = 'page';
+    AtlasAPI.set_pref('repackMode', 'page');
+  }
+
   if (!hasMultiPage) {
     select.value = 'page';
     AtlasAPI.set_pref('repackMode', 'page');
