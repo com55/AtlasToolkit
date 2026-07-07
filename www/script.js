@@ -96,6 +96,13 @@ function registerServiceWorker() {
 
 async function openFile() {
   try {
+    if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
+      const ok = await showConfirm(
+        'You have unsaved atlas modifications. Load a new atlas and discard them?',
+        'Discard modifications?',
+      );
+      if (!ok) return;
+    }
     const success = await AtlasAPI.choose_file();
     if (success) {
       state.selectedIndices.clear();
