@@ -23,7 +23,6 @@ let _preRepackCanvas = null;
 let _preRepackText = null;
 let _lastSaveHandle = null;
 let _currentModifyPage = null;
-let _currentAtlasPath = null;
 let _currentSkel = null; // { name, blob } | null
 
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
@@ -61,13 +60,12 @@ function _isInstalledPWA() {
 }
 
 /**
- * Whether saving should open a folder picker (Tauri native, or installed-PWA
- * File System Access API) rather than downloading a zip. A browser tab — even a
+ * Whether saving should open a folder picker (installed-PWA File System
+ * Access API) rather than downloading a zip. A browser tab — even a
  * Chromium one with the FS API — gets a zip download.
  */
 function _useFolderPicker() {
-  return platform.isTauri
-    || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
+  return _isInstalledPWA() && typeof window.showDirectoryPicker === 'function';
 }
 
 /** Base name (no extension) of the loaded atlas, for naming zip downloads. */
@@ -80,13 +78,6 @@ function _isImageFile(file) {
   if (!file) return false;
   if (typeof file.type === 'string' && file.type === 'image/png') return true;
   return /\.png$/i.test(file.name || '');
-}
-
-function _atlasDirName(path) {
-  if (!path) return null;
-  const norm = String(path).replace(/\\/g, '/');
-  const idx = norm.lastIndexOf('/');
-  return idx >= 0 ? path.slice(0, idx) : null;
 }
 
 function _getRegionPageMap() {
@@ -483,19 +474,6 @@ async function _saveBlobWithDialog(filename, blob) {
  * @param {Blob} blob
  */
 async function _downloadBlob(filename, blob) {
-  // If running in Capacitor, use Filesystem plugin to write to Documents
-  if (window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins.Filesystem) {
-    const { Filesystem, Directory } = window.Capacitor.Plugins;
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Documents });
-    return;
-  }
-
   // Desktop browser: prefer Save As dialog (File System Access API).
   if (_isDesktopFsApiAvailable()) {
     await _saveBlobWithDialog(filename, blob);
@@ -520,18 +498,7 @@ function _canvasToBlob(canvas) {
 }
 
 /** Pick one or more files using a hidden file input triggered by a user gesture. */
-function _acceptToExtensions(accept) {
-  return accept.split(',')
-    .map(s => s.trim())
-    .filter(s => s.startsWith('.'))
-    .map(s => s.slice(1).toLowerCase());
-}
-
 function _pickFiles({ accept = '', multiple = false } = {}) {
-  // Tauri webview blocks <input type=file>; use the native dialog instead.
-  if (platform.isTauri) {
-    return platform.pickFiles({ extensions: _acceptToExtensions(accept), multiple });
-  }
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -606,7 +573,6 @@ async function _loadAtlasFiles(atlasFile, imageFileMap) {
 
     _currentAtlasFilename = atlasFile.name;
     _currentAtlasText = convertedText;
-    _currentAtlasPath = null;
     _currentSkel = null;
 
     // Clear modify state
@@ -625,44 +591,11 @@ async function _loadAtlasFiles(atlasFile, imageFileMap) {
   }
 }
 
-/**
- * Tauri-only: load atlas + sibling PNGs (+ optional .skel) directly from a disk path.
- * Falls back to the missing-image dialog if any sibling PNG isn't on disk.
- */
-async function _loadAtlasFromPath(atlasPath) {
-  if (!platform.isTauri) return false;
-  try {
-    const { atlasText, atlasName, imageBlobs, skelBlob, skelName, missingPages } =
-      await platform.readAtlasWithSiblings(atlasPath);
-
-    // Use the existing pipeline so all parse/scale logic stays in one place.
-    const convertedText = autoConvertAtlas(atlasText);
-    const atlasFile = new File([convertedText], atlasName, { type: 'text/plain' });
-
-    const imageFileMap = {};
-    for (const [name, file] of imageBlobs) imageFileMap[name] = file;
-
-    // _loadAtlasFiles handles missingPages via the missing-image dialog.
-    const ok = await _loadAtlasFiles(atlasFile, imageFileMap);
-    if (!ok) return false;
-
-    _currentAtlasPath = atlasPath;
-    _currentSkel = (skelBlob && skelName) ? { name: skelName, blob: skelBlob } : null;
-    return true;
-  } catch (e) {
-    console.error('load_from_path error:', e);
-    return false;
-  }
-}
-
 // ─── Public API (mirrors pywebview.api) ───────────────────────────────────────
 
 export const AtlasAPI = {
 
-  /**
-   * Read a preference. Tauri: from config.json in appConfigDir.
-   * Web/PWA: from localStorage. Returns a Promise in both cases.
-   */
+  /** Read a preference from localStorage. Returns a Promise. */
   get_pref(key, defaultValue = null) {
     return platform.loadPref(key, defaultValue);
   },
@@ -678,12 +611,6 @@ export const AtlasAPI = {
 
   /** Open a file picker that accepts .atlas and image files. */
   async choose_file() {
-    // Tauri: pick the atlas via native dialog and load sibling PNGs from disk.
-    if (platform.isTauri) {
-      const picked = await platform.pickAtlasFile();
-      if (!picked || !picked.path) return false;
-      return _loadAtlasFromPath(picked.path);
-    }
     const files = await _pickFiles({
       accept: '.atlas,.txt,text/plain,image/png,.png',
       multiple: true,
@@ -704,13 +631,6 @@ export const AtlasAPI = {
   async load_atlas_from_file(atlasFile, imageFileMap = {}) {
     return _loadAtlasFiles(atlasFile, imageFileMap);
   },
-
-  /** Tauri-only: load an atlas (and sibling PNGs / .skel) from a disk path. */
-  async load_from_path(atlasPath) {
-    return _loadAtlasFromPath(atlasPath);
-  },
-
-  get_atlas_path() { return _currentAtlasPath; },
 
   get_region_names() {
     if (!_processor) return [];
@@ -761,10 +681,9 @@ export const AtlasAPI = {
     if (extracted.length === 0) return 'No regions to extract.';
 
     try {
-      // Tauri / installed PWA: pick a folder and write the PNGs into it.
+      // Installed PWA: pick a folder and write the PNGs into it.
       if (_useFolderPicker()) {
-        const defaultPath = _currentAtlasPath ? _atlasDirName(_currentAtlasPath) : null;
-        const folder = await platform.pickSaveFolder(defaultPath);
+        const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(
           folder,
@@ -995,14 +914,13 @@ export const AtlasAPI = {
     }
   },
 
-  /** Save the merged atlas files. Tauri: folder picker + batched write.
-   *  Web/PWA: per-file Save As dialogs / downloads (unchanged). */
+  /** Save the merged atlas files. Installed PWA: folder picker + batched
+   *  write. Browser tab: zip download. */
   async save_modified() {
     if (!_mergedAtlasText) return 'Error: No merged data to save.';
     try {
       // Build the list of outputs (png(s), atlas text, optional skel) up front
-      // so we can route through either the Tauri folder writer or the
-      // per-file download flow.
+      // so we can route through either the folder writer or the zip download.
       const outputs = [];
 
       if (_mergedPages && _mergedPages.length > 0) {
@@ -1022,10 +940,9 @@ export const AtlasAPI = {
       outputs.push({ name: _currentAtlasFilename, data: _mergedAtlasText });
       if (_currentSkel) outputs.push({ name: _currentSkel.name, data: _currentSkel.blob });
 
-      // Tauri / installed PWA: pick a folder and write all outputs into it.
+      // Installed PWA: pick a folder and write all outputs into it.
       if (_useFolderPicker()) {
-        const defaultPath = _atlasDirName(_currentAtlasPath);
-        const folder = await platform.pickSaveFolder(defaultPath);
+        const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs);
         const fileNames = outputs.map(o => o.name).join(', ');

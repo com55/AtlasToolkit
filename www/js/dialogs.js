@@ -1,5 +1,3 @@
-import { platform } from './platform.js';
-
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-overlay');
@@ -188,11 +186,9 @@ export function showMissingAtlasImagesDialog(missingPages) {
     confirmBtn.innerText = 'Load atlas';
     confirmBtn.disabled = true;
 
-    let unsubscribeTauriDrag = null;
     const close = (result) => {
       window.removeEventListener('keydown', onKeyDown);
       delete document.body.dataset.missingDialogOpen;
-      if (unsubscribeTauriDrag) unsubscribeTauriDrag();
       overlay.remove();
       resolve(result);
     };
@@ -219,42 +215,62 @@ export function showMissingAtlasImagesDialog(missingPages) {
     document.body.appendChild(overlay);
     document.body.dataset.missingDialogOpen = 'true';
 
-    // Tauri's webview intercepts drag-drop at the native layer, so the DOM
-    // dragover/drop listeners on the rows above never fire there. Subscribe
-    // to Tauri's own drag-drop event instead and resolve the target row from
-    // the (physical-pixel) cursor position.
-    if (platform.isTauri) {
-      const rowAtPosition = (position) => {
-        if (!position) return null;
-        const dpr = window.devicePixelRatio || 1;
-        const el = document.elementFromPoint(position.x / dpr, position.y / dpr);
-        return el ? el.closest('.missing-images-row') : null;
-      };
-      const clearDragOver = () => { for (const r of rowByPage.values()) r.classList.remove('drag-over'); };
-
-      platform.subscribeDragDrop({
-        onOver: (p) => {
-          const row = rowAtPosition(p?.position);
-          for (const [, r] of rowByPage) r.classList.toggle('drag-over', r === row);
-        },
-        onLeave: clearDragOver,
-        onDrop: async (paths, p) => {
-          clearDragOver();
-          const row = rowAtPosition(p?.position);
-          const pageName = row && [...rowByPage.entries()].find(([, r]) => r === row)?.[0];
-          if (!pageName) return;
-          const pngPath = (paths || []).find(path => /\.png$/i.test(path));
-          if (!pngPath) return;
-          const { droppedImageFiles } = await platform.readDroppedPaths([pngPath]);
-          const file = droppedImageFiles.values().next().value;
-          if (file) applySelection(pageName, file);
-        },
-      }).then((unlisten) => { unsubscribeTauriDrag = unlisten; });
-    }
-
     window.addEventListener('keydown', onKeyDown);
     updateConfirmState();
     const firstBtn = rowByPage.get(pages[0])?.querySelector('button');
     if (firstBtn) firstBtn.focus();
   });
+}
+
+/**
+ * Show a "new version available" toast for the service-worker update flow.
+ * Reuses the existing toast-update visual pattern (see style.css). Clicking
+ * the action button calls onUpdate(), which should tell the waiting worker
+ * to activate; the caller reloads the page on the resulting controllerchange.
+ */
+export function showUpdateToast(onUpdate) {
+  const existing = document.getElementById('update-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'update-toast';
+  toast.className = 'toast-update';
+
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('class', 'toast-update-icon');
+  icon.setAttribute('viewBox', '0 -960 960 960');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M440-320v-326L336-542l-56-58 200-200 200 200-56 58-104-104v326h-80ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z');
+  icon.appendChild(path);
+
+  const title = document.createElement('span');
+  title.className = 'toast-update-title';
+  title.textContent = 'Update available';
+
+  const sub = document.createElement('span');
+  sub.className = 'toast-update-sub';
+  sub.textContent = 'A new version is ready. Refresh to update.';
+
+  const actionBtn = document.createElement('button');
+  actionBtn.className = 'toast-update-btn-go';
+  actionBtn.textContent = 'Refresh';
+  actionBtn.addEventListener('click', () => {
+    actionBtn.disabled = true;
+    actionBtn.textContent = 'Refreshing...';
+    sub.textContent = 'Applying update...';
+    onUpdate();
+  });
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-update-btn-close';
+  closeBtn.textContent = 'x';
+  closeBtn.addEventListener('click', () => toast.remove());
+
+  toast.appendChild(icon);
+  toast.appendChild(title);
+  toast.appendChild(sub);
+  toast.appendChild(actionBtn);
+  toast.appendChild(closeBtn);
+
+  document.getElementById('right-panel').appendChild(toast);
 }
