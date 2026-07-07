@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v4';
+const CACHE_NAME = 'atlas-toolkit-v5';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
@@ -22,7 +22,6 @@ const CORE_ASSETS = [
   'js/preview.js',
   'js/region-list.js',
   'js/state.js',
-  'js/update.js',
   'js/zip.js',
 ].map((path) => new URL(path, APP_BASE_URL).href);
 
@@ -30,7 +29,16 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
   );
-  self.skipWaiting();
+  // Don't skipWaiting() here — a deployed update would otherwise swap the
+  // controller mid-session against the page the user is still running. The
+  // new worker waits until the page acknowledges it via a SKIP_WAITING
+  // message (see script.js's update-prompt flow).
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING' || event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
