@@ -3,7 +3,7 @@ import { state, getSelectedNames } from './state.js';
 import { loadRegions, updateButtons } from './region-list.js';
 import { setMode, onModPreviewReceived, getRepackMode } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
-import { showToast } from './dialogs.js';
+import { showToast, showConfirm } from './dialogs.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -22,6 +22,16 @@ async function processDroppedFiles(files) {
 
   const isPng = (f) => f && (f.type === 'image/png' || /\.png$/i.test(f.name || ''));
   const hasNonImage = files.some(f => !isPng(f));
+
+  // Dropping a new atlas (a non-image file is present) over an in-progress
+  // edit session would discard unsaved modifications — confirm first.
+  if (hasNonImage && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
+    const ok = await showConfirm(
+      'You have unsaved atlas modifications. Load a new atlas and discard them?',
+      'Discard modifications?',
+    );
+    if (!ok) return;
+  }
 
   const loaded = await AtlasAPI.load_from_files(files, { showNoAtlasToast: false });
 

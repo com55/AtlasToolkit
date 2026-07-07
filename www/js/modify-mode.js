@@ -6,7 +6,7 @@ import {
   drawRegionOverlay, clearOverlay,
   updatePreview,
 } from './preview.js';
-import { showToast } from './dialogs.js';
+import { showToast, showConfirm } from './dialogs.js';
 
 export function setMode(mode) {
   state.currentMode = mode;
@@ -35,11 +35,6 @@ export function setMode(mode) {
   }
 }
 
-function lockRepackForMultiPage() {
-  const repackOptions = document.getElementById('repack-options');
-  if (repackOptions) repackOptions.classList.add('hidden');
-}
-
 export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
@@ -48,7 +43,6 @@ export async function enterEditMode() {
       state.modifyRegionBounds = data.regions || {};
       state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
       updateRepackModeAvailability();
-      if (state.modifyPages.length > 1) lockRepackForMultiPage();
       state.hasModImage = false;
       const statusMsg = state.modifyPages.length > 1
         ? 'Multi-page atlas — select regions to edit.'
@@ -79,6 +73,13 @@ export async function enterEditMode() {
 }
 
 export async function exitEditMode() {
+  if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
+    const ok = await showConfirm(
+      'You have unsaved atlas modifications. Continue and discard them?',
+      'Discard modifications?',
+    );
+    if (!ok) return;
+  }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
   setMode('extract');
   state.modifyRegionBounds = {};
