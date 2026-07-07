@@ -2,8 +2,11 @@
 .vscode
 .claude
 
-# Test files
+# Scratch test files (stray root-level test scripts), but not the real
+# committed test suite in /test/
 test*
+!/test/
+!/test/**
 
 CLAUDE.md
 # Superpowers SDD scratch (local only)
