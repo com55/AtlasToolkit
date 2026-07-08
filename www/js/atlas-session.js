@@ -18,10 +18,14 @@ export class ModBatch {
   constructor(names, source) {
     this.names = names;         // array of region names this batch targeted
     this.source = source;       // original mod input (File/Blob/Image/Canvas)
-    this.sharedCanvas = false;  // full-canvas flag — inert until Phase B wires
-                                // full_canvas_regions into the JS repacker
-    this.prepared = null;       // loaded HTMLImageElement/Canvas, reusable for
-                                // replay (dropped Files aren't re-readable)
+    this.sharedCanvas = false;  // strict shared-canvas-mod flag (sharedCanvasMod
+                                // from _prepareModImage); feeds fullCanvasRegions
+    this.loaded = null;         // loaded HTMLImageElement/Canvas, reusable for
+                                // replay (dropped Files aren't re-readable) — the
+                                // multi-page merge path re-prepares from this
+    this.prepared = null;       // single-page prepared mod (padded canvas + dims
+                                // + sharedCanvasMod), resolved once from pristine;
+                                // null for multi-page (re-prepared per page)
   }
 }
 
@@ -79,14 +83,54 @@ export class AtlasSession {
   }
 
   // ─── Batch registration ─────────────────────────────────────────────────
+  /**
+   * Record one mod apply. Resolves + pads the mod against the PRISTINE atlas
+   * (via _prepareModImage) so `moddedSprites[name]` holds the padded mod image
+   * (the same pixels merge would paste) — this is what the repack overlay packs.
+   * Mirrors session.py::_register_mod_batch, including the single- vs multi-page
+   * split: single-page caches the prepared mod on the batch (merge reuses it,
+   * never re-resolving on the evolved canvas); multi-page re-prepares per page.
+   */
   async _registerModBatch(source, selectedNames) {
     if (!selectedNames || selectedNames.length === 0) return null;
     const batch = new ModBatch([...selectedNames], source);
-    batch.prepared = await this._prepareSource(source);
-    for (const name of selectedNames) this.moddedSprites[name] = batch.prepared;
+    batch.loaded = await this._prepareSource(source);
+
+    if (this.isMultiPage) {
+      for (const page of this.processor.pages) {
+        const pageImg = this.processor.getPageImage(page.filename);
+        if (!pageImg) continue;
+        const pageNames = this._regionsOnPage(selectedNames, page.filename);
+        if (pageNames.length === 0) continue;
+        const modifier = new AtlasModifier(this.atlasText, this.filename, pageImg, page.filename);
+        const ordered = this._orderSelection(modifier, pageNames);
+        const prep = modifier._prepareModImage(batch.loaded, ordered);
+        if (prep.sharedCanvasMod) batch.sharedCanvas = true;
+        for (const name of pageNames) this.moddedSprites[name] = prep.canvas;
+      }
+    } else {
+      const modifier = this._freshSinglePageModifier();
+      if (!modifier) return null;
+      const ordered = this._orderSelection(modifier, selectedNames);
+      const prep = modifier._prepareModImage(batch.loaded, ordered);
+      batch.prepared = prep;
+      batch.sharedCanvas = prep.sharedCanvasMod;
+      for (const name of selectedNames) this.moddedSprites[name] = prep.canvas;
+    }
+
     this.modBatches.push(batch);
     this.modificationsSaved = false;
     return batch;
+  }
+
+  // ─── Full-canvas regions (feeds single-page repack offset reset) ──────────
+  /** Union of batch.names across batches whose mod filled the shared canvas. */
+  _fullCanvasRegions() {
+    const regions = new Set();
+    for (const batch of this.modBatches) {
+      if (batch.sharedCanvas) for (const name of batch.names) regions.add(name);
+    }
+    return regions;
   }
 
   _orderSelection(modifier, names) {
@@ -115,7 +159,9 @@ export class AtlasSession {
     let text = modifier.atlasText;
     for (const batch of this.modBatches) {
       const ordered = this._orderSelection(modifier, batch.names);
-      const res = modifier.mergeModImage(batch.prepared, ordered);
+      // Single-page replay reuses the batch's pristine-resolved prepared mod, so
+      // padding never re-resolves against the (already-merged) evolving canvas.
+      const res = modifier.mergeModImage(batch.loaded, ordered, batch.prepared);
       canvas = res.mergedCanvas;
       text = res.atlasText;
       // Adopt this batch's result so the NEXT batch merges onto it (sequential
@@ -126,14 +172,15 @@ export class AtlasSession {
   }
 
   async _rebuildSinglePageRepack() {
-    // Repack the freshly-replayed merge result. Mirrors the existing JS
-    // merge->repack pipeline (repack extracts raw sprites from the merged
-    // canvas). This differs from session.py's repack_with_modded_sprites but
-    // matches the shipped JS AtlasModifier.repack contract, which this task
-    // must not change (Phase B territory).
-    const { canvas, text } = this._rebuildSinglePageMerge();
-    const modifier = new AtlasModifier(text, this.filename, canvas, this._firstPageName());
-    const repacked = await modifier.repack(canvas, text);
+    // Port of session.py::_rebuild_single_page_repack: extract every region's
+    // raw sprite from the PRISTINE base, overlay moddedSprites (padded), then
+    // pack. Non-modded regions keep their pristine offsets; fullCanvasRegions
+    // get default offsets — the offsets-preserved-on-repack asymmetry. (Merge,
+    // by contrast, resets every touched region's offsets to default.)
+    const modifier = this._freshSinglePageModifier();
+    if (!modifier) throw new Error('No single-page modifier');
+    const repacked = await modifier.repackWithModdedSprites(
+      this.moddedSprites, this._fullCanvasRegions());
     return { canvas: repacked.canvas, text: repacked.atlasText };
   }
 
@@ -168,7 +215,9 @@ export class AtlasSession {
         if (pageNames.length === 0) continue;
         const modifier = new AtlasModifier(text, this.filename, pageImages[pageName], pageName);
         const ordered = this._orderSelection(modifier, pageNames);
-        const res = modifier.mergeModImage(batch.prepared, ordered);
+        // Multi-page merge re-prepares per page from the loaded mod (batch.prepared
+        // is null for multi-page); mirrors session.py's per-page merge_mod_image.
+        const res = modifier.mergeModImage(batch.loaded, ordered);
         // mergeModImage with a targetPage only rewrites that page's size line
         // and its regions' bounds in the full text; other pages are untouched.
         text = res.atlasText;
@@ -190,8 +239,13 @@ export class AtlasSession {
       if (c) allSprites[name] = c;
     }
     for (const [name, sprite] of Object.entries(this.moddedSprites)) {
-      if (name in allSprites) allSprites[name] = sprite;
+      if (name in allSprites) allSprites[name] = _toCanvas(sprite);
     }
+    // fullCanvasRegions is intentionally NOT threaded here: repackMultiPage emits
+    // no offsets line at all, which is identical to Python repack_multi_page's
+    // result (both the in-full-canvas (0,0,w,h) and not-in branches serialize to
+    // an omitted offsets line). So multi-page repack never preserves pristine
+    // offsets — the offsets asymmetry is a single-page-only distinction.
 
     const numPages = this.processor.pages.length;
     const pageInfos = this.processor.pages.map(p => ({
@@ -223,11 +277,6 @@ export class AtlasSession {
 
   _setActiveMulti(pages, text) {
     this.active = { canvas: null, pages, text };
-  }
-
-  /** Externally-driven active override (used by the "repack all pages" path). */
-  setActiveOverride(canvas, text) {
-    this._setActiveSingle(canvas, text);
   }
 
   _buildResult() {
