@@ -284,33 +284,6 @@ button {
   fill: #aaa;
 }
 
-.repack-mode-label {
-  font-size: 12px;
-  color: #bbb;
-}
-
-#repack-mode-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.repack-mode-select {
-  height: 28px;
-  background-color: #2f2f2f;
-  color: #ddd;
-  border: 1px solid #555;
-  border-radius: 4px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-
-.repack-mode-select:disabled {
-  color: #888;
-  border-color: #444;
-  background-color: #272727;
-}
-
 .repack-info-btn {
   height: 26px;
   width: 26px;
@@ -966,22 +939,6 @@ img#preview-img {
 
   #repack-options {
     gap: 8px;
-  }
-
-  .repack-mode-label {
-    width: 100%;
-  }
-
-  #repack-mode-group {
-    width: calc(100% - 42px);
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .repack-mode-select {
-    width: 100%;
-    min-width: 0;
   }
 
   #preview-container {

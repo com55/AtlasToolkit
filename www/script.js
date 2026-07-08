@@ -12,10 +12,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   initPanelResizer();
   registerServiceWorker();
 
-  const repackPref     = await AtlasAPI.get_pref('repack', false);
-  const repackModePref = await AtlasAPI.get_pref('repackMode', 'page');
+  const repackPref = await AtlasAPI.get_pref('repack', false);
   document.getElementById('chk-repack').checked = repackPref;
-  document.getElementById('sel-repack-mode').value = repackModePref === 'all' ? 'all' : 'page';
 
   initRepackInfoOverlay();
 

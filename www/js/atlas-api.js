@@ -6,7 +6,6 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor } from './atlas-extracter.js';
-import { parseAtlas, rebuildAtlasText } from './atlas-modifier.js';
 import { platform } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
@@ -94,149 +93,6 @@ function _resolveModifyPageFromSelection(selectedNames) {
   }
   if (pages.size !== 1) return null;
   return Array.from(pages)[0];
-}
-
-function _packCanvasesSimple(sprites) {
-  if (!sprites || sprites.length === 0) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    return { canvas, placements: {} };
-  }
-
-  const totalArea = sprites.reduce((sum, sprite) => sum + sprite.canvas.width * sprite.canvas.height, 0);
-  const maxW = Math.max(...sprites.map(sprite => sprite.canvas.width));
-  const targetRowW = Math.max(maxW, Math.ceil(Math.sqrt(totalArea)));
-
-  let x = 0;
-  let y = 0;
-  let rowH = 0;
-  let usedW = 0;
-  const placements = {};
-
-  for (const sprite of sprites) {
-    const w = sprite.canvas.width;
-    const h = sprite.canvas.height;
-    if (x > 0 && x + w > targetRowW) {
-      x = 0;
-      y += rowH;
-      rowH = 0;
-    }
-    placements[sprite.name] = { x, y, w, h };
-    x += w;
-    rowH = Math.max(rowH, h);
-    usedW = Math.max(usedW, x);
-  }
-
-  const usedH = y + rowH;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, usedW);
-  canvas.height = Math.max(1, usedH);
-  const ctx = canvas.getContext('2d');
-
-  for (const sprite of sprites) {
-    const p = placements[sprite.name];
-    ctx.drawImage(sprite.canvas, p.x, p.y);
-  }
-
-  return { canvas, placements };
-}
-
-function _buildRegionBoundsFromAtlasText(atlasText) {
-  const { regions } = parseAtlas(atlasText);
-  const regionBounds = {};
-  for (const [name, info] of Object.entries(regions)) {
-    regionBounds[name] = [...info.bounds, info.rotate];
-  }
-  return regionBounds;
-}
-
-/**
- * "Repack all pages to one" post-step: collapse the session's current merge
- * result into a single page via the legacy _repackAllPagesToSingle path, and
- * install it as the session's active output so save/preview see it.
- * (Its multi-page limitations are pre-existing and scoped to Phase B.)
- */
-async function _applyRepackAllOverride() {
-  if (!_session) return null;
-  const merged = _session.getMergedOutput();
-  if (!merged) return null;
-  const pageCanvas = merged.canvas || (merged.pages && merged.pages[0]) || null;
-  const activePage = _processor && _processor.pages.length > 0 ? _processor.pages[0].filename : null;
-  const collapsed = await _repackAllPagesToSingle(pageCanvas, merged.text, activePage);
-  if (!collapsed) return null;
-  _session.setActiveOverride(collapsed.canvas, collapsed.atlasText);
-  return {
-    image: collapsed.canvas.toDataURL('image/png'),
-    regions: _buildRegionBoundsFromAtlasText(collapsed.atlasText),
-  };
-}
-
-async function _repackAllPagesToSingle(mergedPageCanvas, atlasText, activePage) {
-  if (!_processor || !atlasText) return null;
-
-  const proc = new AtlasProcessor(atlasText);
-  const pageImageMap = {};
-  for (const page of proc.pages) {
-    if (activePage && page.filename === activePage && mergedPageCanvas) {
-      pageImageMap[page.filename] = mergedPageCanvas;
-    } else {
-      pageImageMap[page.filename] = _processor.getPageImage(page.filename);
-    }
-  }
-
-  for (const [pageName, img] of Object.entries(pageImageMap)) {
-    if (!img) continue;
-    proc._loadedImages[pageName] = img;
-    const page = proc._pageMap[pageName];
-    if (!page) continue;
-    const realW = img.naturalWidth || img.width || 0;
-    const realH = img.naturalHeight || img.height || 0;
-    if (page.width && page.height && realW > 0 && realH > 0) {
-      page.scaleX = realW / page.width;
-      page.scaleY = realH / page.height;
-    }
-  }
-
-  const regionNames = Object.keys(proc.regions);
-  const sprites = [];
-  for (const name of regionNames) {
-    const canvas = proc.extractRegion(name);
-    if (!canvas) continue;
-    sprites.push({ name, canvas });
-  }
-
-  const { canvas: packedCanvas, placements } = _packCanvasesSimple(sprites);
-  const pageInfo = proc.pages.length > 0
-    ? {
-        page: proc.pages[0].filename,
-        format: proc.pages[0].format,
-        filter: `${proc.pages[0].filter[0]}, ${proc.pages[0].filter[1]}`,
-        repeat: proc.pages[0].repeat,
-      }
-    : { page: 'atlas.png', format: 'RGBA8888', filter: 'Nearest, Nearest', repeat: 'none' };
-
-  const regionData = {};
-  for (const name of regionNames) {
-    const p = placements[name];
-    if (!p) continue;
-    const region = proc.regions[name];
-    regionData[name] = [
-      [p.x, p.y, p.w, p.h],
-      region && region.offsets ? region.offsets : null,
-      0,
-      {
-        atlasName: region && region.atlasName ? region.atlasName : name,
-        index: region && Number.isFinite(region.index) ? region.index : -1,
-        split: region ? region.split : null,
-        pad: region ? region.pad : null,
-        extraPairs: region && Array.isArray(region.extraPairs) ? region.extraPairs : [],
-      },
-    ];
-  }
-
-  const atlasOut = rebuildAtlasText(pageInfo, [packedCanvas.width, packedCanvas.height], regionNames, regionData);
-  return { canvas: packedCanvas, atlasText: atlasOut };
 }
 
 function _normalizeName(name) {
@@ -658,27 +514,18 @@ export const AtlasAPI = {
   },
 
   /** Pick a mod PNG and process it. */
-  async select_mod_image(selectedNames, repack = false, repackMode = 'page') {
+  async select_mod_image(selectedNames, repack = false) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
     const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
     if (files.length === 0) return null;
-    return AtlasAPI.process_mod_image(files[0], selectedNames, repack, repackMode);
+    return AtlasAPI.process_mod_image(files[0], selectedNames, repack);
   },
 
   /** Process a mod image (File or canvas/img) for the selected regions. */
-  async process_mod_image(source, selectedNames, repack = false, repackMode = 'page') {
+  async process_mod_image(source, selectedNames, repack = false) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
     try {
-      // "Repack all pages to one" is a JS-only post-step layered on the merge
-      // result; the session itself only knows merge / per-page repack. It's
-      // unsafe for multi-page atlases (see _applyRepackAllOverride) — the UI
-      // already hides that option there, but guard here too in case it's
-      // bypassed, falling back to the safe per-page repack instead.
-      const isMultiPage = !!_processor && _processor.pages.length > 1;
-      const wantAll = repack && repackMode === 'all' && !isMultiPage;
-      const result = await _session.processModImage(source, selectedNames, repack && !wantAll);
-      if (!result) return null;
-      return wantAll ? (await _applyRepackAllOverride()) || result : result;
+      return await _session.processModImage(source, selectedNames, repack);
     } catch (e) {
       console.error('process_mod_image error:', e);
       if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
@@ -736,16 +583,10 @@ export const AtlasAPI = {
   },
 
   /** Toggle repack on/off; the session lazily rebuilds whichever result is stale. */
-  async toggle_repack(repack, repackMode = 'page') {
+  async toggle_repack(repack) {
     if (!_session || _session.modBatches.length === 0) return null;
     try {
-      // See process_mod_image: "all" mode is unsafe for multi-page atlases,
-      // guard here too in case the UI gating is bypassed.
-      const isMultiPage = !!_processor && _processor.pages.length > 1;
-      const wantAll = repack && repackMode === 'all' && !isMultiPage;
-      const result = await _session.toggleRepack(repack && !wantAll);
-      if (!result) return null;
-      return wantAll ? (await _applyRepackAllOverride()) || result : result;
+      return await _session.toggleRepack(repack);
     } catch (e) {
       console.error('toggle_repack error:', e);
       return null;
