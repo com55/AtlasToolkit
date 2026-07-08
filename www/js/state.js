@@ -11,7 +11,6 @@ export const state = {
   modifyRegionPages: {},
   modifyActivePage: null,
   viewState: { scale: 1, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
-  atlasPath: null,
 };
 
 export function getSelectedNames() {
