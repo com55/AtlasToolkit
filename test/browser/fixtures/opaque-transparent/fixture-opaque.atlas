@@ -1,0 +1,14 @@
+fixture-opaque.png
+size: 32, 10
+format: RGBA8888
+filter: Nearest, Nearest
+repeat: none
+plain
+bounds: 0, 0, 10, 10
+withOffsets
+bounds: 10, 0, 8, 6
+offsets: 2, 2, 16, 10
+dupeA
+bounds: 20, 0, 6, 6
+dupeB
+bounds: 26, 0, 6, 6
