@@ -84,17 +84,6 @@ function _getRegionPageMap() {
   return map;
 }
 
-function _resolveModifyPageFromSelection(selectedNames) {
-  if (!_processor || !selectedNames || selectedNames.length === 0) return null;
-  const pages = new Set();
-  for (const name of selectedNames) {
-    const page = AtlasAPI.get_region_page_name(name);
-    if (page) pages.add(page);
-  }
-  if (pages.size !== 1) return null;
-  return Array.from(pages)[0];
-}
-
 function _normalizeName(name) {
   return String(name || '').trim().toLowerCase();
 }
