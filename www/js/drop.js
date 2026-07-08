@@ -1,7 +1,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedNames } from './state.js';
 import { loadRegions, updateButtons } from './region-list.js';
-import { setMode, onModPreviewReceived, getRepackMode } from './modify-mode.js';
+import { setMode, onModPreviewReceived } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
 
@@ -61,9 +61,8 @@ async function processDroppedFiles(files) {
   if (imgFile && state.currentMode === 'modify') {
     const names = getSelectedNames();
     if (names.length === 0) { showToast('Select at least one region first.', 'error'); return; }
-    const repack     = document.getElementById('chk-repack').checked;
-    const repackMode = getRepackMode();
-    const result     = await AtlasAPI.process_mod_image(imgFile, names, repack, repackMode);
+    const repack = document.getElementById('chk-repack').checked;
+    const result = await AtlasAPI.process_mod_image(imgFile, names, repack);
     if (result) {
       onModPreviewReceived(result);
       showToast('Mod image loaded via drag & drop.', 'success');

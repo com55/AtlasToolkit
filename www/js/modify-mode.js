@@ -42,7 +42,6 @@ export async function enterEditMode() {
       setMode('modify');
       state.modifyRegionBounds = data.regions || {};
       state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
-      updateRepackModeAvailability();
       state.hasModImage = false;
       const statusMsg = state.modifyPages.length > 1
         ? 'Multi-page atlas — select regions to edit.'
@@ -97,9 +96,8 @@ export async function ReplaceSelected() {
   if (names.length === 0) { showToast('Select at least one region to edit.', 'error'); return; }
   try {
     document.getElementById('modify-status-text').innerText = 'Selecting mod image...';
-    const repack     = document.getElementById('chk-repack').checked;
-    const repackMode = getRepackMode();
-    const result     = await AtlasAPI.select_mod_image(names, repack, repackMode);
+    const repack = document.getElementById('chk-repack').checked;
+    const result = await AtlasAPI.select_mod_image(names, repack);
     if (result) {
       onModPreviewReceived(result);
     } else {
@@ -152,40 +150,6 @@ export async function saveModified() {
   }
 }
 
-export function getRepackMode() {
-  const sel = document.getElementById('sel-repack-mode');
-  return sel && sel.value === 'all' ? 'all' : 'page';
-}
-
-export function updateRepackModeAvailability() {
-  const repackCheckbox = document.getElementById('chk-repack');
-  const modeGroup      = document.getElementById('repack-mode-group');
-  const select         = document.getElementById('sel-repack-mode');
-  if (!select || !repackCheckbox || !modeGroup) return;
-
-  const hasMultiPage = (state.modifyPages || []).length > 1;
-  const showMode     = hasMultiPage && repackCheckbox.checked;
-  modeGroup.classList.toggle('hidden', !showMode);
-  select.disabled = !showMode;
-
-  // "Repack All Pages To One" only carries the active page's modded pixels
-  // into the combined canvas — mods on other pages of a multi-page atlas fall
-  // back to unmodified image data (see _applyRepackAllOverride in
-  // atlas-api.js). Keep that option unavailable for multi-page atlases; the
-  // per-page "Repack for Each Page" mode remains available and correct.
-  const allOption = select.querySelector('option[value="all"]');
-  if (allOption) allOption.disabled = hasMultiPage;
-  if (hasMultiPage && select.value === 'all') {
-    select.value = 'page';
-    AtlasAPI.set_pref('repackMode', 'page');
-  }
-
-  if (!hasMultiPage) {
-    select.value = 'page';
-    AtlasAPI.set_pref('repackMode', 'page');
-  }
-}
-
 export function initRepackInfoOverlay() {
   const btn      = document.getElementById('btn-repack-info');
   const overlay  = document.getElementById('repack-info-overlay');
@@ -204,13 +168,11 @@ export function initRepackInfoOverlay() {
 // ─── Repack Event Listeners ───────────────────────────────────────────────────
 document.getElementById('chk-repack').addEventListener('change', async (e) => {
   AtlasAPI.set_pref('repack', e.target.checked);
-  updateRepackModeAvailability();
   if (!state.hasModImage) return;
-  const repackMode = getRepackMode();
-  const statusEl   = document.getElementById('modify-status-text');
+  const statusEl = document.getElementById('modify-status-text');
   statusEl.innerText = e.target.checked ? 'Applying repack...' : 'Reverting repack...';
   try {
-    const result = await AtlasAPI.toggle_repack(e.target.checked, repackMode);
+    const result = await AtlasAPI.toggle_repack(e.target.checked);
     if (result) {
       onModPreviewReceived(result);
     } else {
@@ -219,21 +181,5 @@ document.getElementById('chk-repack').addEventListener('change', async (e) => {
   } catch (err) {
     console.error(err);
     showToast('Repack toggle failed.', 'error');
-  }
-});
-
-document.getElementById('sel-repack-mode').addEventListener('change', async (e) => {
-  const mode = e.target.value === 'all' ? 'all' : 'page';
-  AtlasAPI.set_pref('repackMode', mode);
-  if (!state.hasModImage) return;
-  if (!document.getElementById('chk-repack').checked) return;
-  const statusEl = document.getElementById('modify-status-text');
-  statusEl.innerText = mode === 'all' ? 'Applying repack all pages...' : 'Applying repack current page...';
-  try {
-    const result = await AtlasAPI.toggle_repack(true, mode);
-    if (result) onModPreviewReceived(result);
-  } catch (err) {
-    console.error(err);
-    showToast('Repack mode change failed.', 'error');
   }
 });
