@@ -5,13 +5,99 @@ body {
   height: 100vh;
   height: 100dvh;
   display: flex;
+  flex-direction: column;
   background-color: #2b2b2b;
   color: #eee;
   overflow: hidden;
   user-select: none;
 }
 
+/* App Bar (full-width top row) */
+#app-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: #252526;
+  border-bottom: 1px solid #444;
+  flex-shrink: 0;
+  min-height: 48px;
+  box-sizing: border-box;
+  z-index: 15;
+}
+
+.app-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.app-bar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-bar-divider {
+  width: 1px;
+  height: 24px;
+  background-color: #454545;
+  flex-shrink: 0;
+}
+
+/* View / Edit mode toggle */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid #555;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mode-toggle-btn {
+  height: 28px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 0;
+  background-color: #3c3c3c;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mode-toggle-btn + .mode-toggle-btn {
+  border-left: 1px solid #555;
+}
+
+.mode-toggle-btn:hover:not(:disabled):not(.active) {
+  background-color: #4c4c4c;
+  color: #fff;
+}
+
+.mode-toggle-btn.active {
+  background-color: #0e639c;
+  color: #fff;
+}
+
+.mode-toggle-btn:disabled {
+  color: #666;
+  cursor: not-allowed;
+}
+
 /* Layout */
+#main-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  width: 100%;
+}
+
 #left-panel {
   width: 300px;
   min-width: 300px;
@@ -49,40 +135,18 @@ body.resizing {
   user-select: none;
 }
 
-/* Header */
-.panel-header {
+/* Sidebar heading ("Regions (N)") */
+#sidebar-head {
   padding: 10px;
   background-color: #252526;
   font-weight: bold;
+  font-size: 12px;
   border-bottom: 1px solid #444;
   display: flex;
-  justify-content: space-between;
   align-items: center;
   z-index: 10;
   min-height: 40px;
   box-sizing: border-box;
-}
-
-#normal-header,
-#modify-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  gap: 8px;
-}
-
-#normal-header > span {
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.panel-header-buttons {
-  display: flex;
-  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -189,40 +253,56 @@ button {
   color: white;
 }
 
-/* Right Panel Controls */
-#controls {
-  padding: 10px;
-  background-color: #252526;
-  border-bottom: 1px solid #444;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-  align-items: center;
-  z-index: 10;
-  min-height: 40px;
-  box-sizing: border-box;
-}
-
+/* App-bar right-zone control groups */
 #extract-controls,
 #modify-controls {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  width: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
-/* Repack Options Row */
-#repack-options {
-  width: 100%;
-  padding-top: 6px;
-  border-top: 1px solid #3a3a3a;
-  margin-top: 2px;
+/* Multi-page switcher */
+#modify-page-switcher {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.page-nav-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  background-color: #3c3c3c;
+  color: #ccc;
+  border: 1px solid #555;
+}
+
+.page-nav-btn:hover:not(:disabled) {
+  background-color: #4c4c4c;
+  color: #fff;
+  border-color: #666;
+}
+
+.page-nav-btn:disabled {
+  background-color: #333;
+  color: #666;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
+#page-indicator {
+  font-size: 12px;
+  color: #bbb;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 68px;
+  text-align: center;
 }
 
 .toggle-label {
@@ -889,7 +969,7 @@ img#preview-img {
 
 /* Responsive layout for portrait screens (mobile/tablet) */
 @media (orientation: portrait), (max-width: 900px) {
-  body {
+  #main-content {
     flex-direction: column;
   }
 
@@ -922,8 +1002,7 @@ img#preview-img {
     border-right: none;
   }
 
-  #controls {
-    padding: 8px;
+  #app-bar {
     gap: 8px;
   }
 
@@ -935,10 +1014,6 @@ img#preview-img {
   #status-text,
   #modify-status-text {
     font-size: 12px;
-  }
-
-  #repack-options {
-    gap: 8px;
   }
 
   #preview-container {

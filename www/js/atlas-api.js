@@ -351,11 +351,6 @@ export const AtlasAPI = {
     platform.savePref(key, value);
   },
 
-  /** Called on startup; returns false (no file pre-loaded on Android). */
-  async startup_check() {
-    return false;
-  },
-
   /** Open a file picker that accepts .atlas and image files. */
   async choose_file() {
     const files = await _pickFiles({
@@ -506,6 +501,31 @@ export const AtlasAPI = {
 
   exit_modify_mode() {
     if (_session) _session.clearModifyState();
+  },
+
+  /**
+   * Preview data for a single atlas page, for the multi-page switcher.
+   * Re-derives the base page image (reusing _processor.getPageImage) so the
+   * user can browse each page while selecting regions to edit. Region overlay
+   * filtering by page is done client-side (state.modifyRegionPages), so this
+   * only shapes the image.
+   * @param {string} pageFilename
+   * @returns {Promise<{image: string, activePage: string}|null>}
+   */
+  async get_modify_page_preview(pageFilename) {
+    if (!_processor || !pageFilename) return null;
+    try {
+      const baseImg = _processor.getPageImage(pageFilename);
+      if (!baseImg) return null;
+      const canvas = document.createElement('canvas');
+      canvas.width = baseImg.naturalWidth || baseImg.width;
+      canvas.height = baseImg.naturalHeight || baseImg.height;
+      canvas.getContext('2d').drawImage(baseImg, 0, 0);
+      return { image: canvas.toDataURL('image/png'), activePage: pageFilename };
+    } catch (e) {
+      console.error('get_modify_page_preview error:', e);
+      return null;
+    }
   },
 
   /** True when there are unsaved modify-mode modifications. */
