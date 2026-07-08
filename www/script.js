@@ -2,7 +2,8 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state } from './js/state.js';
 import { showToast, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, saveModified } from './js/modify-mode.js';
+import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, saveModified, setMode } from './js/modify-mode.js';
+import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
@@ -10,15 +11,13 @@ import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
 // ─── Startup ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   initPanelResizer();
+  initAppBar();
   registerServiceWorker();
 
   const repackPref = await AtlasAPI.get_pref('repack', false);
   document.getElementById('chk-repack').checked = repackPref;
 
   initRepackInfoOverlay();
-
-  const loaded = await AtlasAPI.startup_check();
-  if (loaded) await loadRegions();
 
   // PWA open-with (File Handling API): the browser hands us the launched
   // file via launchQueue instead of process args.
@@ -103,6 +102,18 @@ async function openFile() {
     }
     const success = await AtlasAPI.choose_file();
     if (success) {
+      // Open lives in the always-visible app-bar left zone, so it can be
+      // clicked mid-edit. A fresh atlas means a fresh session — return to
+      // View mode (the pending-mods guard above already handled discard).
+      if (state.currentMode === 'modify') {
+        AtlasAPI.exit_modify_mode();
+        state.modifyRegionBounds = {};
+        state.modifyPages        = [];
+        state.modifyRegionPages  = {};
+        state.modifyActivePage   = null;
+        state.hasModImage        = false;
+        setMode('extract');
+      }
       state.selectedIndices.clear();
       state.lastClickIndex = -1;
       previewImg.style.display = 'none';

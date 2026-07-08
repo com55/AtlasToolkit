@@ -7,42 +7,38 @@ import {
   updatePreview,
 } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
+import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 
 export function setMode(mode) {
   state.currentMode = mode;
-  const normalHeader    = document.getElementById('normal-header');
-  const modifyHeader    = document.getElementById('modify-header');
   const extractControls = document.getElementById('extract-controls');
   const modifyControls  = document.getElementById('modify-controls');
-  const repackOptions   = document.getElementById('repack-options');
   const dropMsg         = document.getElementById('drop-message-text');
 
   if (mode === 'modify') {
-    normalHeader.classList.add('hidden');
-    modifyHeader.classList.remove('hidden');
     extractControls.classList.add('hidden');
     modifyControls.classList.remove('hidden');
-    repackOptions.classList.remove('hidden');
     dropMsg.textContent = 'Drop image to edit, or .atlas to load';
   } else {
-    normalHeader.classList.remove('hidden');
-    modifyHeader.classList.add('hidden');
     extractControls.classList.remove('hidden');
     modifyControls.classList.add('hidden');
-    repackOptions.classList.add('hidden');
     dropMsg.textContent = 'Drop .atlas file here to load';
     clearOverlay();
   }
+  updateModeToggleUI();
+  updatePageSwitcher();
 }
 
 export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
-      setMode('modify');
       state.modifyRegionBounds = data.regions || {};
       state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
+      state.modifyRegionPages = data.regionPages || {};
+      state.modifyActivePage = data.activePage || (state.modifyPages[0] || null);
       state.hasModImage = false;
+      setMode('modify');
       const statusMsg = state.modifyPages.length > 1
         ? 'Multi-page atlas — select regions to edit.'
         : 'Select regions want to edit.';
@@ -80,10 +76,12 @@ export async function exitEditMode() {
     if (!ok) return;
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
-  setMode('extract');
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
+  state.modifyRegionPages  = {};
+  state.modifyActivePage   = null;
   state.hasModImage        = false;
+  setMode('extract');
   clearOverlay();
   previewImg.style.display = 'none';
   resetPreview();
