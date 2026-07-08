@@ -1,6 +1,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedNames } from './state.js';
 import { updatePreview, updateModifyPreview } from './preview.js';
+import { updateModeToggleUI } from './app-bar.js';
 
 // ─── Auto-Scroll State ────────────────────────────────────────────────────────
 let autoScrollSpeed    = 0;
@@ -45,7 +46,7 @@ export async function loadRegions() {
   });
   const hasRegions = state.regionsData.length > 0;
   document.getElementById('status-text').innerText = hasRegions ? 'Atlas loaded.' : '';
-  document.getElementById('btn-enter-modify').disabled  = !hasRegions;
+  updateModeToggleUI();
   document.getElementById('btn-extract-all').disabled   = !hasRegions;
 }
 

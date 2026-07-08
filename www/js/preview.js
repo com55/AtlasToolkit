@@ -40,9 +40,14 @@ export function drawRegionOverlay() {
   const topLeftY = centerY - imgH * scale / 2;
   const lineWidth = 3;
 
+  const multiPage = state.modifyPages.length > 1;
   for (const name of getSelectedNames()) {
     const bounds = state.modifyRegionBounds[name];
     if (!bounds) continue;
+    // Multi-page: a region's bounds are page-relative, so only draw regions
+    // that belong to the page currently shown in the preview.
+    if (multiPage && state.modifyRegionPages[name]
+        && state.modifyRegionPages[name] !== state.modifyActivePage) continue;
     const [bx, by, bw, bh, rotate] = bounds;
     const isRotated = rotate === 90 || rotate === 270;
     const drawW = isRotated ? bh : bw;
