@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { AtlasDocument, Page, Region } from '../www/js/atlas-document.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Shared fixture text used across several tests below. Covers, in one atlas:
 //  - a region with an explicit but redundant `offsets:` line equal to
@@ -344,4 +349,51 @@ bounds: 0, 0, 10, 10
   const page = doc.pages[0];
   assert.deepEqual(page.filter, ['Nearest', 'Nearest']); // unchanged from default
   assert.deepEqual(page.extraPairs, []);
+});
+
+// ─── Task 5 Deliverable 3: round-trip the two checked-in oracle fixtures ───
+// against live-Python-computed (Python-cross-checked) canonical output.
+// Task 2's own round-trip coverage above already cross-checks a general
+// hand-built fixture against live Python; this specifically closes the one
+// gap the Task 5 brief calls out -- the two REAL, checked-in Deliverable-1
+// fixtures (test/browser/fixtures/) hadn't themselves been round-trip-
+// checked against Python's AtlasDocument.serialize(). Expected strings below
+// were produced by running the actual pinned main@d1f196e document.py's
+// AtlasDocument.parse(text).serialize() against these exact fixture files
+// (see task-5-report.md for the one-off generation command); this test does
+// NOT shell out to Python at run time, matching Task 2's established
+// pure-Node convention for `node --test`.
+
+test('fixtures/opaque-transparent/fixture-opaque.atlas parse->serialize matches live-Python (main@d1f196e) output', () => {
+  const text = fs.readFileSync(
+    path.join(HERE, 'browser', 'fixtures', 'opaque-transparent', 'fixture-opaque.atlas'),
+    'utf8',
+  );
+  const got = AtlasDocument.parse(text).serialize();
+  const expected = `fixture-opaque.png
+size: 32,10
+plain
+  bounds: 0, 0, 10, 10
+withOffsets
+  bounds: 10, 0, 8, 6
+  offsets: 2, 2, 16, 10
+dupeA
+  bounds: 20, 0, 6, 6
+dupeB
+  bounds: 26, 0, 6, 6`;
+  assert.equal(got, expected);
+});
+
+test('fixtures/tie-rounding/fixture-tie.atlas parse->serialize matches live-Python (main@d1f196e) output', () => {
+  const text = fs.readFileSync(
+    path.join(HERE, 'browser', 'fixtures', 'tie-rounding', 'fixture-tie.atlas'),
+    'utf8',
+  );
+  const got = AtlasDocument.parse(text).serialize();
+  const expected = `fixture-tie.png
+size: 14,14
+tieRegion
+  bounds: 0, 0, 6, 6
+  offsets: 0, 0, 7, 7`;
+  assert.equal(got, expected);
 });
