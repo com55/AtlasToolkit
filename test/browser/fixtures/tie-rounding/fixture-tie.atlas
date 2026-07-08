@@ -1,0 +1,8 @@
+fixture-tie.png
+size: 14, 14
+format: RGBA8888
+filter: Nearest, Nearest
+repeat: none
+tieRegion
+bounds: 0, 0, 6, 6
+offsets: 0, 0, 7, 7
