@@ -20,7 +20,7 @@
           <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960">
             <path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H447l-80-80H160v480l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Zm84-80h516l72-240H316l-72 240Zm0 0 72-240-72 240Zm-84-400v-80 80Z"/>
           </svg>
-          Open .atlas file
+          <span class="btn-label">Open .atlas file</span>
         </button>
         <div class="app-bar-divider"></div>
         <div id="mode-toggle" class="mode-toggle" role="group" aria-label="View / Edit mode">
@@ -101,10 +101,14 @@
 
     <div id="repack-info-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="repack-info-title">
       <div id="repack-info-box">
-        <h3 id="repack-info-title">Repack Options</h3>
+        <h3 id="repack-info-title">Repack</h3>
         <p>
-          Repack Current Page: repack only the active page in edit mode.
-          If selected regions are from multiple pages, they are moved to the first page before repacking.
+          Off: the mod image is appended next to the existing atlas canvas, so the
+          atlas image grows to fit it.
+        </p>
+        <p>
+          On: all regions are re-packed into a compact layout when saving.
+          Multi-page atlases are repacked page by page.
         </p>
         <div class="modal-buttons">
           <button id="btn-repack-info-close" class="btn-primary" type="button">Close</button>
