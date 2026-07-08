@@ -39,7 +39,10 @@ export function initPanelResizer() {
       rightPanel.style.removeProperty('flex');
 
       const stored   = Number(localStorage.getItem('atlastoolkit.layout.desktop.leftWidth'));
-      const fallback = 300;
+      // Tablet tier (landscape ≤1200px): narrower default so a 1024px-wide
+      // iPad landscape doesn't spend 300px on the sidebar. A user-dragged
+      // width (stored) still wins over either default.
+      const fallback = window.innerWidth <= 1200 ? 240 : 300;
       const maxW     = Math.max(LEFT_MIN, window.innerWidth - RIGHT_MIN);
       const nextW    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, LEFT_MIN, maxW);
 

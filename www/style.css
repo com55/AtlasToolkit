@@ -1006,9 +1006,18 @@ img#preview-img {
     gap: 8px;
   }
 
+  /* Let the right-zone controls wrap onto a second row instead of clipping;
+     the app-bar has min-height (not fixed height) so it grows to fit. */
+  .app-bar-right {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
   #extract-controls,
   #modify-controls {
     gap: 8px;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   #status-text,
@@ -1024,5 +1033,71 @@ img#preview-img {
     font-size: 18px;
     text-align: center;
     padding: 0 16px;
+  }
+}
+
+/* Tablet tier: landscape 901-1200px keeps the side-by-side layout but with a
+   narrower default sidebar. (panel-resizer.js applies the same 240px default
+   via inline styles; this rule covers the pre-JS paint and no-JS fallback.) */
+@media (orientation: landscape) and (min-width: 901px) and (max-width: 1200px) {
+  #left-panel {
+    width: 240px;
+    min-width: 240px;
+  }
+}
+
+/* Phone-width: the Open button collapses to icon-only (its title attribute
+   still describes it); the mode toggle never collapses. The app-bar wraps so
+   the left zone (Open + mode toggle) keeps its own row and the mode-dependent
+   controls flow onto the row(s) below, instead of floating beside a tall
+   wrapped right zone. */
+@media (max-width: 640px) {
+  .btn-open .btn-label {
+    display: none;
+  }
+
+  #app-bar {
+    flex-wrap: wrap;
+  }
+
+  .app-bar-right {
+    flex: 1 1 100%;
+  }
+
+  /* Wrap the status text onto its own row instead of shrinking it to nothing.
+     (The base rule is `flex: 1`, i.e. flex-basis 0%, which collapses to zero
+     width on a crowded row — restore its natural width here so it wraps.) */
+  #status-text,
+  #modify-status-text {
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
+}
+
+/* Touch-target sizing: bump the compact desktop-height controls in the
+   app-bar on coarse (touch) pointers, matching the ~38-44px targets already
+   used by the missing-images dialog and the region list's touch model. */
+@media (pointer: coarse) {
+  #app-bar .btn-open,
+  #app-bar .action-btn,
+  .mode-toggle-btn {
+    height: 38px;
+  }
+
+  .page-nav-btn {
+    width: 38px;
+    height: 38px;
+    font-size: 20px;
+  }
+
+  .toggle-label {
+    padding: 8px 0;
+  }
+}
+
+/* Touch + stacked layout: widen the horizontal splitter's grab area. */
+@media (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-width: 900px) {
+  #panel-splitter {
+    height: 16px;
   }
 }
