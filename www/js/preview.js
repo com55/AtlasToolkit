@@ -83,6 +83,7 @@ export async function updatePreview(names) {
   if (!names || names.length === 0) {
     previewImg.style.display = 'none';
     status.innerText = 'No selection';
+    updateSaveMergedButton();
     return;
   }
   const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(names) : null;
@@ -102,25 +103,42 @@ export async function updatePreview(names) {
         state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
         applyTransform();
       }
+      updateSaveMergedButton();
       previewImg.onload = null;
     };
   } else {
     previewImg.style.display = 'none';
     status.innerText = 'Preview failed';
+    updateSaveMergedButton();
   }
 }
 
 export function updateModifyPreview(names) {
   drawRegionOverlay();
+  const status = document.getElementById('status-text');
   if (!names || names.length === 0) {
-    document.getElementById('modify-status-text').innerText = state.hasModImage
+    status.innerText = state.hasModImage
       ? 'Mod image merged. Ready to save.'
-      : 'Select regions want to edit.';
+      : 'Select regions and click Modify Selected.';
   } else {
-    document.getElementById('modify-status-text').innerText = state.hasModImage
+    status.innerText = state.hasModImage
       ? `Merged preview. ${names.length} region(s) selected.`
       : `${names.length} region(s) selected`;
   }
+}
+
+/**
+ * "Save Image" is enabled whenever the preview actually shows an image
+ * (mirrors the Python app's updateButtons logic in ui/js/preview.js).
+ */
+export function updateSaveMergedButton() {
+  const btn = document.getElementById('btn-save-merged');
+  if (!btn) return;
+  const hasPreview =
+    previewImg.style.display !== 'none' &&
+    previewImg.naturalWidth > 0 &&
+    previewImg.naturalHeight > 0;
+  btn.disabled = !hasPreview;
 }
 
 // ─── Pan & Zoom ───────────────────────────────────────────────────────────────

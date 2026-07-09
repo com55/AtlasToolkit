@@ -1,3 +1,8 @@
+:root {
+  --sidebar-width: 300px;
+  --panel-header-h: 30px;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -12,63 +17,79 @@ body {
   user-select: none;
 }
 
-/* App Bar (full-width top row) */
+/* App Bar (full-width top row; left zone width tracks the sidebar so the
+   panel divider lines up with the splitter, matching the Python app) */
 #app-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
   background-color: #252526;
   border-bottom: 1px solid #444;
+  display: flex;
+  align-items: stretch;
   flex-shrink: 0;
-  min-height: 48px;
-  box-sizing: border-box;
   z-index: 15;
+  box-sizing: border-box;
 }
 
 .app-bar-left {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  padding: 0 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .app-bar-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#btn-save-mod {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .app-bar-divider {
   width: 1px;
-  height: 24px;
-  background-color: #454545;
+  height: 20px;
+  background-color: #444;
   flex-shrink: 0;
+  align-self: center;
+}
+
+.app-bar-panel-divider {
+  height: auto;
+  align-self: stretch;
 }
 
 /* View / Edit mode toggle */
 .mode-toggle {
-  display: inline-flex;
+  display: flex;
+  flex: 1;
+  min-width: 0;
   border: 1px solid #555;
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
-  flex-shrink: 0;
 }
 
 .mode-toggle-btn {
-  height: 28px;
-  padding: 0 16px;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
   border: none;
   border-radius: 0;
   background-color: #3c3c3c;
-  color: #bbb;
-  font-size: 12px;
-  font-weight: 600;
+  color: #888;
+  font-size: 11px;
 }
 
 .mode-toggle-btn + .mode-toggle-btn {
@@ -81,12 +102,20 @@ body {
 }
 
 .mode-toggle-btn.active {
-  background-color: #0e639c;
-  color: #fff;
+  color: white;
+}
+
+.mode-toggle-btn.mode-view.active {
+  background-color: #3d7a8a;
+}
+
+.mode-toggle-btn.mode-edit.active {
+  background-color: #8a7344;
 }
 
 .mode-toggle-btn:disabled {
-  color: #666;
+  background-color: #333;
+  color: #555;
   cursor: not-allowed;
 }
 
@@ -99,8 +128,8 @@ body {
 }
 
 #left-panel {
-  width: 300px;
-  min-width: 300px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background-color: #1e1e1e;
   border-right: none;
   display: flex;
@@ -135,19 +164,35 @@ body.resizing {
   user-select: none;
 }
 
-/* Sidebar heading ("Regions (N)") */
-#sidebar-head {
-  padding: 10px;
+/* Panel header rows (sidebar heading, repack row, status bar) */
+#sidebar-head,
+#repack-options,
+#status-bar {
+  height: var(--panel-header-h);
+  min-height: var(--panel-header-h);
+  padding: 0 15px;
   background-color: #252526;
-  font-weight: bold;
-  font-size: 12px;
   border-bottom: 1px solid #444;
   display: flex;
   align-items: center;
-  z-index: 10;
-  min-height: 40px;
-  box-sizing: border-box;
   flex-shrink: 0;
+  box-sizing: border-box;
+  z-index: 10;
+}
+
+#sidebar-head {
+  font-size: 12px;
+  font-weight: bold;
+  color: #aaa;
+}
+
+#repack-options {
+  padding: 0 10px;
+  gap: 6px;
+}
+
+#status-bar {
+  padding: 0 12px;
 }
 
 /* --- BUTTON STYLES (Shared) --- */
@@ -218,6 +263,36 @@ button {
   border-color: #444;
 }
 
+/* Save Image button (green, view mode) */
+.btn-save-merged {
+  background-color: #388e3c;
+  color: white;
+}
+.btn-save-merged:hover:not(:disabled) {
+  background-color: #4caf50;
+}
+.btn-save-merged:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
+/* Reset button (brown, edit mode) */
+.btn-reset {
+  background-color: #5d4037;
+  color: white;
+}
+.btn-reset:hover:not(:disabled) {
+  background-color: #795548;
+}
+.btn-reset:disabled {
+  background-color: #444;
+  color: #888;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
 /* Icon Style */
 .btn-icon {
   width: 16px;
@@ -253,15 +328,13 @@ button {
   color: white;
 }
 
-/* App-bar right-zone control groups */
+/* App-bar right-zone control groups (left-aligned; Save As... pins right) */
 #extract-controls,
 #modify-controls {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  overflow: hidden;
 }
 
 /* Multi-page switcher */
@@ -461,12 +534,9 @@ img#preview-img {
   z-index: 5;
 }
 
-#status-text,
-#modify-status-text {
-  flex: 1;
-  min-width: 0;
+#status-text {
+  font-size: 12px;
   color: #aaa;
-  font-size: 0.9em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1002,27 +1072,32 @@ img#preview-img {
     border-right: none;
   }
 
+  /* Stacked layout: the left zone no longer mirrors a sidebar width, and the
+     bar may grow taller when the right zone wraps. */
   #app-bar {
-    gap: 8px;
+    height: auto;
+    min-height: 42px;
   }
 
-  /* Let the right-zone controls wrap onto a second row instead of clipping;
-     the app-bar has min-height (not fixed height) so it grows to fit. */
+  .app-bar-left {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+    padding: 6px 10px;
+  }
+
+  .app-bar-panel-divider {
+    display: none;
+  }
+
   .app-bar-right {
     flex-wrap: wrap;
-    overflow: visible;
+    padding: 6px 10px;
   }
 
   #extract-controls,
   #modify-controls {
-    gap: 8px;
     flex-wrap: wrap;
-    overflow: visible;
-  }
-
-  #status-text,
-  #modify-status-text {
-    font-size: 12px;
   }
 
   #preview-container {
@@ -1038,11 +1113,11 @@ img#preview-img {
 
 /* Tablet tier: landscape 901-1200px keeps the side-by-side layout but with a
    narrower default sidebar. (panel-resizer.js applies the same 240px default
-   via inline styles; this rule covers the pre-JS paint and no-JS fallback.) */
+   at runtime; this covers the pre-JS paint and no-JS fallback. The app-bar
+   left zone follows automatically via the shared var.) */
 @media (orientation: landscape) and (min-width: 901px) and (max-width: 1200px) {
-  #left-panel {
-    width: 240px;
-    min-width: 240px;
+  :root {
+    --sidebar-width: 240px;
   }
 }
 
@@ -1062,15 +1137,6 @@ img#preview-img {
 
   .app-bar-right {
     flex: 1 1 100%;
-  }
-
-  /* Wrap the status text onto its own row instead of shrinking it to nothing.
-     (The base rule is `flex: 1`, i.e. flex-basis 0%, which collapses to zero
-     width on a crowded row — restore its natural width here so it wraps.) */
-  #status-text,
-  #modify-status-text {
-    flex: 0 0 auto;
-    max-width: 100%;
   }
 }
 
