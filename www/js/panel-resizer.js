@@ -19,9 +19,16 @@ export function initPanelResizer() {
   const isPortrait = () => window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
+  // The sidebar width is a shared CSS var so the app-bar's left zone (and its
+  // panel divider) stay aligned with the sidebar edge, like the Python app.
+  const setSidebarWidth = (px) => {
+    document.documentElement.style.setProperty('--sidebar-width', `${px}px`);
+  };
+
   const applyStoredSplit = () => {
     if (isPortrait()) {
       splitter.setAttribute('aria-orientation', 'horizontal');
+      document.documentElement.style.removeProperty('--sidebar-width');
       leftPanel.style.removeProperty('width');
       leftPanel.style.removeProperty('min-width');
       leftPanel.style.removeProperty('flex');
@@ -46,9 +53,8 @@ export function initPanelResizer() {
       const maxW     = Math.max(LEFT_MIN, window.innerWidth - RIGHT_MIN);
       const nextW    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, LEFT_MIN, maxW);
 
-      leftPanel.style.flex     = 'none';
-      leftPanel.style.width    = `${nextW}px`;
-      leftPanel.style.minWidth = `${nextW}px`;
+      leftPanel.style.flex = 'none';
+      setSidebarWidth(nextW);
     }
 
     if (state.currentMode === 'modify') drawRegionOverlay();
@@ -76,9 +82,8 @@ export function initPanelResizer() {
       const delta = e.clientX - startPos;
       const maxW  = Math.max(LEFT_MIN, window.innerWidth - RIGHT_MIN);
       const nextW = clamp(startSize + delta, LEFT_MIN, maxW);
-      leftPanel.style.flex     = 'none';
-      leftPanel.style.width    = `${nextW}px`;
-      leftPanel.style.minWidth = `${nextW}px`;
+      leftPanel.style.flex = 'none';
+      setSidebarWidth(nextW);
     }
     if (state.currentMode === 'modify') drawRegionOverlay();
   });

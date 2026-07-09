@@ -63,7 +63,7 @@ export function updateButtons() {
   const btnModSel = document.getElementById('btn-modify-sel');
   if (btnModSel) {
     btnModSel.disabled  = state.selectedIndices.size === 0;
-    btnModSel.innerText = `Replace (${state.selectedIndices.size})`;
+    btnModSel.innerText = `Modify Selected (${state.selectedIndices.size})`;
   }
 }
 
