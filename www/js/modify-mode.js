@@ -4,24 +4,40 @@ import {
   previewImg, previewContainer,
   resetPreview, applyTransform,
   drawRegionOverlay, clearOverlay,
-  updatePreview,
+  updatePreview, updateSaveMergedButton,
 } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
+
+function setStatus(text) {
+  document.getElementById('status-text').innerText = text;
+}
+
+/** Save As... / Reset follow whether a merged mod image is pending. */
+function updateModifyActionButtons() {
+  document.getElementById('btn-save-mod').disabled = !state.hasModImage;
+  document.getElementById('btn-reset-mod').disabled = !state.hasModImage;
+}
 
 export function setMode(mode) {
   state.currentMode = mode;
   const extractControls = document.getElementById('extract-controls');
   const modifyControls  = document.getElementById('modify-controls');
+  const repackOptions   = document.getElementById('repack-options');
+  const saveModBtn      = document.getElementById('btn-save-mod');
   const dropMsg         = document.getElementById('drop-message-text');
 
   if (mode === 'modify') {
     extractControls.classList.add('hidden');
     modifyControls.classList.remove('hidden');
+    repackOptions.classList.remove('hidden');
+    saveModBtn.classList.remove('hidden');
     dropMsg.textContent = 'Drop image to edit, or .atlas to load';
   } else {
     extractControls.classList.remove('hidden');
     modifyControls.classList.add('hidden');
+    repackOptions.classList.add('hidden');
+    saveModBtn.classList.add('hidden');
     dropMsg.textContent = 'Drop .atlas file here to load';
     clearOverlay();
   }
@@ -29,35 +45,40 @@ export function setMode(mode) {
   updatePageSwitcher();
 }
 
+/** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
+function applyModifyView(data, statusMsg) {
+  state.modifyRegionBounds = data.regions || {};
+  state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
+  state.modifyRegionPages = data.regionPages || {};
+  state.modifyActivePage = data.activePage || (state.modifyPages[0] || null);
+  state.hasModImage = false;
+  setMode('modify');
+  setStatus(statusMsg);
+  updateModifyActionButtons();
+  previewImg.src = data.image;
+  previewImg.style.display = 'block';
+  previewImg.onload = function () {
+    resetPreview();
+    const containerW = previewContainer.clientWidth - 40;
+    const containerH = previewContainer.clientHeight - 40;
+    const imgW = previewImg.naturalWidth;
+    const imgH = previewImg.naturalHeight;
+    if (imgW > containerW || imgH > containerH) {
+      state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+      applyTransform();
+    }
+    previewImg.onload = null;
+  };
+}
+
 export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
-      state.modifyRegionBounds = data.regions || {};
-      state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
-      state.modifyRegionPages = data.regionPages || {};
-      state.modifyActivePage = data.activePage || (state.modifyPages[0] || null);
-      state.hasModImage = false;
-      setMode('modify');
-      const statusMsg = state.modifyPages.length > 1
-        ? 'Multi-page atlas — select regions to edit.'
-        : 'Select regions want to edit.';
-      document.getElementById('modify-status-text').innerText = statusMsg;
-      document.getElementById('btn-save-mod').disabled = true;
-      previewImg.src = data.image;
-      previewImg.style.display = 'block';
-      previewImg.onload = function () {
-        resetPreview();
-        const containerW = previewContainer.clientWidth - 40;
-        const containerH = previewContainer.clientHeight - 40;
-        const imgW = previewImg.naturalWidth;
-        const imgH = previewImg.naturalHeight;
-        if (imgW > containerW || imgH > containerH) {
-          state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
-          applyTransform();
-        }
-        previewImg.onload = null;
-      };
+      const statusMsg = (Array.isArray(data.pages) && data.pages.length > 1)
+        ? 'Multi-page atlas — select regions and click Modify Selected.'
+        : 'Select regions and click Modify Selected.';
+      applyModifyView(data, statusMsg);
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -85,21 +106,45 @@ export async function exitEditMode() {
   clearOverlay();
   previewImg.style.display = 'none';
   resetPreview();
-  document.getElementById('status-text').innerText = 'Ready';
+  setStatus('Ready');
+  updateSaveMergedButton();
   updatePreview(getSelectedNames());
+}
+
+/** Discard all modifications and restore the pristine atlas, staying in edit mode. */
+export async function resetModify() {
+  if (!state.hasModImage) return;
+  const ok = await showConfirm(
+    'Discard all modifications and restore the original atlas?',
+    'Reset modifications?',
+  );
+  if (!ok) return;
+  try {
+    // enter_modify_mode clears the batch list and returns a pristine view.
+    const data = await AtlasAPI.enter_modify_mode();
+    if (data) {
+      applyModifyView(data, 'Select regions and click Modify Selected.');
+      showToast('Modifications reset.', 'success');
+    } else {
+      showToast('Failed to reset modifications.', 'error');
+    }
+  } catch (e) {
+    console.error(e);
+    showToast('Failed to reset modifications.', 'error');
+  }
 }
 
 export async function ReplaceSelected() {
   const names = getSelectedNames();
   if (names.length === 0) { showToast('Select at least one region to edit.', 'error'); return; }
   try {
-    document.getElementById('modify-status-text').innerText = 'Selecting mod image...';
+    setStatus('Selecting mod image...');
     const repack = document.getElementById('chk-repack').checked;
     const result = await AtlasAPI.select_mod_image(names, repack);
     if (result) {
       onModPreviewReceived(result);
     } else {
-      document.getElementById('modify-status-text').innerText = 'Cancelled or no image selected.';
+      setStatus('Cancelled or no image selected.');
     }
   } catch (e) {
     console.error(e);
@@ -112,8 +157,8 @@ export function onModPreviewReceived(data) {
   if (data.regions) state.modifyRegionBounds = data.regions;
   previewImg.src = data.image;
   previewImg.style.display = 'block';
-  document.getElementById('modify-status-text').innerText = 'Mod image merged. Ready to save.';
-  document.getElementById('btn-save-mod').disabled = false;
+  setStatus('Mod image merged. Ready to save.');
+  updateModifyActionButtons();
   previewImg.onload = function () {
     resetPreview();
     const containerW = previewContainer.clientWidth - 40;
@@ -121,9 +166,9 @@ export function onModPreviewReceived(data) {
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
     const statusMsg = data.pageCount > 1
-      ? `Repacked across ${data.pageCount} pages. Ready to save.`
+      ? `Merged across ${data.pageCount} pages. Ready to save.`
       : `Merged preview (${imgW}x${imgH}). Ready to save.`;
-    document.getElementById('modify-status-text').innerText = statusMsg;
+    setStatus(statusMsg);
     if (imgW > containerW || imgH > containerH) {
       state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
     }
@@ -134,14 +179,14 @@ export function onModPreviewReceived(data) {
 
 export async function saveModified() {
   try {
-    document.getElementById('modify-status-text').innerText = 'Saving...';
+    setStatus('Saving...');
     const result = await AtlasAPI.save_modified();
     if (result.startsWith('Error') || result === 'Cancelled') {
       showToast(result, result === 'Cancelled' ? 'info' : 'error');
     } else {
       showToast(result, 'success');
     }
-    document.getElementById('modify-status-text').innerText = result;
+    setStatus(result);
   } catch (e) {
     console.error(e);
     showToast('Save failed.', 'error');
@@ -167,8 +212,7 @@ export function initRepackInfoOverlay() {
 document.getElementById('chk-repack').addEventListener('change', async (e) => {
   AtlasAPI.set_pref('repack', e.target.checked);
   if (!state.hasModImage) return;
-  const statusEl = document.getElementById('modify-status-text');
-  statusEl.innerText = e.target.checked ? 'Applying repack...' : 'Reverting repack...';
+  setStatus(e.target.checked ? 'Applying repack...' : 'Reverting repack...');
   try {
     const result = await AtlasAPI.toggle_repack(e.target.checked);
     if (result) {

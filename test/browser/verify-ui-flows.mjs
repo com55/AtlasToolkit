@@ -133,6 +133,10 @@ const readUi = (page) => page.evaluate(() => ({
   prevDisabled: document.getElementById('page-prev').disabled,
   nextDisabled: document.getElementById('page-next').disabled,
   saveEnabled: !document.getElementById('btn-save-mod').disabled,
+  saveVisible: !document.getElementById('btn-save-mod').classList.contains('hidden'),
+  repackRowVisible: !document.getElementById('repack-options').classList.contains('hidden'),
+  resetEnabled: !document.getElementById('btn-reset-mod').disabled,
+  saveMergedEnabled: !document.getElementById('btn-save-merged').disabled,
   modalVisible: !document.getElementById('modal-overlay').classList.contains('hidden'),
   previewSrcLen: (document.getElementById('preview-img').src || '').length,
   missingDialog: !!document.querySelector('.missing-images-overlay'),
@@ -167,6 +171,7 @@ const browser = await chromium.launch({ headless: true });
   ui = await readUi(page);
   check('desktop: shift-click range selects 3', ui.selected.length === 3, ui.selected.join(','));
   check('desktop: composite preview rendered', ui.previewSrcLen > 100);
+  check('desktop: Save Image enabled with a live preview', ui.saveMergedEnabled);
   await items.nth(1).click({ modifiers: ['Control'] });
   await page.waitForTimeout(120);
   ui = await readUi(page);
@@ -185,6 +190,7 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(200);
   ui = await readUi(page);
   check('desktop: mode toggle enters edit mode', ui.mode === 'modify' && ui.modifyControlsVisible);
+  check('desktop: repack row + Save As appear in edit mode', ui.repackRowVisible && ui.saveVisible);
   check('desktop: multi-page switcher visible, Page 1 / 2, prev disabled', ui.switcherVisible && ui.indicator === 'Page 1 / 2' && ui.prevDisabled && !ui.nextDisabled, ui.indicator);
 
   // 5. Page switcher next/prev
@@ -207,7 +213,25 @@ const browser = await chromium.launch({ headless: true });
   await (await chooser1).setFiles({ name: 'mod1.png', mimeType: 'image/png', buffer: MOD_PNG });
   await page.waitForTimeout(400);
   ui = await readUi(page);
-  check('desktop: mod apply #1 enables Save As', ui.saveEnabled);
+  check('desktop: mod apply #1 enables Save As + Reset', ui.saveEnabled && ui.resetEnabled);
+
+  // Reset: confirm dialog -> pristine edit view (Save As / Reset disabled again)
+  await page.click('#btn-reset-mod');
+  await page.waitForTimeout(150);
+  ui = await readUi(page);
+  check('desktop: Reset asks for confirmation', ui.modalVisible);
+  await page.click('#btn-modal-confirm');
+  await page.waitForTimeout(300);
+  ui = await readUi(page);
+  check('desktop: Reset restores pristine edit view', ui.mode === 'modify' && !ui.saveEnabled && !ui.resetEnabled);
+
+  // Re-apply mod #1 so the sequential test below still starts from one batch
+  await items.nth(0).click();
+  await page.waitForTimeout(120);
+  const chooser1b = page.waitForEvent('filechooser');
+  await page.click('#btn-modify-sel');
+  await (await chooser1b).setFiles({ name: 'mod1.png', mimeType: 'image/png', buffer: MOD_PNG });
+  await page.waitForTimeout(400);
 
   // Sequential second mod on a different region (UI-level rebuild-from-pristine regression)
   await items.nth(1).click(); // "beta"
@@ -224,11 +248,12 @@ const browser = await chromium.launch({ headless: true });
   check('desktop: no page errors after sequential mods', errors.length === 0, errors.join('; '));
 
   // 7. Repack toggle on/off without a reload (the checkbox input is visually
-  // hidden behind the custom switch — click its label like a user would)
+  // hidden behind the custom switch — click its label like a user would; the
+  // toggle lives in the right panel's #repack-options row, like the Python app)
   const navBefore = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-  await page.click('#modify-controls .toggle-label');
+  await page.click('#repack-options .toggle-label');
   await page.waitForTimeout(500);
-  await page.click('#modify-controls .toggle-label');
+  await page.click('#repack-options .toggle-label');
   await page.waitForTimeout(500);
   const navAfter = await page.evaluate(() => performance.getEntriesByType('navigation').length);
   check('desktop: repack toggle on/off, no reload', navBefore === navAfter && errors.length === 0);
