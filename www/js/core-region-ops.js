@@ -40,6 +40,20 @@ export function roundHalfEven(x) {
 }
 
 /**
+ * Round *value* up to the nearest multiple of *multiple* (default 4).
+ * Used to pad packed/merged atlas page canvases to GPU texture-compression
+ * block-size alignment.
+ * @param {number} value
+ * @param {number} [multiple]
+ * @returns {number}
+ */
+export function roundUpToMultiple(value, multiple = 4) {
+  if (value <= 0) return 0;
+  const remainder = value % multiple;
+  return remainder === 0 ? value : value + (multiple - remainder);
+}
+
+/**
  * Post-rotation bounding rectangle for a region. Bounds are stored
  * pre-rotation ([x, y, w, h]); when the region is stored rotated 90/270 in the
  * atlas its on-page footprint has width/height swapped.

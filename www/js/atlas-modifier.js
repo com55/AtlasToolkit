@@ -5,7 +5,7 @@
 
 import { AtlasProcessor } from './atlas-extracter.js';
 import { AtlasDocument } from './atlas-document.js';
-import { cropAndRotate, roundHalfEven } from './core-region-ops.js';
+import { cropAndRotate, roundHalfEven, roundUpToMultiple } from './core-region-ops.js';
 
 // ─── Parse atlas text using AtlasProcessor ──────────────────────────────────
 
@@ -139,7 +139,8 @@ export function findBestPlacement(baseW, baseH, modW, modH, allowRotate = true) 
     { label: 'below+rotated', canvasW: Math.max(baseW, rotW), canvasH: baseH + rotH,          pasteX: 0,     pasteY: baseH, rotated: true  },
   ];
   if (!allowRotate) candidates = candidates.filter(c => !c.rotated);
-  return candidates.reduce((best, c) => c.canvasW * c.canvasH < best.canvasW * best.canvasH ? c : best);
+  const best = candidates.reduce((best, c) => c.canvasW * c.canvasH < best.canvasW * best.canvasH ? c : best);
+  return { ...best, canvasW: roundUpToMultiple(best.canvasW), canvasH: roundUpToMultiple(best.canvasH) };
 }
 
 // ─── Mod-canvas resolution (pure, testable without a DOM) ─────────────────────
@@ -320,7 +321,7 @@ function _shelfPack(items) {
       if (area < bestArea) { bestArea = area; best = { canvasW: usedW, canvasH, placements }; }
     }
   }
-  return best;
+  return { ...best, canvasW: roundUpToMultiple(best.canvasW), canvasH: roundUpToMultiple(best.canvasH) };
 }
 
 // ─── Pixel hashing ───────────────────────────────────────────────────────────
