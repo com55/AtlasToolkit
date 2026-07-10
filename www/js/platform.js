@@ -15,6 +15,28 @@ function _ext(name) {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * True on touch (mobile/tablet) devices. Their OS file pickers often show a
+ * photo-only view for `accept="image/*"`, which can hide files the user
+ * actually wants — pickers should fall back to an unrestricted browser there
+ * and validate the selection afterward with fileMatchesAccept().
+ */
+export function isTouchDevice() {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+}
+
+/** Does file match a comma-separated `accept` string (extensions and/or MIME types)? */
+export function fileMatchesAccept(file, accept) {
+  if (!accept) return true;
+  const name = String(file?.name || '').toLowerCase();
+  const type = String(file?.type || '').toLowerCase();
+  return accept.split(',').map(s => s.trim().toLowerCase()).filter(Boolean).some((token) => {
+    if (token.startsWith('.')) return name.endsWith(token);
+    if (token.endsWith('/*')) return type.startsWith(token.slice(0, -1));
+    return type === token;
+  });
+}
+
+/**
  * Pick a single .atlas (or compatible) file via a hidden <input type=file>.
  */
 export async function pickAtlasFile() {

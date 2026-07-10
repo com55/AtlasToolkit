@@ -1,3 +1,5 @@
+import { isTouchDevice, fileMatchesAccept } from './platform.js';
+
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-overlay');
@@ -23,6 +25,39 @@ export function showConfirm(message, title = 'Confirm') {
   });
 }
 
+/**
+ * Full-screen modal notice with a single OK button. Unlike showToast(), this
+ * stays visible (and above) any other overlay currently open -- e.g. an
+ * unsupported-file-type warning fired from inside the missing-images dialog,
+ * where a toast would render underneath it and go unseen.
+ */
+export function showAlert(message, title = 'Notice') {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').innerText = title;
+    document.getElementById('modal-message').innerText = message;
+    const btnConfirm = document.getElementById('btn-modal-confirm');
+    const btnCancel  = document.getElementById('btn-modal-cancel');
+    const confirmLabel = btnConfirm.innerText;
+    btnConfirm.innerText = 'OK';
+    btnCancel.classList.add('hidden');
+    overlay.classList.remove('hidden');
+    if (document.activeElement) document.activeElement.blur();
+    btnConfirm.focus();
+    function cleanup() {
+      overlay.classList.add('hidden');
+      btnConfirm.innerText = confirmLabel;
+      btnCancel.classList.remove('hidden');
+      btnConfirm.removeEventListener('click', onOk);
+      window.removeEventListener('keydown', onKey);
+    }
+    function onOk() { cleanup(); resolve(); }
+    function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter') onOk(); }
+    btnConfirm.addEventListener('click', onOk);
+    window.addEventListener('keydown', onKey);
+  });
+}
+
 export function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -37,11 +72,14 @@ export function showToast(message, type = 'info') {
   }, 3000);
 }
 
+const IMAGE_ACCEPT = 'image/png,.png';
+
 export function pickSingleImageFile() {
+  const touchMode = isTouchDevice();
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png,.png';
+    input.accept = touchMode ? '*' : IMAGE_ACCEPT;
     input.multiple = false;
 
     let done = false;
@@ -51,8 +89,14 @@ export function pickSingleImageFile() {
       input.removeEventListener('change', onChange);
       resolve(file || null);
     };
-    const onChange = (e) => {
-      finish(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+    const onChange = async (e) => {
+      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+      if (file && touchMode && !fileMatchesAccept(file, IMAGE_ACCEPT)) {
+        await showAlert('Unsupported file type ignored.', 'Unsupported file');
+        finish(null);
+        return;
+      }
+      finish(file);
     };
     input.addEventListener('change', onChange);
     input.click();
