@@ -1,6 +1,6 @@
 """Extended Python reference-oracle ground truth for Task 5 (Phase F partial).
 
-PINNED ORACLE COMMIT: main @ d1f196e (confirm with `git rev-parse --short main`;
+PINNED ORACLE COMMIT: main @ f33ba7f (confirm with `git rev-parse --short main`;
 atlas_toolkit/ is byte-identical between main and dev at time of writing, but
 dev moves -- this script always diffs against the pinned SHA via
 `git show <sha>:<path>`, never a moving branch ref).
@@ -56,7 +56,7 @@ logging.disable(logging.CRITICAL)  # silence the modules' own INFO logging
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 FIXTURES = os.path.join(HERE, "fixtures")
-PINNED_SHA = "d1f196e"
+PINNED_SHA = "f33ba7f"
 
 actual_sha = subprocess.check_output(
     ["git", "-C", REPO, "rev-parse", "--short", "main"], text=True
@@ -92,7 +92,8 @@ repacker_src = show("atlas_toolkit/atlas/repacker.py")
 repacker_src = repacker_src.replace(
     "from atlas_toolkit.core.document import AtlasDocument, Page, Region", ""
 ).replace(
-    "from atlas_toolkit.core.region_ops import extract_raw_sprite", ""
+    "from atlas_toolkit.core.region_ops import extract_raw_sprite, round_up_to_multiple",
+    "",
 )
 exec(compile(repacker_src, "repacker.py", "exec"), ns)
 
@@ -106,7 +107,10 @@ modifier_src = (
         "from atlas_toolkit.atlas.repacker import repack_from_sprites, repack_single_page",
         "",
     )
-    .replace("from atlas_toolkit.core.region_ops import extract_raw_sprite", "")
+    .replace(
+        "from atlas_toolkit.core.region_ops import extract_raw_sprite, round_up_to_multiple",
+        "",
+    )
 )
 exec(compile(modifier_src, "modifier.py", "exec"), ns)
 
