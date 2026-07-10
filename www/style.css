@@ -328,13 +328,21 @@ button {
   color: white;
 }
 
-/* App-bar right-zone control groups (left-aligned; Save As... pins right) */
+/* App-bar right-zone control groups (left-aligned; Save Image / Save As...
+   pin to the right edge, matching the Python app) */
 #extract-controls,
 #modify-controls {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+#btn-save-merged {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* Multi-page switcher */
@@ -346,10 +354,10 @@ button {
 }
 
 .page-nav-btn {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   background-color: #3c3c3c;
   color: #ccc;
@@ -1098,6 +1106,7 @@ img#preview-img {
   #extract-controls,
   #modify-controls {
     flex-wrap: wrap;
+    overflow: visible;
   }
 
   #preview-container {
@@ -1147,13 +1156,13 @@ img#preview-img {
   #app-bar .btn-open,
   #app-bar .action-btn,
   .mode-toggle-btn {
-    height: 38px;
+    height: 32px;
   }
 
   .page-nav-btn {
-    width: 38px;
-    height: 38px;
-    font-size: 20px;
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
   }
 
   .toggle-label {
