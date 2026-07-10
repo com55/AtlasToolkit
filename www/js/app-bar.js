@@ -8,7 +8,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state } from './state.js';
 import { enterEditMode, exitEditMode } from './modify-mode.js';
-import { previewImg, previewContainer, resetPreview, applyTransform } from './preview.js';
+import { previewImg, previewContainer, resetPreview, applyTransform, fitScaleIfOversized } from './preview.js';
 
 /** Reflect the current mode on the toggle, and gate Edit on regions loaded. */
 export function updateModeToggleUI() {
@@ -46,8 +46,9 @@ function fitPreviewOnLoad() {
     const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
-    if (imgW > containerW || imgH > containerH) {
-      state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+    if (fitScale !== null) {
+      state.viewState.scale = fitScale;
     }
     applyTransform(); // also redraws the overlay (filtered to the active page)
     previewImg.onload = null;

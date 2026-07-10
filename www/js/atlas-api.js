@@ -6,7 +6,7 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor } from './atlas-extracter.js';
-import { platform } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 
@@ -238,12 +238,19 @@ function _canvasToBlob(canvas) {
   });
 }
 
-/** Pick one or more files using a hidden file input triggered by a user gesture. */
+/**
+ * Pick one or more files using a hidden file input triggered by a user gesture.
+ * On touch devices, `accept` is dropped in favor of the OS's full file browser
+ * (a MIME-restricted picker there often shows a photo-only view that hides
+ * files the user wants), and the selection is validated against `accept`
+ * afterward instead.
+ */
 function _pickFiles({ accept = '', multiple = false } = {}) {
+  const touchMode = isTouchDevice();
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = accept;
+    input.accept = touchMode ? '*' : accept;
     input.multiple = multiple;
     // listen for change; also handle cancel gracefully
     const cleanup = () => {
@@ -251,7 +258,22 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
       input.removeEventListener('cancel', oncancel);
       clearTimeout(timer);
     };
-    const onchange = (e) => { cleanup(); resolve(Array.from(e.target.files)); };
+    const onchange = async (e) => {
+      cleanup();
+      let files = Array.from(e.target.files);
+      if (touchMode && accept) {
+        const valid = files.filter(f => fileMatchesAccept(f, accept));
+        if (valid.length < files.length) {
+          if (typeof window.showAlert === 'function') {
+            await window.showAlert('Unsupported file type ignored.', 'Unsupported file');
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('Unsupported file type ignored.', 'error');
+          }
+        }
+        files = valid;
+      }
+      resolve(files);
+    };
     const oncancel = () => { cleanup(); resolve([]); };
     input.addEventListener('change', onchange);
     input.addEventListener('cancel', oncancel);

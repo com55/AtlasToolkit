@@ -75,6 +75,8 @@ body {
   display: flex;
   flex: 1;
   min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
   border: 1px solid #555;
   border-radius: 3px;
   overflow: hidden;
@@ -83,7 +85,7 @@ body {
 .mode-toggle-btn {
   flex: 1;
   min-width: 0;
-  height: 26px;
+  height: 100%;
   padding: 0 8px;
   border: none;
   border-radius: 0;
@@ -131,7 +133,7 @@ body {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   background-color: #1e1e1e;
-  border-right: none;
+  border-right: 1px solid #444;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -145,19 +147,15 @@ body {
   position: relative;
 }
 
+/* Landscape/left-right layout has no draggable splitter -- #left-panel's own
+   border-right above is the divider, matching the Python app exactly. The
+   element stays in the DOM (not removed) so it can become the real,
+   functional drag handle in the stacked portrait/mobile layout below. */
 #panel-splitter {
-  width: 8px;
-  background: linear-gradient(to right, #262626, #353535, #262626);
-  border-left: 1px solid #1b1b1b;
-  border-right: 1px solid #1b1b1b;
-  cursor: col-resize;
+  display: none;
   flex-shrink: 0;
   z-index: 20;
   touch-action: none;
-}
-
-#panel-splitter:hover {
-  background: linear-gradient(to right, #2c2c2c, #3f3f3f, #2c2c2c);
 }
 
 body.resizing {
@@ -622,7 +620,10 @@ img#preview-img {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
-  z-index: 2000;
+  /* Above every other overlay (context-menu 4000 is the next-highest) --
+     showAlert() can fire from inside e.g. the missing-images dialog and
+     must stay visible on top of it. */
+  z-index: 4500;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1051,23 +1052,28 @@ img#preview-img {
     flex-direction: column;
   }
 
-  /* Keep preview side on top */
+  /* Keep preview side on top. No min-height here: panel-resizer.js sets an
+     explicit inline height (same ~44% default pre-drag), and a CSS min-height
+     would floor it, blocking the user from dragging the preview down toward
+     PREVIEW_MIN. */
   #right-panel {
     order: 1;
-    min-height: 44dvh;
     border-bottom: none;
   }
 
   #panel-splitter {
+    display: block;
     order: 2;
     width: 100%;
     height: 10px;
     cursor: row-resize;
-    border-left: none;
-    border-right: none;
     border-top: 1px solid #1b1b1b;
     border-bottom: 1px solid #1b1b1b;
     background: linear-gradient(to bottom, #262626, #353535, #262626);
+  }
+
+  #panel-splitter:hover {
+    background: linear-gradient(to bottom, #2c2c2c, #3f3f3f, #2c2c2c);
   }
 
   /* Move regions panel below */
@@ -1081,16 +1087,20 @@ img#preview-img {
   }
 
   /* Stacked layout: the left zone no longer mirrors a sidebar width, and the
-     bar may grow taller when the right zone wraps. */
+     bar may grow taller when the right zone wraps. #app-bar itself wraps so
+     app-bar-right drops to its own row as a whole unit (kept at its natural
+     min-content width) before the buttons inside it wrap onto their own
+     lines — that fallback only kicks in once a full-width row still isn't
+     enough, at the narrower phone-width tier below. */
   #app-bar {
     height: auto;
     min-height: 42px;
+    flex-wrap: wrap;
   }
 
   .app-bar-left {
     width: auto;
-    min-width: 0;
-    flex: 1;
+    flex: 1 0 auto;
     padding: 6px 10px;
   }
 
@@ -1099,14 +1109,9 @@ img#preview-img {
   }
 
   .app-bar-right {
-    flex-wrap: wrap;
+    flex: 1 1 auto;
+    min-width: max-content;
     padding: 6px 10px;
-  }
-
-  #extract-controls,
-  #modify-controls {
-    flex-wrap: wrap;
-    overflow: visible;
   }
 
   #preview-container {
@@ -1120,16 +1125,6 @@ img#preview-img {
   }
 }
 
-/* Tablet tier: landscape 901-1200px keeps the side-by-side layout but with a
-   narrower default sidebar. (panel-resizer.js applies the same 240px default
-   at runtime; this covers the pre-JS paint and no-JS fallback. The app-bar
-   left zone follows automatically via the shared var.) */
-@media (orientation: landscape) and (min-width: 901px) and (max-width: 1200px) {
-  :root {
-    --sidebar-width: 240px;
-  }
-}
-
 /* Phone-width: the Open button collapses to icon-only (its title attribute
    still describes it); the mode toggle never collapses. The app-bar wraps so
    the left zone (Open + mode toggle) keeps its own row and the mode-dependent
@@ -1140,12 +1135,12 @@ img#preview-img {
     display: none;
   }
 
-  #app-bar {
+  /* Last-resort fallback: even a full-width app-bar-right row can't fit its
+     buttons at phone widths, so let them wrap onto their own lines here. */
+  #extract-controls,
+  #modify-controls {
     flex-wrap: wrap;
-  }
-
-  .app-bar-right {
-    flex: 1 1 100%;
+    overflow: visible;
   }
 }
 
@@ -1155,7 +1150,7 @@ img#preview-img {
 @media (pointer: coarse) {
   #app-bar .btn-open,
   #app-bar .action-btn,
-  .mode-toggle-btn {
+  .mode-toggle {
     height: 32px;
   }
 
