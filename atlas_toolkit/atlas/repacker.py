@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image
 
 from atlas_toolkit.core.document import AtlasDocument, Page, Region
-from atlas_toolkit.core.region_ops import extract_raw_sprite
+from atlas_toolkit.core.region_ops import extract_raw_sprite, round_up_to_multiple
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +98,8 @@ def shelf_pack(
                 best_result = (cw, ch, placements)
 
     assert best_result is not None
-    cw, ch, _ = best_result
+    cw, ch, placements = best_result
+    cw, ch = round_up_to_multiple(cw), round_up_to_multiple(ch)
     log.info(
         "Shelf pack: best %sx%s = %s px² (tried %s widths × 2 rotate modes)",
         cw,
@@ -106,7 +107,7 @@ def shelf_pack(
         f"{cw * ch:,}",
         len(candidates),
     )
-    return best_result
+    return cw, ch, placements
 
 
 def _deduplicate_sprites(
