@@ -22,7 +22,7 @@ from atlas_toolkit.core.document import (
     UpdatedRegionData,
 )
 from atlas_toolkit.atlas.repacker import repack_from_sprites, repack_single_page
-from atlas_toolkit.core.region_ops import extract_raw_sprite
+from atlas_toolkit.core.region_ops import extract_raw_sprite, round_up_to_multiple
 
 
 def parse_atlas(
@@ -191,7 +191,10 @@ class AtlasModifier:
                 f"  {c.label:20s}  {c.canvas_w}x{c.canvas_h} = {area:,} px²{tag}"
             )
 
-        return best
+        return best._replace(
+            canvas_w=round_up_to_multiple(best.canvas_w),
+            canvas_h=round_up_to_multiple(best.canvas_h),
+        )
 
     @staticmethod
     def _canvas_size_match(

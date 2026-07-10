@@ -12,6 +12,14 @@ if TYPE_CHECKING:
     pass
 
 
+def round_up_to_multiple(value: int, multiple: int = 4) -> int:
+    """Round *value* up to the nearest multiple of *multiple*."""
+    if value <= 0:
+        return 0
+    remainder = value % multiple
+    return value if remainder == 0 else value + (multiple - remainder)
+
+
 def crop_and_rotate(
     image: Image.Image, x: int, y: int, w: int, h: int, rotate: int
 ) -> Image.Image:
