@@ -1,16 +1,27 @@
 import { state } from './state.js';
 import { drawRegionOverlay } from './preview.js';
 
-export function initPanelResizer() {
-  const splitter   = document.getElementById('panel-splitter');
-  const leftPanel  = document.getElementById('left-panel');
-  const rightPanel = document.getElementById('right-panel');
-  if (!splitter || !leftPanel || !rightPanel) return;
+let _applyStoredSplit = null;
 
-  const LEFT_MIN    = 220;
-  const RIGHT_MIN   = 320;
-  const PREVIEW_MIN = 260;
-  const LIST_MIN    = 220;
+/**
+ * Re-clamp the panel split after something outside this module changes the
+ * chrome it accounts for -- e.g. setMode() (modify-mode.js) shows/hides
+ * repack-options, which shifts minRightHeight() in stacked/portrait layout.
+ * No-op before initPanelResizer() has run.
+ */
+export function refreshPanelSplit() {
+  if (_applyStoredSplit) _applyStoredSplit();
+}
+
+export function initPanelResizer() {
+  const splitter      = document.getElementById('panel-splitter');
+  const leftPanel     = document.getElementById('left-panel');
+  const rightPanel    = document.getElementById('right-panel');
+  const mainContent   = document.getElementById('main-content');
+  const sidebarHead   = document.getElementById('sidebar-head');
+  const repackOptions = document.getElementById('repack-options');
+  const statusBar     = document.getElementById('status-bar');
+  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !repackOptions || !statusBar) return;
 
   let dragging  = false;
   let startPos  = 0;
@@ -19,11 +30,23 @@ export function initPanelResizer() {
   const isPortrait = () => window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-  // The sidebar width is a shared CSS var so the app-bar's left zone (and its
-  // panel divider) stay aligned with the sidebar edge, like the Python app.
-  const setSidebarWidth = (px) => {
-    document.documentElement.style.setProperty('--sidebar-width', `${px}px`);
-  };
+  // Stacked (portrait/mobile) mode is user-resizable, but each side's own
+  // header row always stays visible: dragging up stops once the preview has
+  // shrunk to nothing beneath repack-options + status-bar; dragging down
+  // stops once the region list has shrunk to nothing beneath sidebar-head.
+  // The budget is #main-content's own height (not window.innerHeight) minus
+  // the splitter's own footprint, since #app-bar can grow taller than its
+  // base 42px when it wraps -- eating into the space actually left for the
+  // panels. The wide left/right layout is locked to a fixed width, matching
+  // the Python app -- it is not user-resizable.
+  const minRightHeight = () =>
+    repackOptions.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
+  const maxRightHeight = () => Math.max(
+    minRightHeight(),
+    mainContent.getBoundingClientRect().height
+      - splitter.getBoundingClientRect().height
+      - sidebarHead.getBoundingClientRect().height,
+  );
 
   const applyStoredSplit = () => {
     if (isPortrait()) {
@@ -35,8 +58,9 @@ export function initPanelResizer() {
 
       const stored   = Number(localStorage.getItem('atlastoolkit.layout.portrait.previewHeight'));
       const fallback = Math.round(window.innerHeight * 0.44);
-      const maxH     = Math.max(PREVIEW_MIN, window.innerHeight - LIST_MIN);
-      const nextH    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, PREVIEW_MIN, maxH);
+      const minH     = minRightHeight();
+      const maxH     = maxRightHeight();
+      const nextH    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, minH, maxH);
 
       rightPanel.style.flex   = 'none';
       rightPanel.style.height = `${nextH}px`;
@@ -45,46 +69,34 @@ export function initPanelResizer() {
       rightPanel.style.removeProperty('height');
       rightPanel.style.removeProperty('flex');
 
-      const stored   = Number(localStorage.getItem('atlastoolkit.layout.desktop.leftWidth'));
-      // Tablet tier (landscape ≤1200px): narrower default so a 1024px-wide
-      // iPad landscape doesn't spend 300px on the sidebar. A user-dragged
-      // width (stored) still wins over either default.
-      const fallback = window.innerWidth <= 1200 ? 240 : 300;
-      const maxW     = Math.max(LEFT_MIN, window.innerWidth - RIGHT_MIN);
-      const nextW    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, LEFT_MIN, maxW);
-
-      leftPanel.style.flex = 'none';
-      setSidebarWidth(nextW);
+      // Fixed width, matching the Python app exactly (--sidebar-width: 300px
+      // in :root) -- not user-resizable here, and no narrower tier either.
+      document.documentElement.style.removeProperty('--sidebar-width');
+      leftPanel.style.removeProperty('width');
+      leftPanel.style.removeProperty('min-width');
+      leftPanel.style.removeProperty('flex');
     }
 
     if (state.currentMode === 'modify') drawRegionOverlay();
   };
 
   splitter.addEventListener('pointerdown', (e) => {
+    if (!isPortrait()) return; // locked/fixed in left-right mode
     e.preventDefault();
     dragging  = true;
-    startPos  = isPortrait() ? e.clientY : e.clientX;
-    startSize = isPortrait()
-      ? rightPanel.getBoundingClientRect().height
-      : leftPanel.getBoundingClientRect().width;
+    startPos  = e.clientY;
+    startSize = rightPanel.getBoundingClientRect().height;
     document.body.classList.add('resizing');
     splitter.setPointerCapture(e.pointerId);
   });
 
   splitter.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    if (isPortrait()) {
-      const delta = e.clientY - startPos;
-      const maxH  = Math.max(PREVIEW_MIN, window.innerHeight - LIST_MIN);
-      rightPanel.style.flex   = 'none';
-      rightPanel.style.height = `${clamp(startSize + delta, PREVIEW_MIN, maxH)}px`;
-    } else {
-      const delta = e.clientX - startPos;
-      const maxW  = Math.max(LEFT_MIN, window.innerWidth - RIGHT_MIN);
-      const nextW = clamp(startSize + delta, LEFT_MIN, maxW);
-      leftPanel.style.flex = 'none';
-      setSidebarWidth(nextW);
-    }
+    const delta = e.clientY - startPos;
+    const minH  = minRightHeight();
+    const maxH  = maxRightHeight();
+    rightPanel.style.flex   = 'none';
+    rightPanel.style.height = `${clamp(startSize + delta, minH, maxH)}px`;
     if (state.currentMode === 'modify') drawRegionOverlay();
   });
 
@@ -95,21 +107,15 @@ export function initPanelResizer() {
     if (e?.pointerId !== undefined && splitter.hasPointerCapture(e.pointerId)) {
       splitter.releasePointerCapture(e.pointerId);
     }
-    if (isPortrait()) {
-      localStorage.setItem(
-        'atlastoolkit.layout.portrait.previewHeight',
-        String(Math.round(rightPanel.getBoundingClientRect().height)),
-      );
-    } else {
-      localStorage.setItem(
-        'atlastoolkit.layout.desktop.leftWidth',
-        String(Math.round(leftPanel.getBoundingClientRect().width)),
-      );
-    }
+    localStorage.setItem(
+      'atlastoolkit.layout.portrait.previewHeight',
+      String(Math.round(rightPanel.getBoundingClientRect().height)),
+    );
   };
 
   splitter.addEventListener('pointerup', stopDragging);
   splitter.addEventListener('pointercancel', stopDragging);
   window.addEventListener('resize', applyStoredSplit);
+  _applyStoredSplit = applyStoredSplit;
   applyStoredSplit();
 }

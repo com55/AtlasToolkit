@@ -1,6 +1,6 @@
 import { AtlasAPI } from './js/atlas-api.js';
 import { state } from './js/state.js';
-import { showToast, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
+import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
 import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
@@ -164,5 +164,6 @@ window.savePreviewImageAs  = savePreviewImageAs;
 window.saveMergedImage     = savePreviewImageAs;
 window.resetModify         = resetModify;
 window.showConfirm         = showConfirm;
+window.showAlert           = showAlert;
 window.showMissingAtlasImages = showMissingAtlasImagesDialog;
 window.showToast           = showToast;

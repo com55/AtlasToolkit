@@ -5,9 +5,11 @@ import {
   resetPreview, applyTransform,
   drawRegionOverlay, clearOverlay,
   updatePreview, updateSaveMergedButton,
+  fitScaleIfOversized,
 } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
+import { refreshPanelSplit } from './panel-resizer.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -43,6 +45,9 @@ export function setMode(mode) {
   }
   updateModeToggleUI();
   updatePageSwitcher();
+  // repack-options just appeared/disappeared -- re-clamp the stacked-layout
+  // split so the splitter follows instead of leaving it stranded.
+  refreshPanelSplit();
 }
 
 /** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
@@ -63,8 +68,9 @@ function applyModifyView(data, statusMsg) {
     const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
-    if (imgW > containerW || imgH > containerH) {
-      state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+    if (fitScale !== null) {
+      state.viewState.scale = fitScale;
       applyTransform();
     }
     previewImg.onload = null;
@@ -169,8 +175,9 @@ export function onModPreviewReceived(data) {
       ? `Merged across ${data.pageCount} pages. Ready to save.`
       : `Merged preview (${imgW}x${imgH}). Ready to save.`;
     setStatus(statusMsg);
-    if (imgW > containerW || imgH > containerH) {
-      state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+    if (fitScale !== null) {
+      state.viewState.scale = fitScale;
     }
     applyTransform();
     previewImg.onload = null;

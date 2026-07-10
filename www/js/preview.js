@@ -9,6 +9,23 @@ export function resetPreview() {
   applyTransform();
 }
 
+const isPortraitLayout = () => window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
+
+/**
+ * Scale to shrink an oversized image into a container, or null if it already
+ * fits. In the stacked portrait/mobile layout the preview panel's height is
+ * user-draggable (see panel-resizer.js) and can range from near-0 to nearly
+ * full-screen, so fitting against height there would make the same image
+ * jump to a wildly different size depending only on where the splitter
+ * happens to sit -- width is the stable axis there, so fit against width alone.
+ */
+export function fitScaleIfOversized(containerW, containerH, imgW, imgH) {
+  if (isPortraitLayout()) {
+    return imgW > containerW ? containerW / imgW : null;
+  }
+  return (imgW > containerW || imgH > containerH) ? Math.min(containerW / imgW, containerH / imgH) : null;
+}
+
 export function applyTransform() {
   const { x, y, scale } = state.viewState;
   previewImg.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
@@ -99,8 +116,9 @@ export async function updatePreview(names) {
       status.innerText = names.length === 1
         ? `Previewing: ${names[0]} (${imgW}x${imgH})`
         : `Previewing: ${names.length} regions (${imgW}x${imgH})`;
-      if (imgW > containerW || imgH > containerH) {
-        state.viewState.scale = Math.min(containerW / imgW, containerH / imgH);
+      const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+      if (fitScale !== null) {
+        state.viewState.scale = fitScale;
         applyTransform();
       }
       updateSaveMergedButton();
