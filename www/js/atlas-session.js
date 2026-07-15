@@ -18,8 +18,10 @@ export class ModBatch {
   constructor(names, source) {
     this.names = names;         // array of region names this batch targeted
     this.source = source;       // original mod input (File/Blob/Image/Canvas)
-    this.sharedCanvas = false;  // strict shared-canvas-mod flag (sharedCanvasMod
-                                // from _prepareModImage); feeds fullCanvasRegions
+    this.sharedCanvas = false;  // isFullCanvas flag from _prepareModImage (NOT
+                                // sharedCanvasMod — that one requires >1 region
+                                // and would wrongly exclude single-region
+                                // full-canvas mods); feeds fullCanvasRegions
     this.loaded = null;         // loaded HTMLImageElement/Canvas, reusable for
                                 // replay (dropped Files aren't re-readable) — the
                                 // multi-page merge path re-prepares from this
@@ -105,7 +107,7 @@ export class AtlasSession {
         const modifier = new AtlasModifier(this.atlasText, this.filename, pageImg, page.filename);
         const ordered = this._orderSelection(modifier, pageNames);
         const prep = modifier._prepareModImage(batch.loaded, ordered);
-        if (prep.sharedCanvasMod) batch.sharedCanvas = true;
+        if (prep.isFullCanvas) batch.sharedCanvas = true;
         for (const name of pageNames) this.moddedSprites[name] = prep.canvas;
       }
     } else {
@@ -114,7 +116,7 @@ export class AtlasSession {
       const ordered = this._orderSelection(modifier, selectedNames);
       const prep = modifier._prepareModImage(batch.loaded, ordered);
       batch.prepared = prep;
-      batch.sharedCanvas = prep.sharedCanvasMod;
+      batch.sharedCanvas = prep.isFullCanvas;
       for (const name of selectedNames) this.moddedSprites[name] = prep.canvas;
     }
 
