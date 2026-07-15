@@ -1,5 +1,5 @@
 {
-  "pinnedSha": "f33ba7f",
+  "pinnedSha": "9655e3c",
   "extractCases": [
     {
       "name": "fixture-opaque: extract 'plain' via real AtlasDocument.parse path (exact, binary alpha)",

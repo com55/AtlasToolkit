@@ -1,6 +1,6 @@
 """Extended Python reference-oracle ground truth for Task 5 (Phase F partial).
 
-PINNED ORACLE COMMIT: main @ f33ba7f (confirm with `git rev-parse --short main`;
+PINNED ORACLE COMMIT: main @ 9655e3c (confirm with `git rev-parse --short main`;
 atlas_toolkit/ is byte-identical between main and dev at time of writing, but
 dev moves -- this script always diffs against the pinned SHA via
 `git show <sha>:<path>`, never a moving branch ref).
@@ -56,7 +56,7 @@ logging.disable(logging.CRITICAL)  # silence the modules' own INFO logging
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 FIXTURES = os.path.join(HERE, "fixtures")
-PINNED_SHA = "f33ba7f"
+PINNED_SHA = "9655e3c"
 
 actual_sha = subprocess.check_output(
     ["git", "-C", REPO, "rev-parse", "--short", "main"], text=True
