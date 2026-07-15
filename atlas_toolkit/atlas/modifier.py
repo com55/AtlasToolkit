@@ -311,7 +311,7 @@ class AtlasModifier:
         mod_image_path: Path,
         selected_regions: List[str],
         *,
-        prepared_mod: Optional[Tuple[Image.Image, int, int, bool]] = None,
+        prepared_mod: Optional[Tuple[Image.Image, int, int, bool, bool]] = None,
     ) -> Tuple[Image.Image, str]:
         """
         Merges a mod image onto the base atlas canvas for the selected regions.
@@ -326,10 +326,10 @@ class AtlasModifier:
             raise ValueError("No regions selected for modification")
 
         if prepared_mod is not None:
-            mod_img, mod_w, mod_h, shared_canvas_mod = prepared_mod
+            mod_img, mod_w, mod_h, shared_canvas_mod, _is_full_canvas = prepared_mod
         else:
-            mod_img, mod_w, mod_h, shared_canvas_mod = self._prepare_mod_image(
-                mod_image_path, selected_regions
+            mod_img, mod_w, mod_h, shared_canvas_mod, _is_full_canvas = (
+                self._prepare_mod_image(mod_image_path, selected_regions)
             )
 
         base_w, base_h = self.base_image.size
@@ -396,7 +396,7 @@ class AtlasModifier:
 
     def _prepare_mod_image(
         self, mod_image_path: Path, selected_regions: List[str]
-    ) -> Tuple[Image.Image, int, int, bool]:
+    ) -> Tuple[Image.Image, int, int, bool, bool]:
         """Load and pad a mod image for the selected regions' logical canvas."""
         mod_img = Image.open(mod_image_path).convert("RGBA")
 
@@ -436,6 +436,13 @@ class AtlasModifier:
             mod_img = padded_mod
             mod_w, mod_h = orig_canvas_w, orig_canvas_h
 
+        # shared_canvas_mod: multiple selected regions paste from the same
+        # canvas image — governs merge's rotate-avoidance (rotating would
+        # break their shared coordinate space). is_full_canvas: this mod
+        # image needs no offset/trim regardless of region count — governs
+        # whether repack resets a region's offsets. Keep them distinct:
+        # a single-region full-canvas mod has is_full_canvas=True but
+        # shared_canvas_mod=False.
         shared_canvas_mod = (
             is_full_canvas and self._selected_share_canvas(selected_regions)
         )
@@ -444,7 +451,7 @@ class AtlasModifier:
                 "Shared logical canvas: all selected regions use one atlas area"
             )
 
-        return mod_img, mod_w, mod_h, shared_canvas_mod
+        return mod_img, mod_w, mod_h, shared_canvas_mod, is_full_canvas
 
     def repack_with_modded_sprites(
         self,
