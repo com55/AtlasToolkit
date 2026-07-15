@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-PreparedMod = Tuple["Image", int, int, bool]
+PreparedMod = Tuple["Image", int, int, bool, bool]
 
 
 @dataclass
@@ -292,7 +292,7 @@ class AtlasSession:
                 )
                 prepared = modifier._prepare_mod_image(mod_path, page_selected)
                 mod_img = prepared[0]
-                if prepared[3]:
+                if prepared[4]:  # is_full_canvas — feeds full_canvas_regions on repack
                     batch.shared_canvas = True
                 for name in page_selected:
                     self.modded_sprites[name] = mod_img
@@ -305,7 +305,7 @@ class AtlasSession:
             return None
         prepared = modifier._prepare_mod_image(mod_path, selected_names)
         batch.prepared = prepared
-        batch.shared_canvas = prepared[3]
+        batch.shared_canvas = prepared[4]  # is_full_canvas — feeds full_canvas_regions on repack
         mod_img = prepared[0]
         for name in selected_names:
             self.modded_sprites[name] = mod_img
