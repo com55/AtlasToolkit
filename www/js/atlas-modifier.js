@@ -421,12 +421,20 @@ export class AtlasModifier {
   /**
    * Load + pad a mod image for the selection's logical canvas.
    * Port of modifier.py::_prepare_mod_image. Returns the padded mod canvas, its
-   * (possibly padded) dimensions, and `sharedCanvasMod` — the STRICT flag that
-   * both disables rotation on placement and is recorded on the ModBatch to feed
-   * fullCanvasRegions. Computed against `this.regions`, so callers must run it
-   * on a modifier whose regions carry the offsets they want resolved (the
-   * session runs it on a fresh, pristine modifier).
-   * @returns {{canvas: HTMLCanvasElement, modW: number, modH: number, sharedCanvasMod: boolean}}
+   * (possibly padded) dimensions, and two DISTINCT flags:
+   *   - sharedCanvasMod: multiple selected regions paste from the same canvas
+   *     image — disables rotation on placement (rotating would break their
+   *     shared coordinate space). Requires selectedRegions.length > 1.
+   *   - isFullCanvas: this mod image needs no offset/trim, regardless of how
+   *     many regions are selected — feeds fullCanvasRegions on the ModBatch so
+   *     repack resets this region's offsets instead of preserving stale ones.
+   * A single-region full-canvas mod has isFullCanvas=true but
+   * sharedCanvasMod=false — callers must not conflate the two (see
+   * session.py commit that split this same flag).
+   * Computed against `this.regions`, so callers must run it on a modifier
+   * whose regions carry the offsets they want resolved (the session runs it
+   * on a fresh, pristine modifier).
+   * @returns {{canvas: HTMLCanvasElement, modW: number, modH: number, sharedCanvasMod: boolean, isFullCanvas: boolean}}
    */
   _prepareModImage(modImage, selectedRegions) {
     const modCanvas = _toCanvas(modImage);
@@ -450,7 +458,7 @@ export class AtlasModifier {
     }
 
     const sharedCanvasMod = isFullCanvas && this._selectedShareCanvas(selectedRegions);
-    return { canvas: finalMod, modW, modH, sharedCanvasMod };
+    return { canvas: finalMod, modW, modH, sharedCanvasMod, isFullCanvas };
   }
 
   /**
