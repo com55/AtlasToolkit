@@ -313,6 +313,15 @@ if (!WORKSPACES_ROOT && gt.realworldCases.length > 0) {
       const atlasRelMatch = cse.name.match(/\[([^\]]+\.atlas)\]/);
       const atlasRel = atlasRelMatch[1];
       const pngRel = atlasRel.replace(/\.atlas$/, '.png');
+      // WORKSPACES_ROOT existing doesn't mean THIS case's fixture atlas does
+      // -- .workspaces/ can hold unrelated local data (e.g. a debugging
+      // session's own workspace) without the specific group_XXX targets
+      // gen-ground-truth-ops.py baked into ground_truth_ops.json.
+      if (!fs.existsSync(path.join(WORKSPACES_ROOT, pngRel))) {
+        console.log(`SKIP ${cse.name}: ${pngRel} not found in this environment's .workspaces/.`);
+        skip += 1;
+        continue;
+      }
       const pngUrl = `/__workspaces__/${pngRel}`;
       const got = await page.evaluate(({ c, u }) => window.runRealworldExtractCase(c, u), { c: cse, u: pngUrl });
       check(cse.name, comparePixels(cse.name, got, cse.expected, cse.exact, cse.tolerance));
