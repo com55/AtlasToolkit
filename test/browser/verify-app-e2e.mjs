@@ -131,6 +131,23 @@ bounds: 0, 0, 10, 10
   };
 };
 
+window.runScaleMismatch = async () => {
+  // Atlas declares a 200x200 page, but the actual PNG provided is 100x100
+  // (scaleX=scaleY=0.5) -- reproduces the reported overlay-misalignment bug:
+  // enter_modify_mode() must scale bounds to match the real image, the same
+  // way AtlasProcessor.loadImages()/extractRegion() already do for extraction.
+  const atlasText = \`page1.png
+size: 200,200
+sword
+bounds: 40, 20, 80, 60
+\`;
+  const atlasFile = textFile(atlasText, 'scale.atlas');
+  const pageFile = await canvasToFile(solidCanvas(100, 100, [10, 20, 30, 255]), 'page1.png');
+  const loaded = await AtlasAPI.load_atlas_from_file(atlasFile, { 'page1.png': pageFile });
+  const entered = await AtlasAPI.enter_modify_mode();
+  return { loaded, entered: !!entered, swordBounds: entered && entered.regions.sword };
+};
+
 window.__ready = true;
 </script></body>`;
 
@@ -173,6 +190,17 @@ check('multi-page: entered modify mode', multi.entered === true, multi);
 check('multi-page: merge produced 2 pages', multi.mergedPageCount === 2, multi);
 check('multi-page: repack toggle ON still produces 2 pages (per-page repack, no "all" mode)', multi.repackedPageCount === 2, multi);
 check('multi-page: repack toggle OFF produces 2 pages', multi.unrepackedPageCount === 2, multi);
+
+const scaleMismatch = await page.evaluate(() => window.runScaleMismatch());
+check('scale-mismatch: atlas loaded', scaleMismatch.loaded === true, scaleMismatch);
+check('scale-mismatch: entered modify mode', scaleMismatch.entered === true, scaleMismatch);
+check(
+  'scale-mismatch: sword bounds scaled 0.5x to match real 100x100 image (declared bounds: 40,20,80,60)',
+  Array.isArray(scaleMismatch.swordBounds) &&
+    scaleMismatch.swordBounds[0] === 20 && scaleMismatch.swordBounds[1] === 10 &&
+    scaleMismatch.swordBounds[2] === 40 && scaleMismatch.swordBounds[3] === 30,
+  scaleMismatch,
+);
 
 check('no console/page errors during either scenario', pageErrors.length === 0, pageErrors);
 
