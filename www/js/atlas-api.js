@@ -485,11 +485,11 @@ export const AtlasAPI = {
       // Entering modify mode always starts from a clean batch list.
       _session.clearModifyState();
 
-      // Build region bounds for overlay: { name: [x, y, w, h, rotate] }
-      const regionBounds = {};
-      for (const [name, info] of Object.entries(_processor.regions || {})) {
-        regionBounds[name] = [info.x, info.y, info.w, info.h, info.rotate];
-      }
+      // Build region bounds for overlay: { name: [x, y, w, h, rotate] }.
+      // Scaled per page to the real loaded image size (see
+      // AtlasSession.getModifyRegionBounds) so the overlay lines up even
+      // when a page's PNG doesn't match the atlas's declared `size:`.
+      const regionBounds = _session.getModifyRegionBounds();
 
       // Convert base image to data URL for preview
       const baseCanvas = document.createElement('canvas');
