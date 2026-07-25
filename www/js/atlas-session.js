@@ -125,6 +125,29 @@ export class AtlasSession {
     return batch;
   }
 
+  // ─── Modify-mode overlay bounds ─────────────────────────────────────────
+  /**
+   * Region bounds for the modify-mode overlay: { name: [x, y, w, h, rotate] }.
+   * Built per page via AtlasModifier (same construction _registerModBatch's
+   * multi-page branch uses) so bounds come out scaled to each loaded page
+   * image's real pixel size when it differs from the atlas's declared
+   * `size:` — mirrors session.py::build_modify_view reading bounds from
+   * self.modifier.regions (AtlasModifier-scaled) rather than the raw parser.
+   */
+  getModifyRegionBounds() {
+    const bounds = {};
+    for (const page of this.processor.pages) {
+      const pageImg = this.processor.getPageImage(page.filename);
+      if (!pageImg) continue;
+      const modifier = new AtlasModifier(this.atlasText, this.filename, pageImg, page.filename);
+      for (const [name, info] of Object.entries(modifier.regions)) {
+        const [x, y, w, h] = info.bounds;
+        bounds[name] = [x, y, w, h, info.rotate];
+      }
+    }
+    return bounds;
+  }
+
   // ─── Full-canvas regions (feeds single-page repack offset reset) ──────────
   /** Union of batch.names across batches whose mod filled the shared canvas. */
   _fullCanvasRegions() {
