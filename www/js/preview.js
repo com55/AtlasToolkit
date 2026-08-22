@@ -1,5 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedNames } from './state.js';
+import { isPortrait } from './platform.js';
 
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
@@ -8,8 +9,6 @@ export function resetPreview() {
   state.viewState = { scale: 1, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 };
   applyTransform();
 }
-
-const isPortraitLayout = () => window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
 
 /**
  * Scale to shrink an oversized image into a container, or null if it already
@@ -20,7 +19,7 @@ const isPortraitLayout = () => window.matchMedia('(orientation: portrait), (max-
  * happens to sit -- width is the stable axis there, so fit against width alone.
  */
 export function fitScaleIfOversized(containerW, containerH, imgW, imgH) {
-  if (isPortraitLayout()) {
+  if (isPortrait()) {
     return imgW > containerW ? containerW / imgW : null;
   }
   return (imgW > containerW || imgH > containerH) ? Math.min(containerW / imgW, containerH / imgH) : null;

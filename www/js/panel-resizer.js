@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { drawRegionOverlay } from './preview.js';
+import { isPortrait } from './platform.js';
 
 let _applyStoredSplit = null;
 
@@ -27,7 +28,6 @@ export function initPanelResizer() {
   let startPos  = 0;
   let startSize = 0;
 
-  const isPortrait = () => window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
   // Stacked (portrait/mobile) mode is user-resizable, but each side's own

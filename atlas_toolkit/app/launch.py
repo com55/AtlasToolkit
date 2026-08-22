@@ -119,7 +119,14 @@ def run() -> None:
         url=str(gui_path.absolute().as_uri()),
         width=window_width,
         height=window_height,
-        min_size=(800, 500),
+        # (1000, 650): 1000px width keeps the window above style.css's
+        # `max-width: 900px` stacked-layout breakpoint. This alone doesn't
+        # stop `orientation: portrait` from matching (that fires whenever
+        # height > width, regardless of absolute size) — the real fix is the
+        # `html.pywebview` CSS-class scoping (index.html + style.css,
+        # unify-js-engine Phase 6); this is just a belt-and-suspenders floor
+        # so the window can't be dragged into an unreasonably cramped size.
+        min_size=(1000, 650),
         x=center_x,
         y=center_y,
         resizable=True,
