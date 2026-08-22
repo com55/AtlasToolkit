@@ -398,6 +398,12 @@ export const AtlasAPI = {
     return _loadAtlasFiles(atlasFile, imageFileMap);
   },
 
+  /** Filename of the currently-loaded atlas, or '' if none — used by
+   * script.js to update the pywebview native window title. */
+  get_current_atlas_filename() {
+    return _currentAtlasFilename;
+  },
+
   get_region_names() {
     if (!_processor) return [];
     return Object.keys(_processor.regions);
