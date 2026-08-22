@@ -6,7 +6,7 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 
@@ -351,8 +351,32 @@ export const AtlasAPI = {
     platform.savePref(key, value);
   },
 
-  /** Open a file picker that accepts .atlas and image files. */
+  /**
+   * Open a file picker that accepts .atlas and image files. Under pywebview,
+   * use the native single-file Open dialog + list_sibling_page_images() to
+   * auto-resolve sibling PNGs from disk (matching the old Python-engine
+   * desktop UX) instead of requiring the user to multi-select the atlas +
+   * every PNG together in a browser `<input type=file>` picker.
+   */
   async choose_file() {
+    if (isPywebviewDesktop() && window.pywebview.api.pick_atlas_file) {
+      const path = await window.pywebview.api.pick_atlas_file();
+      if (!path) return false;
+      try {
+        const atlasInfo = await window.pywebview.api.read_file_as_base64(path);
+        const imagesInfo = await window.pywebview.api.list_sibling_page_images(path);
+        const atlasFile = base64ToFile(atlasInfo.base64, atlasInfo.name, 'text/plain');
+        const imageFileMap = {};
+        for (const [name, b64] of Object.entries(imagesInfo || {})) {
+          imageFileMap[name] = base64ToFile(b64, name, 'image/png');
+        }
+        return _loadAtlasFiles(atlasFile, imageFileMap);
+      } catch (e) {
+        console.error('choose_file (pywebview) error:', e);
+        return false;
+      }
+    }
+
     const files = await _pickFiles({
       accept: '.atlas,.txt,text/plain,image/png,.png',
       multiple: true,
