@@ -1,8 +1,9 @@
 /**
  * platform.js
- * Small facade isolating browser/File-System-Access-API quirks (file pickers,
- * folder writes, preferences) behind a stable interface for the rest of the
- * app. PWA-only — there is no native shell here.
+ * Small facade isolating browser/File-System-Access-API vs. pywebview-native
+ * quirks (file pickers, folder writes, preferences) behind a stable
+ * interface for the rest of the app. Callers never need to know which
+ * backend is active.
  */
 
 const ATLAS_EXTS = new Set(['atlas', 'txt']);
@@ -10,6 +11,38 @@ const ATLAS_EXTS = new Set(['atlas', 'txt']);
 function _ext(name) {
   const idx = String(name || '').lastIndexOf('.');
   return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+}
+
+// ─── pywebview native bridge detection ─────────────────────────────────────
+// Detection idiom matches the one already used in www/js/dialogs.js /
+// ui/js/updates.js: pywebview.api exists once the native bridge is ready.
+
+function _isPywebview() {
+  return typeof window !== 'undefined' && !!(window.pywebview && window.pywebview.api);
+}
+
+/** True when running inside the pywebview desktop shell. */
+export function isPywebviewDesktop() {
+  return _isPywebview();
+}
+
+/**
+ * Base64-encode a Blob/string/binary payload — pywebview's `js_api` bridge
+ * only accepts JSON-serializable arguments, so file bytes have to cross as
+ * base64 rather than as a Blob/ArrayBuffer.
+ */
+export async function blobToBase64(data) {
+  const blob = data instanceof Blob
+    ? data
+    : typeof data === 'string'
+      ? new Blob([data], { type: 'text/plain' })
+      : new Blob([data]);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -59,10 +92,14 @@ export async function pickAtlasFile() {
 }
 
 /**
- * Pick a folder to save into, via the File System Access API.
- * Returns null if unsupported or the user cancels.
+ * Pick a folder to save into. pywebview: native folder dialog (returns a
+ * plain path string). Browser: File System Access API (returns a
+ * FileSystemDirectoryHandle). Returns null if unsupported or cancelled.
  */
 export async function pickSaveFolder() {
+  if (_isPywebview() && window.pywebview.api.pick_save_folder) {
+    return (await window.pywebview.api.pick_save_folder()) || null;
+  }
   if (typeof window.showDirectoryPicker !== 'function') return null;
   try {
     return await window.showDirectoryPicker({ mode: 'readwrite', id: 'atlastoolkit-extract-folder' });
@@ -74,9 +111,19 @@ export async function pickSaveFolder() {
 
 /**
  * Write a list of {name, data} to a folder.
- * target: a FileSystemDirectoryHandle (from pickSaveFolder).
+ * target: a plain path string (pywebview) or a FileSystemDirectoryHandle
+ * (browser, from pickSaveFolder).
  */
 export async function writeFilesToFolder(target, files) {
+  if (typeof target === 'string') {
+    const sep = target.includes('\\') ? '\\' : '/';
+    for (const item of files) {
+      const base64 = await blobToBase64(item.data);
+      await window.pywebview.api.write_file_bytes(`${target}${sep}${item.name}`, base64);
+    }
+    return;
+  }
+
   if (target && typeof target.getFileHandle === 'function') {
     for (const item of files) {
       const data = item.data;
@@ -96,9 +143,59 @@ export async function writeFilesToFolder(target, files) {
   throw new Error('writeFilesToFolder: invalid target');
 }
 
-// ─── Preferences (localStorage) ────────────────────────────────────────────────
+/**
+ * Save a single Blob via a Save As dialog (D1 — output pickers route
+ * through the native bridge on pywebview, unlike input pickers).
+ * Returns a FileSystemFileHandle (browser, truthy — pass back in as
+ * `startIn` for the next save), `true` (pywebview — no handle concept), or
+ * `null`/`false` if the user cancelled. Never throws on cancel.
+ */
+export async function saveFileWithDialog(filename, blob, { startIn = null } = {}) {
+  if (_isPywebview() && window.pywebview.api.pick_save_file) {
+    const path = await window.pywebview.api.pick_save_file(filename);
+    if (!path) return null;
+    await window.pywebview.api.write_file_bytes(path, await blobToBase64(blob));
+    return true;
+  }
+
+  if (typeof window.showSaveFilePicker !== 'function') return null;
+  const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+  const fileType = ext === 'png'
+    ? { description: 'PNG image', accept: { 'image/png': ['.png'] } }
+    : ext === 'zip'
+      ? { description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }
+      : { description: 'Atlas text', accept: { 'text/plain': ['.atlas', '.txt'] } };
+  const pickerOptions = {
+    id: 'atlastoolkit-export',
+    suggestedName: filename,
+    types: [fileType],
+    excludeAcceptAllOption: false,
+  };
+  if (startIn) pickerOptions.startIn = startIn;
+
+  try {
+    const fileHandle = await window.showSaveFilePicker(pickerOptions);
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return fileHandle;
+  } catch (e) {
+    if (e?.name === 'AbortError') return null;
+    throw e;
+  }
+}
+
+// ─── Preferences ────────────────────────────────────────────────────────────
+// pywebview: disk-backed via config.json (Api.get_pref/set_pref). Browser:
+// localStorage.
 
 export async function loadPref(key, defaultValue = null) {
+  if (_isPywebview() && window.pywebview.api.get_pref) {
+    try {
+      const value = await window.pywebview.api.get_pref(key, defaultValue);
+      return value === undefined ? defaultValue : value;
+    } catch (_) { return defaultValue; }
+  }
   try {
     const raw = localStorage.getItem(`atlastoolkit.${key}`);
     return raw !== null ? JSON.parse(raw) : defaultValue;
@@ -106,6 +203,10 @@ export async function loadPref(key, defaultValue = null) {
 }
 
 export function savePref(key, value) {
+  if (_isPywebview() && window.pywebview.api.set_pref) {
+    window.pywebview.api.set_pref(key, value);
+    return;
+  }
   try { localStorage.setItem(`atlastoolkit.${key}`, JSON.stringify(value)); } catch (_) {}
 }
 
@@ -113,6 +214,7 @@ export const platform = {
   pickAtlasFile,
   pickSaveFolder,
   writeFilesToFolder,
+  saveFileWithDialog,
   loadPref,
   savePref,
 };

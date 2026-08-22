@@ -6,7 +6,7 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 
@@ -40,6 +40,7 @@ function _extractRequiredPages(atlasText) {
 }
 
 function _isDesktopFsApiAvailable() {
+  if (isPywebviewDesktop()) return true;
   return typeof window !== 'undefined'
     && window.isSecureContext
     && typeof window.showSaveFilePicker === 'function'
@@ -56,11 +57,13 @@ function _isInstalledPWA() {
 
 /**
  * Whether saving should open a folder picker (installed-PWA File System
- * Access API) rather than downloading a zip. A browser tab — even a
- * Chromium one with the FS API — gets a zip download.
+ * Access API, or the pywebview desktop app's native folder dialog) rather
+ * than downloading a zip. A plain browser tab — even a Chromium one with
+ * the FS API — gets a zip download.
  */
 function _useFolderPicker() {
-  return _isInstalledPWA() && typeof window.showDirectoryPicker === 'function';
+  return isPywebviewDesktop()
+    || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
 }
 
 /** Base name (no extension) of the loaded atlas, for naming zip downloads. */
@@ -182,31 +185,17 @@ async function _loadAtlasFromFileList(files, options = {}) {
   return _loadAtlasFiles(atlasFile, imageFileMap);
 }
 
-async function _writeBlobToHandle(fileHandle, blob) {
-  const writable = await fileHandle.createWritable();
-  await writable.write(blob);
-  await writable.close();
-}
-
 async function _saveBlobWithDialog(filename, blob) {
-  const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
-  const fileType = ext === 'png'
-    ? { description: 'PNG image', accept: { 'image/png': ['.png'] } }
-    : ext === 'zip'
-      ? { description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }
-      : { description: 'Atlas text', accept: { 'text/plain': ['.atlas', '.txt'] } };
-  const pickerOptions = {
-    id: 'atlastoolkit-export',
-    suggestedName: filename,
-    types: [fileType],
-    excludeAcceptAllOption: false,
-  };
-
-  if (_lastSaveHandle) pickerOptions.startIn = _lastSaveHandle;
-
-  const fileHandle = await window.showSaveFilePicker(pickerOptions);
-  await _writeBlobToHandle(fileHandle, blob);
-  _lastSaveHandle = fileHandle;
+  // platform.js branches browser (File System Access API) vs pywebview
+  // (native save dialog + write_file_bytes); _lastSaveHandle only means
+  // anything for the former.
+  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle });
+  if (!result) {
+    const e = new Error('Save cancelled');
+    e.name = 'AbortError';
+    throw e;
+  }
+  if (typeof result === 'object') _lastSaveHandle = result;
 }
 
 /**
@@ -442,7 +431,7 @@ export const AtlasAPI = {
     if (extracted.length === 0) return 'No regions to extract.';
 
     try {
-      // Installed PWA: pick a folder and write the PNGs into it.
+      // Installed PWA / pywebview desktop: pick a folder and write the PNGs into it.
       if (_useFolderPicker()) {
         const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
@@ -591,7 +580,7 @@ export const AtlasAPI = {
       outputs.push({ name: _currentAtlasFilename, data: merged.text });
       if (_currentSkel) outputs.push({ name: _currentSkel.name, data: _currentSkel.blob });
 
-      // Installed PWA: pick a folder and write all outputs into it.
+      // Installed PWA / pywebview desktop: pick a folder and write all outputs into it.
       if (_useFolderPicker()) {
         const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
