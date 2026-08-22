@@ -77,6 +77,8 @@ class Api:
         self._config = AppConfig()
         self._updates = UpdateController(pending_failure=pending_update_failure)
         self._preview_cache = PreviewCache()
+        self._closing_confirmed = False
+        self._close_check_in_progress = False
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -168,6 +170,13 @@ class Api:
         # client-side in www/js/atlas-api.js — read its state synchronously
         # via evaluate_js (confirmed synchronous in pywebview 6.1 docs)
         # instead of the now-inert Python AtlasSession.
+        #
+        # IMPORTANT: this must only ever be called from a background thread
+        # (see on_closing below) — evaluate_js needs the main GUI thread's
+        # message loop to be free to pump, and calling it directly from a
+        # blocking window event (like `closing`) that itself runs ON the
+        # main thread deadlocks pywebview outright (known, still-open
+        # upstream issue: r0x0r/pywebview#1699).
         if not self._window:
             return True
         try:
@@ -184,6 +193,31 @@ class Api:
             "Discard modifications?",
             "You have unsaved atlas modifications. Continue and discard them?",
         )
+
+    def on_closing(self) -> bool:
+        """`window.events.closing` handler. Always vetoes the *first* close
+        attempt (native X button / Alt+F4) and kicks the actual
+        has-pending-modifications check off onto a background thread —
+        calling `evaluate_js` synchronously right here, on the closing
+        event's own thread, would deadlock the whole app (main GUI thread
+        blocks on evaluate_js's result; evaluate_js needs that same thread's
+        message loop free to produce one). Once the background check
+        confirms it's OK to close, `window.destroy()` closes it for real."""
+        if self._closing_confirmed:
+            return True
+        if not self._close_check_in_progress:
+            self._close_check_in_progress = True
+            threading.Thread(target=self._check_and_close, daemon=True).start()
+        return False
+
+    def _check_and_close(self) -> None:
+        try:
+            proceed = self._confirm_discard_modifications()
+        finally:
+            self._close_check_in_progress = False
+        if proceed and self._window:
+            self._closing_confirmed = True
+            self._window.destroy()
 
     def _open_atlas_path_native(self, path_str: str) -> bool:
         """Load an `.atlas` file opened via a native path (CLI arg, file

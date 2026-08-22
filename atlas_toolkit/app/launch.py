@@ -129,11 +129,10 @@ def run() -> None:
 
     if window:
         api.set_window(window)
-
-        def on_closing() -> bool:
-            return api._confirm_discard_modifications()
-
-        window.events.closing += on_closing
+        # api.on_closing (not _confirm_discard_modifications directly!) —
+        # see its docstring: evaluate_js can't be called synchronously from
+        # this event without deadlocking pywebview.
+        window.events.closing += api.on_closing
     else:
         sys.exit(1)
 
