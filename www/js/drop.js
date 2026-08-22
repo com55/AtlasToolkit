@@ -4,6 +4,7 @@ import { loadRegions, updateButtons } from './region-list.js';
 import { setMode, onModPreviewReceived } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
+import { platform, isPywebviewDesktop } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -150,15 +151,13 @@ export async function savePreviewImageAs() {
     const regionsJoined  = selectedNames.map(sanitize).filter(Boolean).join('-') || 'preview';
     const filename       = `${pageName}_${regionsJoined}.png`;
 
-    if ('showSaveFilePicker' in window) {
-      const fileHandle = await window.showSaveFilePicker({
-        suggestedName: filename,
-        types: [{ description: 'PNG Image', accept: { 'image/png': ['.png'] } }],
-      });
-      const writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      showToast('Image saved.', 'success');
+    // platform.js branches browser (File System Access API) vs pywebview
+    // (native save dialog + write_file_bytes) — see D1's revised split.
+    const hasNativeDialog = isPywebviewDesktop() || typeof window.showSaveFilePicker === 'function';
+    if (hasNativeDialog) {
+      const saved = await platform.saveFileWithDialog(filename, blob);
+      if (saved) { showToast('Image saved.', 'success'); return; }
+      showToast('Save cancelled.', 'info');
       return;
     }
 
