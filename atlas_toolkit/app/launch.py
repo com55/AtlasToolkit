@@ -113,7 +113,7 @@ def run() -> None:
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
 
-    gui_path = resource_path("ui/index.html")
+    gui_path = resource_path("www/index.html")
     window = webview.create_window(
         f"Atlas Toolkit v{get_current_version()}",
         url=str(gui_path.absolute().as_uri()),
