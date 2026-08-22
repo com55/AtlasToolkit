@@ -123,6 +123,28 @@ class Api:
             log.warning("Failed listing sibling images in %s: %s", parent, e)
         return images
 
+    def pick_save_folder(self, default_dir: str = "") -> Optional[str]:
+        """Native folder-picker for output (extract-to-folder / save_modified)
+        — see platform.js's pickSaveFolder(), Phase 3."""
+        if not self._window:
+            return None
+        result = self._window.create_file_dialog(
+            webview.FileDialog.FOLDER, directory=default_dir or ""
+        )
+        return result[0] if result else None
+
+    def pick_save_file(self, default_filename: str = "", default_dir: str = "") -> Optional[str]:
+        """Native Save-As dialog for a single output file (preview export /
+        "Save Preview As") — see platform.js's saveFileWithDialog(), Phase 3."""
+        if not self._window:
+            return None
+        result = self._window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            directory=default_dir or "",
+            save_filename=default_filename,
+        )
+        return result[0] if result else None
+
     def has_pending_modifications(self) -> bool:
         return self._session.has_pending_modifications()
 
