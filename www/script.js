@@ -1,8 +1,8 @@
 import { AtlasAPI } from './js/atlas-api.js';
-import { state } from './js/state.js';
+import { state, getSelectedNames } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode } from './js/modify-mode.js';
+import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
@@ -91,6 +91,31 @@ function registerServiceWorker() {
   });
 }
 
+/**
+ * Reset the UI to a fresh-load state after a new atlas has been loaded into
+ * AtlasAPI — return to View mode (a fresh atlas means a fresh session) and
+ * re-render the region list/preview from scratch. Shared by the file-picker
+ * open flow and native (pywebview) opens/drops, which land the atlas the
+ * same way but can't reuse a DOM click handler.
+ */
+async function _resetUiAfterFreshLoad() {
+  if (state.currentMode === 'modify') {
+    AtlasAPI.exit_modify_mode();
+    state.modifyRegionBounds = {};
+    state.modifyPages        = [];
+    state.modifyRegionPages  = {};
+    state.modifyActivePage   = null;
+    state.hasModImage        = false;
+    setMode('extract');
+  }
+  state.selectedIndices.clear();
+  state.lastClickIndex = -1;
+  previewImg.style.display = 'none';
+  resetPreview();
+  updateButtons();
+  await loadRegions();
+}
+
 async function openFile() {
   try {
     if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
@@ -101,29 +126,66 @@ async function openFile() {
       if (!ok) return;
     }
     const success = await AtlasAPI.choose_file();
-    if (success) {
-      // Open lives in the always-visible app-bar left zone, so it can be
-      // clicked mid-edit. A fresh atlas means a fresh session — return to
-      // View mode (the pending-mods guard above already handled discard).
-      if (state.currentMode === 'modify') {
-        AtlasAPI.exit_modify_mode();
-        state.modifyRegionBounds = {};
-        state.modifyPages        = [];
-        state.modifyRegionPages  = {};
-        state.modifyActivePage   = null;
-        state.hasModImage        = false;
-        setMode('extract');
-      }
-      state.selectedIndices.clear();
-      state.lastClickIndex = -1;
-      previewImg.style.display = 'none';
-      resetPreview();
-      updateButtons();
-      await loadRegions();
-    }
+    // Open lives in the always-visible app-bar left zone, so it can be
+    // clicked mid-edit. The pending-mods guard above already handled discard.
+    if (success) await _resetUiAfterFreshLoad();
   } catch (e) {
     console.error(e);
   }
+}
+
+// ─── Native (pywebview) bridge glue ────────────────────────────────────────
+// pywebview's native CLI-arg/file-association/drag-drop paths hand Python a
+// filesystem path, not a browser File — bridge.py reads it (and any sibling
+// page images) as base64 and calls these via evaluate_js() to reconstruct
+// File objects client-side and feed them into the same AtlasAPI used by the
+// file-picker/browser-drop paths above. See atlas_toolkit/app/bridge.py.
+
+function _base64ToFile(base64, filename, mime) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  return new File([bytes], filename, { type: mime });
+}
+
+/** Load an atlas opened via a native path (CLI arg, file association, or
+ *  single-file native drag-drop with no in-DOM FileList available). */
+async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map) {
+  try {
+    const atlasFile = _base64ToFile(atlasBase64, atlasFilename, 'text/plain');
+    const imageFileMap = {};
+    for (const [name, b64] of Object.entries(imagesBase64Map || {})) {
+      imageFileMap[name] = _base64ToFile(b64, name, 'image/png');
+    }
+    const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap);
+    if (ok) await _resetUiAfterFreshLoad();
+    return ok;
+  } catch (e) {
+    console.error('loadAtlasFromNative error:', e);
+    return false;
+  }
+}
+
+/** Apply a mod image dropped natively onto the currently-selected regions
+ *  in Edit mode (native drag-drop delivers a path, not a browser File). */
+async function applyNativeModImageDrop(imageBase64, filename) {
+  if (state.currentMode !== 'modify') {
+    showToast('Enter Edit Mode first to drop images.', 'error');
+    return false;
+  }
+  const names = getSelectedNames();
+  if (names.length === 0) {
+    showToast('Select at least one region first.', 'error');
+    return false;
+  }
+  const repack = document.getElementById('chk-repack').checked;
+  const file = _base64ToFile(imageBase64, filename, 'image/png');
+  const result = await AtlasAPI.process_mod_image(file, names, repack);
+  if (result) {
+    onModPreviewReceived(result);
+    showToast('Mod image loaded via drag & drop.', 'success');
+    return true;
+  }
+  showToast('Failed to process mod image.', 'error');
+  return false;
 }
 
 async function extractSelected() {
@@ -167,3 +229,8 @@ window.showConfirm         = showConfirm;
 window.showAlert           = showAlert;
 window.showMissingAtlasImages = showMissingAtlasImagesDialog;
 window.showToast           = showToast;
+
+// ─── Expose for the pywebview native bridge (evaluate_js from Python) ─────────
+window.AtlasAPI                  = AtlasAPI;
+window.loadAtlasFromNative       = loadAtlasFromNative;
+window.applyNativeModImageDrop   = applyNativeModImageDrop;

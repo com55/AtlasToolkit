@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -86,18 +87,90 @@ class Api:
     def set_pref(self, key: str, value: Any) -> None:
         self._config.set(key, value)
 
+    # ── Native-only OS glue (D1's revised split — see plan Phase 2) ──────────
+    # These have no in-webview equivalent: pywebview's native drag-drop/CLI-arg
+    # opens hand Python a filesystem path, not a browser File, and native
+    # drag-drop File objects carry no readable bytes client-side (only
+    # `pywebviewFullPath`). Read the bytes here and hand them to the JS engine
+    # (`window.AtlasAPI` / `window.loadAtlasFromNative`, see www/script.js) as
+    # base64 via `evaluate_js`.
+
+    def read_file_as_base64(self, path: str) -> dict[str, str]:
+        p = Path(path)
+        data = p.read_bytes()
+        return {"name": p.name, "base64": base64.b64encode(data).decode("ascii")}
+
+    def write_file_bytes(self, path: str, base64_data: str) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(base64.b64decode(base64_data))
+
+    def list_sibling_page_images(self, atlas_path: str) -> dict[str, str]:
+        """Glob the `.atlas` file's parent directory for `*.png` siblings —
+        pure I/O, no atlas-text parsing (the JS side already knows which page
+        names it needs; this just hands over every candidate by filename)."""
+        parent = Path(atlas_path).parent
+        images: dict[str, str] = {}
+        try:
+            for png in parent.glob("*.png"):
+                try:
+                    images[png.name] = base64.b64encode(png.read_bytes()).decode(
+                        "ascii"
+                    )
+                except OSError as e:
+                    log.warning("Failed reading sibling image %s: %s", png, e)
+        except OSError as e:
+            log.warning("Failed listing sibling images in %s: %s", parent, e)
+        return images
+
     def has_pending_modifications(self) -> bool:
         return self._session.has_pending_modifications()
 
     def _confirm_discard_modifications(self) -> bool:
-        if not self._session.has_pending_modifications():
-            return True
+        # Redesigned (fable review): the atlas engine/session now lives
+        # client-side in www/js/atlas-api.js — read its state synchronously
+        # via evaluate_js (confirmed synchronous in pywebview 6.1 docs)
+        # instead of the now-inert Python AtlasSession.
         if not self._window:
-            return False
+            return True
+        try:
+            pending = self._window.evaluate_js(
+                "window.AtlasAPI && window.AtlasAPI.has_pending_modifications"
+                " && window.AtlasAPI.has_pending_modifications()"
+            )
+        except Exception as e:
+            log.warning("has_pending_modifications check failed: %s", e)
+            pending = False
+        if not pending:
+            return True
         return self._window.create_confirmation_dialog(
             "Discard modifications?",
             "You have unsaved atlas modifications. Continue and discard them?",
         )
+
+    def _open_atlas_path_native(self, path_str: str) -> bool:
+        """Load an `.atlas` file opened via a native path (CLI arg, file
+        association, or native drag-drop) into the JS engine."""
+        if not self._window:
+            return False
+        try:
+            atlas_file = self.read_file_as_base64(path_str)
+            images = self.list_sibling_page_images(path_str)
+            result = self._window.evaluate_js(
+                f"window.loadAtlasFromNative({json.dumps(atlas_file['base64'])}, "
+                f"{json.dumps(atlas_file['name'])}, {json.dumps(images)})"
+            )
+            ok = bool(result)
+            if not ok:
+                self._window.evaluate_js(
+                    "showToast('Failed to load atlas file.', 'error')"
+                )
+            return ok
+        except Exception as e:
+            log.error("Native atlas open error: %s", e)
+            msg = json.dumps(f"Error: {e}")
+            self._window.evaluate_js(f"showToast({msg}, 'error')")
+            return False
 
     def startup_check(self) -> bool:
         time.sleep(0.5)
@@ -110,7 +183,7 @@ class Api:
             )
 
         if len(sys.argv) > 1 and sys.argv[1].endswith(".atlas"):
-            return self.load_atlas(sys.argv[1])
+            return self._open_atlas_path_native(sys.argv[1])
         return False
 
     def open_update_log(self, log_path: str) -> dict[str, Any]:
@@ -403,6 +476,9 @@ class Api:
         log.debug("JS: %s", msg)
 
     def on_drop(self, e: Any) -> None:
+        # Redesigned (fable review): point the follow-up calls at the JS
+        # engine's AtlasAPI/www/script.js glue instead of the now-inert
+        # Python AtlasSession — see _open_atlas_path_native/_handle_image_drop.
         try:
             files = e["dataTransfer"]["files"]
             if len(files) == 0:
@@ -410,70 +486,49 @@ class Api:
 
             path = files[0].get("pywebviewFullPath")
             log.debug("Dropped file path: %s", path)
-            if not path:
+            if not path or not self._window:
                 return
 
             path_lower = path.lower()
 
-            if self._window:
-                missing_open = self._window.evaluate_js(
-                    "typeof isMissingDialogOpen === 'function' && isMissingDialogOpen()"
-                )
-                if missing_open:
-                    if not path_lower.endswith(".png"):
-                        return
-                    path_json = json.dumps(path)
-                    client_x = e.get("clientX")
-                    client_y = e.get("clientY")
-                    if client_x is not None and client_y is not None:
-                        self._window.evaluate_js(
-                            f"applyMissingImageDrop({path_json}, {client_x}, {client_y})"
-                        )
-                    return
+            missing_open = self._window.evaluate_js(
+                "document.body.dataset.missingDialogOpen === 'true'"
+            )
+            if missing_open:
+                # Not wired up yet: the missing-page dialog's own per-row
+                # drop handling only reads real bytes over a browser drag
+                # (File System-backed FileList), which native pywebview
+                # drops don't provide — "Add image" (native file dialog)
+                # already covers this case. Revisit if this becomes a
+                # regression at Phase 3's manual smoke test.
+                return
 
             if path_lower.endswith(".atlas"):
-                if self._window:
-                    path_json = json.dumps(path)
-                    self._window.evaluate_js(f"requestLoadAtlas({path_json})")
+                self._open_atlas_path_native(path)
             elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
-                if self._session.modifier:
-                    self._handle_image_drop(path)
-                elif self._window:
-                    self._window.evaluate_js(
-                        "showToast('Enter Modify Mode first to drop images.', 'error')"
-                    )
-            elif self._window:
+                self._handle_image_drop(path)
+            else:
                 self._window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
             log.error("Drop error: %s", ex)
 
     def _handle_image_drop(self, path: str) -> None:
+        """Apply a natively-dropped PNG as a mod image via the JS engine's
+        AtlasAPI (client-side selection/repack state) — `applyNativeModImageDrop`
+        (www/script.js) itself no-ops with a toast if Edit mode/a selection
+        isn't active, mirroring the old Python-session guard here."""
         if not self._window:
             return
-
-        selected_json = self._window.evaluate_js("JSON.stringify(getSelectedNames())")
-        if not selected_json:
+        try:
+            image = self.read_file_as_base64(path)
             self._window.evaluate_js(
-                "showToast('Select at least one region first.', 'error')"
+                f"window.applyNativeModImageDrop({json.dumps(image['base64'])}, "
+                f"{json.dumps(image['name'])})"
             )
-            return
-
-        names: list[str] = json.loads(selected_json)
-        if not names:
-            self._window.evaluate_js(
-                "showToast('Select at least one region first.', 'error')"
-            )
-            return
-
-        repack_val = self._window.evaluate_js(
-            "document.getElementById('chk-repack').checked"
-        )
-        result = self.process_mod_image(path, names, bool(repack_val))
-        if result:
-            result_json = json.dumps(result)
-            self._window.evaluate_js(f"window.onModImageProcessed({result_json})")
-        else:
-            self._window.evaluate_js("showToast('Failed to process mod image.', 'error')")
+        except Exception as e:
+            log.error("Native image drop error: %s", e)
+            msg = json.dumps(f"Error: {e}")
+            self._window.evaluate_js(f"showToast({msg}, 'error')")
 
     def get_update_download_progress(self) -> dict[str, Any]:
         return self._updates.get_progress()
