@@ -1,4 +1,4 @@
-"""Filesystem paths for bundled resources (ui/, etc.)."""
+"""Filesystem paths for bundled resources (www/, etc.)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def app_root() -> Path:
-    """Project / install directory containing ``ui/``."""
+    """Project / install directory containing ``www/``."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
