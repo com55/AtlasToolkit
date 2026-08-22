@@ -45,6 +45,13 @@ export async function blobToBase64(data) {
   });
 }
 
+/** Reconstruct a browser File from base64 bytes handed back by the
+ * pywebview bridge (read_file_as_base64 / list_sibling_page_images). */
+export function base64ToFile(base64, filename, mime) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  return new File([bytes], filename, { type: mime });
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**

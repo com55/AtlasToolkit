@@ -7,6 +7,7 @@ import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
+import { base64ToFile } from './js/platform.js';
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -141,19 +142,14 @@ async function openFile() {
 // File objects client-side and feed them into the same AtlasAPI used by the
 // file-picker/browser-drop paths above. See atlas_toolkit/app/bridge.py.
 
-function _base64ToFile(base64, filename, mime) {
-  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  return new File([bytes], filename, { type: mime });
-}
-
 /** Load an atlas opened via a native path (CLI arg, file association, or
  *  single-file native drag-drop with no in-DOM FileList available). */
 async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map) {
   try {
-    const atlasFile = _base64ToFile(atlasBase64, atlasFilename, 'text/plain');
+    const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
     for (const [name, b64] of Object.entries(imagesBase64Map || {})) {
-      imageFileMap[name] = _base64ToFile(b64, name, 'image/png');
+      imageFileMap[name] = base64ToFile(b64, name, 'image/png');
     }
     const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap);
     if (ok) await _resetUiAfterFreshLoad();
@@ -177,7 +173,7 @@ async function applyNativeModImageDrop(imageBase64, filename) {
     return false;
   }
   const repack = document.getElementById('chk-repack').checked;
-  const file = _base64ToFile(imageBase64, filename, 'image/png');
+  const file = base64ToFile(imageBase64, filename, 'image/png');
   const result = await AtlasAPI.process_mod_image(file, names, repack);
   if (result) {
     onModPreviewReceived(result);
