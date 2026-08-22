@@ -1,6 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
 # Editor
 .vscode
 .claude
+CONTEXT.md
+CLAUDE.md
 
 # Scratch test files (stray root-level test scripts), but not the real
 # committed test suite in /test/
@@ -8,6 +21,10 @@ test*
 !/test/
 !/test/**
 
-CLAUDE.md
 # Superpowers SDD scratch (local only)
 .superpowers
+
+# Worktrees (local scratch, not part of repo)
+.worktrees
+# Real-world atlas fixtures for the pixel-oracle harness (local scratch data)
+.workspaces
