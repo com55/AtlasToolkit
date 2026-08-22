@@ -10,10 +10,47 @@ import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
 import { base64ToFile } from './js/platform.js';
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
+
+/**
+ * `window.pywebview.api` is injected asynchronously by pywebview — it is
+ * NOT guaranteed to exist yet by `DOMContentLoaded` (pywebview's own
+ * `before_load` event, which triggers the injection, fires "roughly
+ * corresponding to DOMContentLoaded", i.e. no ordering guarantee either
+ * way). Calling into it too early (e.g. `get_pref`/`startup_check`) would
+ * silently no-op or fall through to the browser-only path. `launch.py`
+ * always loads `www/index.html` via a literal `file://` URI (never true for
+ * the hosted PWA/browser case), so that's a reliable synchronous signal
+ * this is the desktop shell and it's worth waiting for `pywebviewready`.
+ */
+function _waitForPywebviewReady() {
+  return new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api) { resolve(); return; }
+    if (location.protocol !== 'file:') { resolve(); return; }
+    let settled = false;
+    const onReady = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    window.addEventListener('pywebviewready', onReady, { once: true });
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('pywebviewready', onReady);
+      resolve();
+    }, 5000);
+  });
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
+  await _waitForPywebviewReady();
   initPanelResizer();
   initAppBar();
-  registerServiceWorker();
+  if (window.pywebview) {
+    await _clearStaleServiceWorkerUnderDesktop();
+  } else {
+    registerServiceWorker();
+  }
 
   const repackPref = await AtlasAPI.get_pref('repack', false);
   document.getElementById('chk-repack').checked = repackPref;
@@ -29,19 +66,55 @@ window.addEventListener('DOMContentLoaded', async () => {
         const file = await launchParams.files[0].getFile();
         const ok = await AtlasAPI.load_atlas_from_file(file);
         if (!ok) { showToast('Failed to load atlas file.', 'error'); return; }
-        state.selectedIndices.clear();
-        state.lastClickIndex = -1;
-        previewImg.style.display = 'none';
-        resetPreview();
-        updateButtons();
-        await loadRegions();
+        await _resetUiAfterFreshLoad();
       } catch (e) {
         console.error('launchQueue consumer error:', e);
         showToast(`Open failed: ${e.message || e}`, 'error');
       }
     });
   }
+
+  // pywebview desktop equivalent of the above: CLI arg / "Open with" file
+  // association. bridge.py's startup_check() reads sys.argv itself and, if
+  // it matches, drives the native atlas-open flow (which calls back into
+  // _resetUiAfterFreshLoad via window.loadAtlasFromNative) — nothing else
+  // to do here but trigger it once on startup.
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.startup_check) {
+    try {
+      await window.pywebview.api.startup_check();
+    } catch (e) {
+      console.error('startup_check error:', e);
+    }
+  }
 });
+
+/**
+ * Desktop shell (Phase 4 of the unify-js-engine plan): `launch.py` always
+ * loads `www/index.html` via a literal `file://` URI, and `file://` is
+ * never a valid service-worker registration origin (verified directly: the
+ * browser itself rejects `register()` with "The URL protocol of the
+ * current origin ('file://') is not supported") — so `registerServiceWorker()`'s
+ * existing `location.protocol` guard below already prevents registration
+ * from ever being attempted here, and there is no PWA-caching bug to guard
+ * against (unlike Tauri's old `http://tauri.localhost` setup, which DID
+ * satisfy `register()`'s origin requirement and so needed an explicit
+ * runtime guard). This is just cheap insurance against a leftover
+ * registration from some future platform/config change (e.g. a webview
+ * that serves over http(s) instead of file://) — normally a no-op.
+ */
+async function _clearStaleServiceWorkerUnderDesktop() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((r) => r.unregister()));
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) {
+    console.warn('Stale service-worker cleanup failed:', e);
+  }
+}
 
 /**
  * Register the service worker and wire up a user-prompted update flow: PWA
@@ -115,6 +188,16 @@ async function _resetUiAfterFreshLoad() {
   resetPreview();
   updateButtons();
   await loadRegions();
+
+  // Native window title (old Python engine's load_atlas() used to do this;
+  // the JS engine has no equivalent hook, so it's centralized here instead
+  // — covers all three open paths: Open button, drag-drop, CLI/file
+  // association).
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.set_window_title) {
+    try {
+      await window.pywebview.api.set_window_title(AtlasAPI.get_current_atlas_filename());
+    } catch (_) { /* non-fatal */ }
+  }
 }
 
 async function openFile() {

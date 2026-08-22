@@ -125,6 +125,20 @@ class Api:
             log.warning("Failed listing sibling images in %s: %s", parent, e)
         return images
 
+    def set_window_title(self, atlas_filename: str) -> None:
+        """Update the native OS window title to reflect the loaded atlas —
+        the old Python engine's `load_atlas` did this on every open; the new
+        JS engine has no equivalent hook, so `_resetUiAfterFreshLoad()`
+        (script.js) calls this once, centrally, after every fresh load
+        across all three open paths (Open button, drag-drop, CLI/file
+        association)."""
+        if not self._window:
+            return
+        title = f"Atlas Toolkit v{get_current_version()}"
+        if atlas_filename:
+            title = f"{title} - {atlas_filename}"
+        self._window.set_title(title)
+
     def pick_atlas_file(self) -> Optional[str]:
         """Native single-file Open dialog for `.atlas` files, used by the
         "Open" button (`AtlasAPI.choose_file()`, see platform.js/atlas-api.js
@@ -219,6 +233,34 @@ class Api:
             self._closing_confirmed = True
             self._window.destroy()
 
+    def _evaluate_js_promise(self, script: str, timeout: float = 30.0) -> Any:
+        """`evaluate_js(script)` **without** a callback does NOT await a
+        returned JS Promise (pywebview docs: "If the JavaScript code returns
+        a promise, you can resolve it by providing a callback function") —
+        calling it bare against an `async function` silently returns the
+        (empty, falsy) Promise wrapper instead of the real resolved value.
+        This bit `_open_atlas_path_native` for real: `window.loadAtlasFromNative`
+        is async, so the old bare call always looked like a failure even
+        though the atlas had, in fact, loaded — a false "Failed to load
+        atlas file" toast on every native open/drag-drop (found via user
+        testing, 2026-08-23). Use the documented callback form + a
+        threading.Event instead — same pattern already proven by
+        `_prompt_missing_page_images`."""
+        if not self._window:
+            return None
+        holder: dict[str, object] = {}
+        done = threading.Event()
+
+        def on_result(value: object) -> None:
+            holder["value"] = value
+            done.set()
+
+        self._window.evaluate_js(script, on_result)
+        if not done.wait(timeout=timeout):
+            log.warning("evaluate_js promise timed out: %s", script[:120])
+            return None
+        return holder.get("value")
+
     def _open_atlas_path_native(self, path_str: str) -> bool:
         """Load an `.atlas` file opened via a native path (CLI arg, file
         association, or native drag-drop) into the JS engine."""
@@ -227,7 +269,7 @@ class Api:
         try:
             atlas_file = self.read_file_as_base64(path_str)
             images = self.list_sibling_page_images(path_str)
-            result = self._window.evaluate_js(
+            result = self._evaluate_js_promise(
                 f"window.loadAtlasFromNative({json.dumps(atlas_file['base64'])}, "
                 f"{json.dumps(atlas_file['name'])}, {json.dumps(images)})"
             )
@@ -236,6 +278,10 @@ class Api:
                 self._window.evaluate_js(
                     "showToast('Failed to load atlas file.', 'error')"
                 )
+            # Window title update happens centrally in script.js's
+            # _resetUiAfterFreshLoad() (via set_window_title below), so it
+            # covers every fresh-load path uniformly (Open button's native
+            # branch included), not just this one.
             return ok
         except Exception as e:
             log.error("Native atlas open error: %s", e)
