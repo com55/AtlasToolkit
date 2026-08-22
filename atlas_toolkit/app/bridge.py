@@ -123,6 +123,21 @@ class Api:
             log.warning("Failed listing sibling images in %s: %s", parent, e)
         return images
 
+    def pick_atlas_file(self) -> Optional[str]:
+        """Native single-file Open dialog for `.atlas` files, used by the
+        "Open" button (`AtlasAPI.choose_file()`, see platform.js/atlas-api.js
+        Phase 3 fix) — returns a bare path so the caller can auto-resolve
+        sibling page images via list_sibling_page_images(), matching the old
+        Python-engine desktop UX instead of requiring the user to multi-select
+        the atlas + every PNG together in a browser file picker."""
+        if not self._window:
+            return None
+        file_types = ("Atlas Files (*.atlas)", "All files (*.*)")
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, allow_multiple=False, file_types=file_types
+        )
+        return result[0] if result else None
+
     def pick_save_folder(self, default_dir: str = "") -> Optional[str]:
         """Native folder-picker for output (extract-to-folder / save_modified)
         — see platform.js's pickSaveFolder(), Phase 3."""
