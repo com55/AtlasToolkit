@@ -1046,9 +1046,15 @@ img#preview-img {
   color: #ffb3b3;
 }
 
-/* Responsive layout for portrait screens (mobile/tablet) */
+/* Responsive layout for portrait screens (mobile/tablet). Every selector is
+   scoped with html:not(.pywebview) (Phase 6 of the unify-js-engine plan):
+   the desktop shell always sets that class synchronously before first paint
+   (see index.html's inline <head> script) and is never resizable into this
+   layout even if the native window is dragged narrow/tall — a bare
+   @media block can't be turned off by a class alone, only its selectors can
+   be neutralized this way. */
 @media (orientation: portrait), (max-width: 900px) {
-  #main-content {
+  html:not(.pywebview) #main-content {
     flex-direction: column;
   }
 
@@ -1056,12 +1062,12 @@ img#preview-img {
      explicit inline height (same ~44% default pre-drag), and a CSS min-height
      would floor it, blocking the user from dragging the preview down toward
      PREVIEW_MIN. */
-  #right-panel {
+  html:not(.pywebview) #right-panel {
     order: 1;
     border-bottom: none;
   }
 
-  #panel-splitter {
+  html:not(.pywebview) #panel-splitter {
     display: block;
     order: 2;
     width: 100%;
@@ -1072,12 +1078,12 @@ img#preview-img {
     background: linear-gradient(to bottom, #262626, #353535, #262626);
   }
 
-  #panel-splitter:hover {
+  html:not(.pywebview) #panel-splitter:hover {
     background: linear-gradient(to bottom, #2c2c2c, #3f3f3f, #2c2c2c);
   }
 
   /* Move regions panel below */
-  #left-panel {
+  html:not(.pywebview) #left-panel {
     order: 3;
     width: 100%;
     min-width: 0;
@@ -1092,33 +1098,33 @@ img#preview-img {
      min-content width) before the buttons inside it wrap onto their own
      lines — that fallback only kicks in once a full-width row still isn't
      enough, at the narrower phone-width tier below. */
-  #app-bar {
+  html:not(.pywebview) #app-bar {
     height: auto;
     min-height: 42px;
     flex-wrap: wrap;
   }
 
-  .app-bar-left {
+  html:not(.pywebview) .app-bar-left {
     width: auto;
     flex: 1 0 auto;
     padding: 6px 10px;
   }
 
-  .app-bar-panel-divider {
+  html:not(.pywebview) .app-bar-panel-divider {
     display: none;
   }
 
-  .app-bar-right {
+  html:not(.pywebview) .app-bar-right {
     flex: 1 1 auto;
     min-width: max-content;
     padding: 6px 10px;
   }
 
-  #preview-container {
+  html:not(.pywebview) #preview-container {
     min-height: 0;
   }
 
-  .drop-message span {
+  html:not(.pywebview) .drop-message span {
     font-size: 18px;
     text-align: center;
     padding: 0 16px;
@@ -1165,9 +1171,12 @@ img#preview-img {
   }
 }
 
-/* Touch + stacked layout: widen the horizontal splitter's grab area. */
+/* Touch + stacked layout: widen the horizontal splitter's grab area.
+   Scoped with html:not(.pywebview), same reasoning as the main portrait
+   block above — pywebview is desktop-only and never uses the stacked
+   layout regardless of pointer type. */
 @media (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-width: 900px) {
-  #panel-splitter {
+  html:not(.pywebview) #panel-splitter {
     height: 16px;
   }
 }

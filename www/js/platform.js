@@ -27,6 +27,22 @@ export function isPywebviewDesktop() {
 }
 
 /**
+ * Shared stacked/portrait-layout query (Phase 6 of the unify-js-engine
+ * plan) — replaces what used to be two independently-implemented copies in
+ * panel-resizer.js and preview.js. Desktop (pywebview) always reports
+ * `false`, locking the layout to landscape/desktop regardless of window
+ * size/aspect: reads the `pywebview` class set synchronously on `<html>` by
+ * an inline script in index.html's `<head>` (before first paint, so the
+ * media query below never has a chance to flash on) rather than
+ * `isPywebviewDesktop()`/`window.pywebview.api`, which aren't guaranteed
+ * ready that early (see script.js's `_waitForPywebviewReady()`).
+ */
+export function isPortrait() {
+  if (document.documentElement.classList.contains('pywebview')) return false;
+  return window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
+}
+
+/**
  * Base64-encode a Blob/string/binary payload — pywebview's `js_api` bridge
  * only accepts JSON-serializable arguments, so file bytes have to cross as
  * base64 rather than as a Blob/ArrayBuffer.

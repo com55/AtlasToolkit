@@ -8,6 +8,7 @@ import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
 import { base64ToFile } from './js/platform.js';
+import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
