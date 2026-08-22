@@ -2,20 +2,46 @@
 
 **Spine Atlas Toolkit - Extract, modify, and repack atlas sprites.**
 
-A web-based tool for working with [Spine](http://esotericsoftware.com/) atlas files.
-View atlas regions, extract individual sprites, replace sprites with other images, and repack the atlas — all through a simple browser interface.
+A tool for working with [Spine](http://esotericsoftware.com/) atlas files, available as a **hosted web app**, a **desktop app** (powered by [pywebview](https://pywebview.flowrl.com/)), or run directly from source.
+View atlas regions, extract individual sprites, replace sprites with other images, and repack the atlas — all through the same simple interface everywhere.
 
 ## Usage
 
-Use the hosted web app directly — no installation required:
+- **Web app** — use it directly, no installation required: 👉 **[https://com55.github.io/AtlasToolkit/](https://com55.github.io/AtlasToolkit/)**
+- **Desktop app** — download the pre-built executables from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
+  - Windows is distributed as an **installer** (`AtlasToolkit-Setup-x64.exe`, per-user, no admin) plus a **portable** zip. The installed build updates itself silently in-app; the portable build links to the releases page.
+  - **One-time migration:** builds made before the installer switch used the old single-exe auto-update and will report "asset not found" when checking for this release — download and run the new installer once manually.
+- **From source** (in-development / unstable) — clone the repository:
+  ```bash
+  git clone https://github.com/com55/AtlasToolkit.git
+  cd AtlasToolkit
+  ```
 
-👉 **[https://com55.github.io/AtlasToolkit/](https://com55.github.io/AtlasToolkit/)**
+## Setup & Run (desktop app, from source)
 
-Or clone and open locally:
+Once you are inside the project directory, choose your preferred method:
+
+- **Using [uv](https://github.com/astral-sh/uv#installation) (Recommended)**
+  ```bash
+  uv sync
+  uv run python main.py
+  ```
+- **Using pip**
+  ```bash
+  pip install -r requirements.txt
+  python main.py
+  ```
+  or
+  ```bash
+  pip install pillow pywebview requests
+  python main.py
+  ```
+
+## Setup & Run (web app, from source)
+
 ```bash
-git clone -b js-project https://github.com/com55/AtlasToolkit.git
-cd AtlasToolkit/www
-# Open index.html in your browser
+cd www
+# Open index.html in your browser, or serve it: python3 -m http.server
 ```
 
 ## Features
@@ -28,8 +54,10 @@ cd AtlasToolkit/www
 - **Copy to Clipboard** — Right-click the preview image to copy it to clipboard (Extract Mode)
 - **Auto Format Conversion** — Automatically converts LibGDX atlas format (`xy`/`orig`/`offset`) to the Spine format on load
 - **Multi-page Atlas** — Supports atlas files that reference multiple page images
+- **File Association** (desktop app) — Can be set as the default app for `.atlas` files; opening an atlas file directly will launch the app and load it automatically
+- **Update Notifications** (desktop app) — Checks GitHub for new releases on startup and shows an in-app banner when an update is available
+- **PWA Support** (web app) — Install as a Progressive Web App for offline use
 - **Save Modified Atlas** — Export updated `.atlas`, `.png`, and also copy `.skel` file if available
-- **PWA Support** — Install as a Progressive Web App for offline use
 
 ## Acknowledgments
 
