@@ -79,8 +79,8 @@ jobs:
           script-name: main.py
           mode: standalone
           windows-console-mode: ${{ env.CONSOLE_MODE }}
-          windows-icon-from-ico: ui/icon.ico
-          include-data-dir: ui=ui
+          windows-icon-from-ico: www/icon.ico
+          include-data-dir: www=www
           include-data-files: |
             VERSION=VERSION
           include-package-data: webview
