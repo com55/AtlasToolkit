@@ -1,0 +1,231 @@
+name: Build and Release
+
+on:
+  # 1. AUTO RELEASE TRIGGER (from auto_tag.yml)
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  # 2. MANUAL TRIGGER (with tag push)
+  push:
+    tags:
+      - "v*"
+  # 3. MANUAL TRIGGER (workflow_dispatch)
+  workflow_dispatch:
+    inputs:
+      test_version:
+        description: "Optional test version (digits only, e.g. 1.2.3) to publish as tag v<version>"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  MANUAL_TEST_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_version || '' }}
+  # Determine if this is a release (from workflow_call OR tag push ONLY - NOT from manual test_version)
+  IS_RELEASE: ${{ inputs.tag_name != '' || startsWith(github.ref, 'refs/tags/v') }}
+  TAG_NAME: ${{ inputs.tag_name != '' && inputs.tag_name || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+  # Force console for manual builds (debugging), disable for releases
+  CONSOLE_MODE: ${{ github.event_name == 'workflow_dispatch' && 'attach' || 'disable' }}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install Dependencies
+        run: uv export --no-hashes -o requirements.txt && pip install -r requirements.txt
+
+      - name: Get version for build
+        id: build_version
+        shell: powershell
+        run: |
+          if ("${{ env.MANUAL_TEST_VERSION }}" -ne "" -and "${{ env.MANUAL_TEST_VERSION }}" -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid test_version. Expected format: X.Y.Z (digits only)."
+          }
+
+          # Priority: tag from workflow_call -> git tag -> manual test_version -> pyproject.toml
+          if ("${{ inputs.tag_name }}" -ne "") {
+            $version = "${{ inputs.tag_name }}".TrimStart("v")
+          } elseif ("${{ github.ref }}" -match "refs/tags/v(.+)") {
+            $version = $matches[1]
+          } elseif ("${{ env.MANUAL_TEST_VERSION }}" -ne "") {
+            $version = "${{ env.MANUAL_TEST_VERSION }}"
+          } else {
+            $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
+          }
+          if (-not $version) { $version = "0.0.0" }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
+          echo "Building version: $version"
+
+      - name: Build with Nuitka (standalone / onedir) 🏗️
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: standalone
+          windows-console-mode: ${{ env.CONSOLE_MODE }}
+          windows-icon-from-ico: ui/icon.ico
+          include-data-dir: ui=ui
+          include-data-files: |
+            VERSION=VERSION
+          include-package-data: webview
+          include-package: atlas_toolkit
+          nofollow-import-to: |
+            PyQt5
+            PyQt6
+            PySide2
+            PySide6
+            tkinter
+            gi
+          output-dir: dist
+
+      - name: Normalize standalone exe name 🔧
+        shell: pwsh
+        run: |
+          $dist = "dist/main.dist"
+          # standalone mode names the exe after the script (main.exe); output-file
+          # is ignored for standalone, so rename to the user-facing name.
+          if (Test-Path "$dist/main.exe") {
+            Rename-Item -Path "$dist/main.exe" -NewName "AtlasToolkit.exe" -Force
+          }
+          if (-not (Test-Path "$dist/AtlasToolkit.exe")) {
+            Write-Host "Expected exe not found. Contents of ${dist}:"
+            Get-ChildItem -Recurse $dist | Select-Object FullName
+            throw "AtlasToolkit.exe missing after standalone build"
+          }
+          Write-Host "OK: $dist/AtlasToolkit.exe present"
+
+      - name: Check signing secrets
+        id: check_secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.CERT_BASE64 }}" ] && [ -n "${{ secrets.CERT_PASSWORD }}" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sign Standalone Executable
+        if: steps.check_secrets.outputs.available == 'true'
+        shell: pwsh
+        env:
+          CERT_DATA: ${{ secrets.CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          $exePath = "dist/main.dist/AtlasToolkit.exe"
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse |
+                      Where-Object { $_.FullName -match "x64" } |
+                      Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+          try {
+              $cleanBase64 = $env:CERT_DATA -replace '\s',''
+              $certBytes = [System.Convert]::FromBase64String($cleanBase64)
+              [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+
+              Write-Host "Verifying PFX and Password..."
+              certutil -p $env:CERT_PASS -dump $certPath | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Incorrect password or corrupted PFX file." }
+
+              Write-Host "Signing standalone executable..."
+              & $signtool sign /f $certPath /p "$env:CERT_PASS" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /v $exePath
+
+              if ($LASTEXITCODE -ne 0) { throw "SignTool failed with code: $LASTEXITCODE" }
+          }
+          catch {
+              Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
+          finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+          }
+
+      - name: Install Inno Setup 🧰
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Installer (Inno Setup) 📦
+        shell: pwsh
+        run: |
+          $version = "${{ steps.build_version.outputs.version }}"
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc "/DMyAppVersion=$version" AtlasToolkit.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with code: $LASTEXITCODE" }
+          if (-not (Test-Path "installer/AtlasToolkit-Setup-x64.exe")) {
+            throw "Installer not produced at installer/AtlasToolkit-Setup-x64.exe"
+          }
+
+      - name: Sign Installer
+        if: steps.check_secrets.outputs.available == 'true'
+        shell: pwsh
+        env:
+          CERT_DATA: ${{ secrets.CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          $exePath = "installer/AtlasToolkit-Setup-x64.exe"
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\" -Filter signtool.exe -Recurse |
+                      Where-Object { $_.FullName -match "x64" } |
+                      Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+          try {
+              $cleanBase64 = $env:CERT_DATA -replace '\s',''
+              $certBytes = [System.Convert]::FromBase64String($cleanBase64)
+              [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+
+              Write-Host "Signing installer..."
+              & $signtool sign /f $certPath /p "$env:CERT_PASS" /tr http://timestamp.digicert.com /td sha256 /fd sha256 /v $exePath
+              if ($LASTEXITCODE -ne 0) { throw "SignTool failed with code: $LASTEXITCODE" }
+          }
+          catch {
+              Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
+          finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+          }
+
+      - name: Create portable zip 📁
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/main.dist/*" -DestinationPath "AtlasToolkit-Windows-x64-portable.zip" -Force
+          if (-not (Test-Path "AtlasToolkit-Windows-x64-portable.zip")) { throw "Portable zip not produced" }
+
+      - name: Upload Artifacts (Testing) 💾
+        uses: actions/upload-artifact@v4
+        if: ${{ env.IS_RELEASE != 'true' }}
+        with:
+          name: AtlasToolkit-Windows-x64
+          path: |
+            installer/AtlasToolkit-Setup-x64.exe
+            AtlasToolkit-Windows-x64-portable.zip
+
+      - name: Upload Release Assets 📤
+        if: ${{ env.IS_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            installer/AtlasToolkit-Setup-x64.exe
+            AtlasToolkit-Windows-x64-portable.zip
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
