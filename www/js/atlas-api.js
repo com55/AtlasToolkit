@@ -609,12 +609,26 @@ export const AtlasAPI = {
     return _session ? Object.keys(_session.moddedSprites) : [];
   },
 
-  /** Pick a mod PNG and process it. */
+  /**
+   * Pick a mod PNG and process it. Under pywebview, use the native Open
+   * dialog (pick_mod_image) starting at the atlas's own folder, matching the
+   * old Python engine — a plain `<input type=file>` can't be pointed at a
+   * starting directory (found via parity audit, 2026-08-23).
+   */
   async select_mod_image(selectedNames, repack = false) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
-    const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
-    if (files.length === 0) return null;
-    return AtlasAPI.process_mod_image(files[0], selectedNames, repack);
+    let file;
+    if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
+      const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
+      if (!path) return null;
+      const info = await window.pywebview.api.read_file_as_base64(path);
+      file = base64ToFile(info.base64, info.name, 'image/png');
+    } else {
+      const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
+      if (files.length === 0) return null;
+      file = files[0];
+    }
+    return AtlasAPI.process_mod_image(file, selectedNames, repack);
   },
 
   /** Process a mod image (File or canvas/img) for the selected regions. */

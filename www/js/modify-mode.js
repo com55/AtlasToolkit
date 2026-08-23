@@ -152,7 +152,7 @@ export async function ReplaceSelected() {
     const repack = document.getElementById('chk-repack').checked;
     const result = await AtlasAPI.select_mod_image(names, repack);
     if (result) {
-      onModPreviewReceived(result);
+      await onModPreviewReceived(result);
     } else {
       setStatus('Cancelled or no image selected.');
     }
@@ -162,10 +162,22 @@ export async function ReplaceSelected() {
   }
 }
 
-export function onModPreviewReceived(data) {
+export async function onModPreviewReceived(data) {
   state.hasModImage = true;
   if (data.regions) state.modifyRegionBounds = data.regions;
-  previewImg.src = data.image;
+
+  // _buildResult() (atlas-session.js) always returns page-0's image for a
+  // multi-page result, regardless of which page was active when the mod was
+  // applied — found via parity audit, 2026-08-23: modifying a region on page
+  // 2+ would silently jump the preview back to page 1. Re-fetch the correct
+  // page's (now-merged) image for whichever page is actually active.
+  let image = data.image;
+  if (state.modifyPages.length > 1 && state.modifyActivePage) {
+    const pageData = await AtlasAPI.get_modify_page_preview(state.modifyActivePage);
+    if (pageData && pageData.image) image = pageData.image;
+  }
+
+  previewImg.src = image;
   previewImg.style.display = 'block';
   setStatus('Mod image merged. Ready to save.');
   updateModifyActionButtons();
@@ -228,7 +240,7 @@ document.getElementById('chk-repack').addEventListener('change', async (e) => {
   try {
     const result = await AtlasAPI.toggle_repack(e.target.checked);
     if (result) {
-      onModPreviewReceived(result);
+      await onModPreviewReceived(result);
     } else {
       showToast('No merged data to repack.', 'error');
     }
