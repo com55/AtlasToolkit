@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AtlasDocument, Page, Region } from '../www/js/atlas-document.js';
+import { AtlasDocument, Page, Region, pngNamesForSave } from '../www/js/atlas-document.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -382,6 +382,15 @@ dupeA
 dupeB
   bounds: 26, 0, 6, 6`;
   assert.equal(got, expected);
+});
+
+test('pngNamesForSave uses atlas page lines, not the .atlas stem', () => {
+  const text = 'CH0355_spr.png\nsize: 10,10\nr\nbounds: 0,0,1,1\n';
+  assert.deepEqual(pngNamesForSave(text, 1, 'hero.atlas'), ['CH0355_spr.png']);
+});
+
+test('pngNamesForSave keeps multi-page names in atlas order', () => {
+  assert.deepEqual(pngNamesForSave(FIXTURE, 2, 'pack.atlas'), ['page1.png', 'page2.png']);
 });
 
 test('fixtures/tie-rounding/fixture-tie.atlas parse->serialize matches live-Python (main@d1f196e) output', () => {

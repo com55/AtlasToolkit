@@ -77,6 +77,35 @@ export function base64ToFile(base64, filename, mime) {
  * leaving a Windows drive letter ("C:") unencoded, matching how browsers
  * expect it in a file URI.
  */
+/** Join a directory and filename with the separator already used in `dir`. */
+export function joinNativePath(dir, name) {
+  const file = String(name || '').replace(/^[\\/]+/, '');
+  if (!dir) return file;
+  const base = String(dir).replace(/[\\/]+$/, '');
+  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/';
+  return `${base}${sep}${file}`;
+}
+
+/** Last path segment of a native OS path (Windows or POSIX). */
+export function nativePathBasename(path) {
+  const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : '';
+}
+
+/**
+ * Map a dropped PNG path onto a missing-page row by filename. Used when
+ * pywebview's native drop event has no usable clientX/clientY.
+ */
+export function matchDroppedPngToPage(path, pageNames) {
+  const base = nativePathBasename(path);
+  if (!base) return null;
+  const names = Array.isArray(pageNames) ? pageNames : [];
+  const exact = names.find((p) => p === base);
+  if (exact) return exact;
+  const lower = base.toLowerCase();
+  return names.find((p) => String(p).toLowerCase() === lower) || null;
+}
+
 export function pathToFileUrl(path) {
   let p = String(path).replace(/\\/g, '/');
   if (!p.startsWith('/')) p = '/' + p; // Windows: "C:/foo" -> "/C:/foo"

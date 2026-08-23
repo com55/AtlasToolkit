@@ -130,6 +130,7 @@ def run() -> None:
         # see its docstring: evaluate_js can't be called synchronously from
         # this event without deadlocking pywebview.
         window.events.closing += api.on_closing
+        window.events.closed += api.on_closed
     else:
         sys.exit(1)
 

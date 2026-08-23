@@ -509,3 +509,19 @@ function serializeRegion(region) {
   }
   return lines;
 }
+
+/**
+ * PNG filenames to write next to a saved atlas. Always taken from the
+ * atlas text's page lines — not the `.atlas` stem (`hero.atlas` must not
+ * become `hero.png` when the page is `CH0355_spr.png`).
+ */
+export function pngNamesForSave(atlasText, pageCount, atlasFilename = 'atlas.atlas') {
+  const names = AtlasDocument.parse(atlasText || '').pageFilenames();
+  const stem = String(atlasFilename || 'atlas').replace(/\.[^.]+$/, '') || 'atlas';
+  const count = Number(pageCount) || 0;
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push(names[i] || (count === 1 ? `${stem}.png` : `page${i}.png`));
+  }
+  return out;
+}
