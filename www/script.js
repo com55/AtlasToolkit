@@ -205,7 +205,8 @@ async function openFile() {
   try {
     if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
       const ok = await showConfirm(
-        'You have unsaved atlas modifications. Load a new atlas and discard them?',
+        // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
+        'You have unsaved atlas modifications.\nContinue and discard them?',
         'Discard modifications?',
       );
       if (!ok) return;

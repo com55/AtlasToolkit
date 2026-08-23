@@ -633,12 +633,21 @@ class Api:
                 "document.body.dataset.missingDialogOpen === 'true'"
             )
             if missing_open:
-                # Not wired up yet: the missing-page dialog's own per-row
-                # drop handling only reads real bytes over a browser drag
-                # (File System-backed FileList), which native pywebview
-                # drops don't provide — "Add image" (native file dialog)
-                # already covers this case. Revisit if this becomes a
-                # regression at Phase 3's manual smoke test.
+                # Native OS drops never carry readable file bytes client-side
+                # (only pywebviewFullPath here on the Python side), so the
+                # missing-page dialog's own per-row `drop` handler no-ops
+                # under pywebview and defers to this instead — mirrors the
+                # old Python engine's applyMissingImageDrop() (parity fix,
+                # 2026-08-23). clientX/clientY come along on every DOM event
+                # pywebview forwards (standard MouseEvent properties), used
+                # here to figure out which row the file was dropped onto.
+                if path_lower.endswith(".png"):
+                    client_x = e.get("clientX")
+                    client_y = e.get("clientY")
+                    self._window.evaluate_js(
+                        f"window.applyMissingImageDrop({json.dumps(path)}, "
+                        f"{json.dumps(client_x)}, {json.dumps(client_y)})"
+                    )
                 return
 
             if path_lower.endswith(".atlas"):
