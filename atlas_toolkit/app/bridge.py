@@ -154,6 +154,23 @@ class Api:
         )
         return result[0] if result else None
 
+    def pick_mod_image(self, default_dir: str = "") -> Optional[str]:
+        """Native single-file Open dialog for a mod PNG ("Modify Selected"),
+        opened at the atlas's own folder by default — old Python engine's
+        select_mod_image() did the same (`directory=atlas_path.parent`); the
+        JS port initially always used a plain `<input type=file>` even on
+        desktop (found via parity audit, 2026-08-23)."""
+        if not self._window:
+            return None
+        file_types = ("PNG Files (*.png)", "All files (*.*)")
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=file_types,
+            directory=default_dir or "",
+        )
+        return result[0] if result else None
+
     def pick_save_folder(self, default_dir: str = "") -> Optional[str]:
         """Native folder-picker for output (extract-to-folder / save_modified)
         — see platform.js's pickSaveFolder(), Phase 3."""
