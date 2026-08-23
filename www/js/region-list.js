@@ -39,6 +39,7 @@ export async function loadRegions() {
     li.className    = 'region-item';
     li.innerText    = name;
     li.dataset.index = index;
+    li.dataset.name  = name;
     li.addEventListener('mousedown', (e) => onRegionMouseDown(e, index, name));
     li.addEventListener('mouseenter', () => { /* handled by global mousemove */ });
     li.addEventListener('touchstart', (e) => onRegionTouchStart(e, index), { passive: false });
@@ -48,6 +49,24 @@ export async function loadRegions() {
   document.getElementById('status-text').innerText = hasRegions ? 'Atlas loaded.' : '';
   updateModeToggleUI();
   document.getElementById('btn-extract-all').disabled   = !hasRegions;
+  refreshModifiedHighlight();
+}
+
+/**
+ * Bold-green "name*" highlight for regions touched by a pending mod, mirroring
+ * the old Python UI's `ui/js/regions.js` (`.modified` class + `${name}*`
+ * display name) — missing entirely from the initial JS port. Called after
+ * every mod apply/reset/repack-toggle rather than folded into `loadRegions()`,
+ * since those operations don't re-fetch the full region list.
+ */
+export function refreshModifiedHighlight() {
+  const modified = new Set(AtlasAPI.get_modified_region_names ? AtlasAPI.get_modified_region_names() : []);
+  document.querySelectorAll('.region-item').forEach((el) => {
+    const name = el.dataset.name;
+    const isModified = modified.has(name);
+    el.classList.toggle('modified', isModified);
+    el.innerText = isModified ? `${name}*` : name;
+  });
 }
 
 export function renderSelection() {

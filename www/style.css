@@ -320,10 +320,23 @@ button {
   background-color: #2a2d2e;
 }
 
+/* Regions touched by a pending mod — port of the old Python UI's
+   ui/css/components.css (bold green + "name*" suffix, see region-list.js's
+   refreshModifiedHighlight()). */
+.region-item.modified {
+  font-weight: 700;
+  color: #81c784;
+}
+
 /* Highlight Styles */
 .region-item.selected {
   background-color: #094771;
   color: white;
+}
+
+.region-item.modified.selected {
+  font-weight: 700;
+  color: #a5d6a7;
 }
 
 /* App-bar right-zone control groups (left-aligned; Save Image / Save As...
