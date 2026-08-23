@@ -7,7 +7,7 @@ import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
-import { base64ToFile } from './js/platform.js';
+import { base64ToFile, loadFileAsFile } from './js/platform.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
@@ -222,22 +222,26 @@ async function openFile() {
 
 // ─── Native (pywebview) bridge glue ────────────────────────────────────────
 // pywebview's native CLI-arg/file-association/drag-drop paths hand Python a
-// filesystem path, not a browser File — bridge.py reads it (and any sibling
-// page images) as base64 and calls these via evaluate_js() to reconstruct
-// File objects client-side and feed them into the same AtlasAPI used by the
-// file-picker/browser-drop paths above. See atlas_toolkit/app/bridge.py.
+// filesystem path, not a browser File. The .atlas TEXT itself is small
+// (plain text, a few KB) and still crosses as base64. Sibling/mod PNGs do
+// NOT -- bridge.py hands over their plain paths and these reconstruct File
+// objects via fetch(file://...) (see platform.loadFileAsFile's doc comment:
+// base64 through pywebview's evaluate_js bridge measured over 1s for a
+// single ~5MB PNG, this measured under 10ms for the same file, 2026-08-23)
+// and feed them into the same AtlasAPI used by the file-picker/browser-drop
+// paths above. See atlas_toolkit/app/bridge.py.
 
 /** Load an atlas opened via a native path (CLI arg, file association, or
  *  single-file native drag-drop with no in-DOM FileList available).
  *  `atlasDirectory` (added for parity-audit fix, 2026-08-23) is the folder the
  *  .atlas file lives in on disk — threaded through so extract/save dialogs can
  *  default to it, matching the old Python engine. */
-async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map, atlasDirectory) {
+async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, atlasDirectory) {
   try {
     const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
-    for (const [name, b64] of Object.entries(imagesBase64Map || {})) {
-      imageFileMap[name] = base64ToFile(b64, name, 'image/png');
+    for (const [name, imgPath] of Object.entries(imagePathsMap || {})) {
+      imageFileMap[name] = await loadFileAsFile(imgPath);
     }
     const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap, atlasDirectory || '');
     if (ok) await _resetUiAfterFreshLoad();
@@ -250,7 +254,7 @@ async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map, 
 
 /** Apply a mod image dropped natively onto the currently-selected regions
  *  in Edit mode (native drag-drop delivers a path, not a browser File). */
-async function applyNativeModImageDrop(imageBase64, filename) {
+async function applyNativeModImageDrop(imagePath) {
   if (state.currentMode !== 'modify') {
     showToast('Enter Edit Mode first to drop images.', 'error');
     return false;
@@ -261,7 +265,7 @@ async function applyNativeModImageDrop(imageBase64, filename) {
     return false;
   }
   const repack = document.getElementById('chk-repack').checked;
-  const file = base64ToFile(imageBase64, filename, 'image/png');
+  const file = await loadFileAsFile(imagePath, 'image/png');
   const result = await AtlasAPI.process_mod_image(file, names, repack);
   if (result) {
     onModPreviewReceived(result);
