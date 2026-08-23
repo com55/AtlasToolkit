@@ -10,6 +10,7 @@ import {
 import { showToast, showConfirm } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
+import { refreshModifiedHighlight } from './region-list.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -85,6 +86,7 @@ export async function enterEditMode() {
         ? 'Multi-page atlas — select regions and click Modify Selected.'
         : 'Select regions and click Modify Selected.';
       applyModifyView(data, statusMsg);
+      refreshModifiedHighlight();
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -103,6 +105,7 @@ export async function exitEditMode() {
     if (!ok) return;
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
+  refreshModifiedHighlight();
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
   state.modifyRegionPages  = {};
@@ -130,6 +133,7 @@ export async function resetModify() {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
       applyModifyView(data, 'Select regions and click Modify Selected.');
+      refreshModifiedHighlight();
       showToast('Modifications reset.', 'success');
     } else {
       showToast('Failed to reset modifications.', 'error');
@@ -165,6 +169,7 @@ export function onModPreviewReceived(data) {
   previewImg.style.display = 'block';
   setStatus('Mod image merged. Ready to save.');
   updateModifyActionButtons();
+  refreshModifiedHighlight();
   previewImg.onload = function () {
     resetPreview();
     const containerW = previewContainer.clientWidth - 40;
