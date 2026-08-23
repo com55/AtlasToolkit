@@ -16,10 +16,10 @@ CONTEXT.md
 CLAUDE.md
 
 # Scratch test files (stray root-level test scripts), but not the real
-# committed test suite in /test/
+# committed test suite in /tests/
 test*
-!/test/
-!/test/**
+!/tests/
+!/tests/**
 
 # Superpowers SDD scratch (local only)
 .superpowers

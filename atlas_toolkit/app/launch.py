@@ -89,16 +89,6 @@ def run() -> None:
     elif webview_debug:
         log.info("pywebview debug mode enabled (--debug).")
 
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            ctypes.windll.kernel32.CreateMutexW(  # type: ignore[attr-defined]
-                None, False, "AtlasToolkitSingleInstanceMutex"
-            )
-        except Exception:
-            pass
-
     api = Api(pending_update_failure=pending_failure)
 
     window_width, window_height = 1200, 800

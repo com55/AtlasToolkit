@@ -90,7 +90,15 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext('2d');
+  // willReadFrequently: every sprite this produces gets getImageData'd at
+  // least once downstream (repack dedup hashing -- atlas-modifier.js's
+  // _canvasHash), often twice (its documented priming-read workaround).
+  // Without this hint Chromium keeps the canvas GPU-backed and each
+  // getImageData call forces a GPU->CPU readback sync; measured ~4ms/call
+  // fixed overhead regardless of these sprites' small size, dominating a
+  // 68-region repack (perf fix, 2026-08-23). CPU-backed via this hint
+  // measured ~2.5x faster per read in the same scenario.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingEnabled = false;
 
   if (rotate === 90) {
@@ -160,7 +168,7 @@ export function extractRegionFromPage(pageImage, region, page = null) {
   const canvas = document.createElement('canvas');
   canvas.width = origW;
   canvas.height = origH;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }); // see cropAndRotate's comment
   ctx.imageSmoothingEnabled = false;
   const pasteX = offX;
   const pasteY = origH - offY - currentH;
