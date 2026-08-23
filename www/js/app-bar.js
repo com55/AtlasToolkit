@@ -8,7 +8,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state } from './state.js';
 import { enterEditMode, exitEditMode } from './modify-mode.js';
-import { previewImg, previewContainer, resetPreview, applyTransform, fitScaleIfOversized } from './preview.js';
+import { previewImg, previewContainer, resetPreview, applyTransform, fitScaleIfOversized, setPreviewSrc } from './preview.js';
 
 /** Reflect the current mode on the toggle, and gate Edit on regions loaded. */
 export function updateModeToggleUI() {
@@ -63,7 +63,7 @@ async function goToPage(newIndex) {
   try {
     const data = await AtlasAPI.get_modify_page_preview(pageName);
     if (!data || !data.image) return;
-    previewImg.src = data.image;
+    setPreviewSrc(data.image);
     previewImg.style.display = 'block';
     fitPreviewOnLoad();
   } catch (e) {

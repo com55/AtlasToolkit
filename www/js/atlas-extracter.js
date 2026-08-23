@@ -136,15 +136,19 @@ export class AtlasProcessor {
     return extractRegionFromPage(baseImg, region, page);
   }
 
-  /** Extract a single region as a base64 PNG data URI. */
+  /** Extract a single region as a blob: URL (no base64). */
   extractRegionAsDataURL(name) {
     const canvas = this.extractRegion(name);
-    return canvas ? canvas.toDataURL('image/png') : null;
+    return canvasToPreviewUrl(canvas);
   }
 
   /**
-   * Get a composite preview of one or more region names as a data URI.
+   * Get a composite preview of one or more region names as a blob: URL.
    * Regions are composited (alpha-blended) on a max-size canvas.
+   * Avoids canvas.toDataURL() — encoding a full atlas page to a PNG data
+   * URI is the remaining desktop-slowness after the pywebview base64-bridge
+   * fix (2026-08-23): a 2k–4k page can take hundreds of ms just to
+   * base64-encode, then the <img> has to decode it again.
    */
   getPreviewDataURL(names) {
     const images = names
@@ -152,8 +156,8 @@ export class AtlasProcessor {
       .map(n => this.extractRegion(n))
       .filter(Boolean);
 
-    if (images.length === 0) return null;
-    if (images.length === 1) return images[0].toDataURL('image/png');
+    if (images.length === 0) return Promise.resolve(null);
+    if (images.length === 1) return canvasToPreviewUrl(images[0]);
 
     const maxW = Math.max(...images.map(c => c.width));
     const maxH = Math.max(...images.map(c => c.height));
@@ -168,7 +172,7 @@ export class AtlasProcessor {
       ctx.drawImage(img, 0, 0);
     }
 
-    return canvas.toDataURL('image/png');
+    return canvasToPreviewUrl(canvas);
   }
 
   /**
@@ -189,6 +193,24 @@ export class AtlasProcessor {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Encode a canvas as a `blob:` URL via toBlob() — skips the PNG→base64
+ * step that `toDataURL('image/png')` does on the main thread. The preview
+ * <img> and getPreviewPngBlob()'s fetch(img.src) both accept blob: URLs.
+ */
+export function canvasToPreviewUrl(canvas) {
+  if (!canvas) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('canvas.toBlob failed'));
+        return;
+      }
+      resolve(URL.createObjectURL(blob));
+    }, 'image/png');
+  });
+}
 
 /** Load an image from a File object or a URL/data-URL string. */
 export function _loadImage(source) {

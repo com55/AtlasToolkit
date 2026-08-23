@@ -224,10 +224,18 @@ class Api:
             pending = False
         if not pending:
             return True
-        return self._window.create_confirmation_dialog(
-            "Discard modifications?",
-            "You have unsaved atlas modifications. Continue and discard them?",
+        # In-app modal (www/js/dialogs.js showConfirm), not the OS native
+        # MessageBox — user request 2026-08-23: confirmation dialogs should
+        # match the rest of the www/ UI. Safe here because every caller
+        # already runs off the GUI thread (on_closing's background thread,
+        # on_drop / startup_check via js_api worker thread).
+        result = self._evaluate_js_promise(
+            "window.showConfirm("
+            "'You have unsaved atlas modifications.\\nContinue and discard them?', "
+            "'Discard modifications?')",
+            timeout=None,
         )
+        return bool(result)
 
     def on_closing(self) -> bool:
         """`window.events.closing` handler. Always vetoes the *first* close
@@ -254,7 +262,9 @@ class Api:
             self._closing_confirmed = True
             self._window.destroy()
 
-    def _evaluate_js_promise(self, script: str, timeout: float = 30.0) -> Any:
+    def _evaluate_js_promise(
+        self, script: str, timeout: float | None = 30.0
+    ) -> Any:
         """`evaluate_js(script)` **without** a callback does NOT await a
         returned JS Promise (pywebview docs: "If the JavaScript code returns
         a promise, you can resolve it by providing a callback function") —
@@ -266,7 +276,11 @@ class Api:
         atlas file" toast on every native open/drag-drop (found via user
         testing, 2026-08-23). Use the documented callback form + a
         threading.Event instead — same pattern already proven by
-        `_prompt_missing_page_images`."""
+        `_prompt_missing_page_images`.
+
+        `timeout=None` waits indefinitely — required for in-app confirm
+        modals where the user may sit on the dialog longer than 30s.
+        """
         if not self._window:
             return None
         holder: dict[str, object] = {}
@@ -688,7 +702,10 @@ class Api:
         if not self._window:
             return
         try:
-            self._window.evaluate_js(
+            # Await the async JS handler — a bare evaluate_js returns the
+            # Promise wrapper immediately and the caller would think the
+            # drop finished before merge/preview even started.
+            self._evaluate_js_promise(
                 f"window.applyNativeModImageDrop({json.dumps(path)})"
             )
         except Exception as e:

@@ -5,6 +5,23 @@ import { isPortrait } from './platform.js';
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
 
+let _previewObjectUrl = null;
+
+/** Assign preview <img>.src, revoking the previous blob: URL so replace
+ *  / page-switch / region-select don't leak encoded PNG blobs. */
+export function setPreviewSrc(url) {
+  const prev = _previewObjectUrl;
+  previewImg.src = url || '';
+  _previewObjectUrl = (url && String(url).startsWith('blob:')) ? url : null;
+  if (prev && prev !== url) {
+    // get_preview() memoizes blob: URLs. If we revoke one that's still
+    // cached there, Edit→View would set <img src> to a dead blob and
+    // show the broken-image icon (found 2026-08-23).
+    if (AtlasAPI.forget_preview_url) AtlasAPI.forget_preview_url(prev);
+    URL.revokeObjectURL(prev);
+  }
+}
+
 export function resetPreview() {
   state.viewState = { scale: 1, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 };
   applyTransform();
@@ -104,7 +121,7 @@ export async function updatePreview(names) {
   }
   const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(names) : null;
   if (base64Img) {
-    previewImg.src = base64Img;
+    setPreviewSrc(base64Img);
     previewImg.style.display = 'block';
     status.innerText = names.length === 1 ? `Previewing: ${names[0]}` : `Previewing: ${names.length} regions`;
     previewImg.onload = function () {

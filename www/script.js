@@ -7,7 +7,7 @@ import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
-import { base64ToFile, loadFileAsFile } from './js/platform.js';
+import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
@@ -265,10 +265,12 @@ async function applyNativeModImageDrop(imagePath) {
     return false;
   }
   const repack = document.getElementById('chk-repack').checked;
-  const file = await loadFileAsFile(imagePath, 'image/png');
-  const result = await AtlasAPI.process_mod_image(file, names, repack);
+  // file:// URL goes straight into Image() — no fetch→File copy, no
+  // toDataURL of the dropped PNG (perf fix, 2026-08-23). Preview after
+  // merge is a blob: URL from canvas.toBlob(), not a data: URI.
+  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), names, repack);
   if (result) {
-    onModPreviewReceived(result);
+    await onModPreviewReceived(result);
     showToast('Mod image loaded via drag & drop.', 'success');
     return true;
   }

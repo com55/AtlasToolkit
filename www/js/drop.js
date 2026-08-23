@@ -66,7 +66,7 @@ async function processDroppedFiles(files) {
     const repack = document.getElementById('chk-repack').checked;
     const result = await AtlasAPI.process_mod_image(imgFile, names, repack);
     if (result) {
-      onModPreviewReceived(result);
+      await onModPreviewReceived(result);
       showToast('Mod image loaded via drag & drop.', 'success');
     }
   } else {
@@ -131,8 +131,9 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') contextMenu.
  * re-encoding via canvas.toBlob() — a canvas round-trip softens edges
  * (port of old Python engine's ui/js/preview.js getPreviewPngBlob(); the old
  * app avoided this by writing the PIL-generated PNG directly). previewImg.src
- * is always a data: URL here, so fetch() resolves it synchronously with no
- * network I/O. Falls back to a canvas capture only if that somehow fails.
+ * is a blob: URL (or rarely a data: URL), so fetch() reads the PNG bytes
+ * without a second canvas encode. Falls back to a canvas capture only if
+ * that somehow fails.
  */
 async function getPreviewPngBlob() {
   const img = previewImg;

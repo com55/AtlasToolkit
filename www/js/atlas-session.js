@@ -10,7 +10,7 @@
  * result. See session.py commit 5a6f6bf.
  */
 
-import { AtlasProcessor, _loadImage } from './atlas-extracter.js';
+import { AtlasProcessor, _loadImage, canvasToPreviewUrl } from './atlas-extracter.js';
 import { AtlasModifier, repackMultiPage } from './atlas-modifier.js';
 
 /** One mod apply: the region names it targeted plus the (durable) mod image. */
@@ -100,7 +100,10 @@ export class AtlasSession {
 
   // ─── Mod image preparation (overridable seam for tests) ─────────────────
   async _prepareSource(source) {
-    return source instanceof File ? await _loadImage(source) : source;
+    if (source instanceof File || typeof source === 'string') {
+      return await _loadImage(source);
+    }
+    return source;
   }
 
   // ─── Batch registration ─────────────────────────────────────────────────
@@ -323,7 +326,7 @@ export class AtlasSession {
     this.active = { canvas: null, pages, text };
   }
 
-  _buildResult() {
+  async _buildResult() {
     const a = this.active;
     if (!a) return null;
     const proc = new AtlasProcessor(a.text);
@@ -333,10 +336,10 @@ export class AtlasSession {
     }
     if (a.pages) {
       const previewPage = proc.pages.length > 0 ? proc.pages[0].filename : null;
-      const image = a.pages.length > 0 ? a.pages[0].toDataURL('image/png') : null;
+      const image = a.pages.length > 0 ? await canvasToPreviewUrl(a.pages[0]) : null;
       return { image, regions: regionBounds, pageCount: a.pages.length, previewPage };
     }
-    return { image: a.canvas.toDataURL('image/png'), regions: regionBounds };
+    return { image: await canvasToPreviewUrl(a.canvas), regions: regionBounds };
   }
 
   // ─── Public: apply a mod image ───────────────────────────────────────────
@@ -377,7 +380,7 @@ export class AtlasSession {
         this._setActiveSingle(r.canvas, r.text);
       }
 
-      return this._buildResult();
+      return await this._buildResult();
     } catch (e) {
       this.modBatches = prevBatches;
       this.moddedSprites = prevSprites;
@@ -423,7 +426,7 @@ export class AtlasSession {
       this._setActiveSingle(this.preRepack.canvas, this.preRepack.text);
     }
 
-    return this._buildResult();
+    return await this._buildResult();
   }
 }
 

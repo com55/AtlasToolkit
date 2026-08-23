@@ -4,7 +4,7 @@ import {
   previewImg, previewContainer,
   resetPreview, applyTransform,
   drawRegionOverlay, clearOverlay,
-  updatePreview, updateSaveMergedButton,
+  updatePreview, updateSaveMergedButton, setPreviewSrc,
   fitScaleIfOversized,
 } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
@@ -61,7 +61,7 @@ function applyModifyView(data, statusMsg) {
   setMode('modify');
   setStatus(statusMsg);
   updateModifyActionButtons();
-  previewImg.src = data.image;
+  setPreviewSrc(data.image);
   previewImg.style.display = 'block';
   previewImg.onload = function () {
     resetPreview();
@@ -178,7 +178,7 @@ export async function onModPreviewReceived(data) {
     if (pageData && pageData.image) image = pageData.image;
   }
 
-  previewImg.src = image;
+  setPreviewSrc(image);
   previewImg.style.display = 'block';
   setStatus('Mod image merged. Ready to save.');
   updateModifyActionButtons();
