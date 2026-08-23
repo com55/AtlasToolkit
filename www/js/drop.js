@@ -165,7 +165,9 @@ export async function savePreviewImageAs() {
     // (native save dialog + write_file_bytes) — see D1's revised split.
     const hasNativeDialog = isPywebviewDesktop() || typeof window.showSaveFilePicker === 'function';
     if (hasNativeDialog) {
-      const saved = await platform.saveFileWithDialog(filename, blob);
+      const saved = await platform.saveFileWithDialog(filename, blob, {
+        defaultDir: AtlasAPI.get_current_atlas_directory(),
+      });
       if (saved) { showToast('Image saved.', 'success'); return; }
       showToast('Save cancelled.', 'info');
       return;

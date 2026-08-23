@@ -14,6 +14,12 @@ import { AtlasSession } from './atlas-session.js';
 
 let _processor = null;
 let _currentAtlasFilename = '';
+// Native-open source folder (pywebview only — a browser <input type=file>
+// never exposes a real filesystem path). Used as the starting directory for
+// native extract/save dialogs, matching the old Python engine's behavior of
+// always opening those at the loaded atlas's folder (found missing via
+// parity audit, 2026-08-23). Empty string just means "let the OS pick".
+let _currentAtlasDirectory = '';
 let _currentAtlasText = '';
 let _session = null;               // AtlasSession — owns modify-mode state / mod batches
 let _lastSaveHandle = null;
@@ -64,6 +70,13 @@ function _isInstalledPWA() {
 function _useFolderPicker() {
   return isPywebviewDesktop()
     || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
+}
+
+/** Directory portion of a native (Windows or POSIX) filesystem path. */
+function _dirnameOf(path) {
+  if (!path) return '';
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return idx >= 0 ? path.slice(0, idx) : '';
 }
 
 /** Base name (no extension) of the loaded atlas, for naming zip downloads. */
@@ -185,11 +198,11 @@ async function _loadAtlasFromFileList(files, options = {}) {
   return _loadAtlasFiles(atlasFile, imageFileMap);
 }
 
-async function _saveBlobWithDialog(filename, blob) {
+async function _saveBlobWithDialog(filename, blob, { defaultDir = '' } = {}) {
   // platform.js branches browser (File System Access API) vs pywebview
   // (native save dialog + write_file_bytes); _lastSaveHandle only means
   // anything for the former.
-  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle });
+  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle, defaultDir });
   if (!result) {
     const e = new Error('Save cancelled');
     e.name = 'AbortError';
@@ -280,7 +293,7 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
  * @param {Object.<string, File>} imageFileMap  { pageName: File }  (may be partial)
  * @returns {Promise<boolean>}
  */
-async function _loadAtlasFiles(atlasFile, imageFileMap) {
+async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
   try {
     const rawText = await _readFileAsText(atlasFile);
     const convertedText = autoConvertAtlas(rawText);
@@ -324,6 +337,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap) {
     await _processor.loadImages(finalMap);
 
     _currentAtlasFilename = atlasFile.name;
+    _currentAtlasDirectory = sourceDir;
     _currentAtlasText = convertedText;
     _currentSkel = null;
     _previewMemo = { key: null, value: null };
@@ -370,7 +384,7 @@ export const AtlasAPI = {
         for (const [name, b64] of Object.entries(imagesInfo || {})) {
           imageFileMap[name] = base64ToFile(b64, name, 'image/png');
         }
-        return _loadAtlasFiles(atlasFile, imageFileMap);
+        return _loadAtlasFiles(atlasFile, imageFileMap, _dirnameOf(path));
       } catch (e) {
         console.error('choose_file (pywebview) error:', e);
         return false;
@@ -394,8 +408,15 @@ export const AtlasAPI = {
   },
 
   /** Load atlas directly from a File object (used by drag-and-drop). */
-  async load_atlas_from_file(atlasFile, imageFileMap = {}) {
-    return _loadAtlasFiles(atlasFile, imageFileMap);
+  async load_atlas_from_file(atlasFile, imageFileMap = {}, sourceDir = '') {
+    return _loadAtlasFiles(atlasFile, imageFileMap, sourceDir);
+  },
+
+  /** Directory the current atlas was natively opened from, or '' — pywebview
+   * only (see `_currentAtlasDirectory`'s doc comment). Used as the starting
+   * directory for extract/save native dialogs. */
+  get_current_atlas_directory() {
+    return _currentAtlasDirectory;
   },
 
   /** Filename of the currently-loaded atlas, or '' if none — used by
@@ -461,9 +482,18 @@ export const AtlasAPI = {
     if (extracted.length === 0) return 'No regions to extract.';
 
     try {
-      // Installed PWA / pywebview desktop: pick a folder and write the PNGs into it.
+      // Single region, installed PWA / pywebview desktop: a native Save As
+      // dialog defaulting to "{region}.png" — matches the old Python engine's
+      // extract_files() single-file save flow (a folder picker for one file
+      // was a desktop-UX regression, found via parity audit 2026-08-23).
+      if (extracted.length === 1 && _useFolderPicker()) {
+        await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob, { defaultDir: _currentAtlasDirectory });
+        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+      }
+
+      // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
       if (_useFolderPicker()) {
-        const folder = await platform.pickSaveFolder();
+        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(
           folder,
@@ -534,23 +564,30 @@ export const AtlasAPI = {
   },
 
   /**
-   * Preview data for a single atlas page, for the multi-page switcher.
-   * Re-derives the base page image (reusing _processor.getPageImage) so the
-   * user can browse each page while selecting regions to edit. Region overlay
-   * filtering by page is done client-side (state.modifyRegionPages), so this
-   * only shapes the image.
+   * Preview data for a single atlas page, for the multi-page switcher. Prefers
+   * the current merged/repacked page image (`_session.getActivePageCanvas`) so
+   * mods already applied to that page stay visible when navigating away and
+   * back — falls back to the pristine page (reusing _processor.getPageImage)
+   * before any mod has been applied yet. Region overlay filtering by page is
+   * done client-side (state.modifyRegionPages), so this only shapes the image.
    * @param {string} pageFilename
    * @returns {Promise<{image: string, activePage: string}|null>}
    */
   async get_modify_page_preview(pageFilename) {
     if (!_processor || !pageFilename) return null;
     try {
-      const baseImg = _processor.getPageImage(pageFilename);
-      if (!baseImg) return null;
-      const canvas = document.createElement('canvas');
-      canvas.width = baseImg.naturalWidth || baseImg.width;
-      canvas.height = baseImg.naturalHeight || baseImg.height;
-      canvas.getContext('2d').drawImage(baseImg, 0, 0);
+      const activeCanvas = _session ? _session.getActivePageCanvas(pageFilename) : null;
+      let canvas;
+      if (activeCanvas) {
+        canvas = activeCanvas;
+      } else {
+        const baseImg = _processor.getPageImage(pageFilename);
+        if (!baseImg) return null;
+        canvas = document.createElement('canvas');
+        canvas.width = baseImg.naturalWidth || baseImg.width;
+        canvas.height = baseImg.naturalHeight || baseImg.height;
+        canvas.getContext('2d').drawImage(baseImg, 0, 0);
+      }
       return { image: canvas.toDataURL('image/png'), activePage: pageFilename };
     } catch (e) {
       console.error('get_modify_page_preview error:', e);
@@ -621,7 +658,7 @@ export const AtlasAPI = {
 
       // Installed PWA / pywebview desktop: pick a folder and write all outputs into it.
       if (_useFolderPicker()) {
-        const folder = await platform.pickSaveFolder();
+        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs);
         _session.markSaved();

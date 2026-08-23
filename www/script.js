@@ -227,15 +227,18 @@ async function openFile() {
 // file-picker/browser-drop paths above. See atlas_toolkit/app/bridge.py.
 
 /** Load an atlas opened via a native path (CLI arg, file association, or
- *  single-file native drag-drop with no in-DOM FileList available). */
-async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map) {
+ *  single-file native drag-drop with no in-DOM FileList available).
+ *  `atlasDirectory` (added for parity-audit fix, 2026-08-23) is the folder the
+ *  .atlas file lives in on disk — threaded through so extract/save dialogs can
+ *  default to it, matching the old Python engine. */
+async function loadAtlasFromNative(atlasBase64, atlasFilename, imagesBase64Map, atlasDirectory) {
   try {
     const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
     for (const [name, b64] of Object.entries(imagesBase64Map || {})) {
       imageFileMap[name] = base64ToFile(b64, name, 'image/png');
     }
-    const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap);
+    const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap, atlasDirectory || '');
     if (ok) await _resetUiAfterFreshLoad();
     return ok;
   } catch (e) {

@@ -269,9 +269,11 @@ class Api:
         try:
             atlas_file = self.read_file_as_base64(path_str)
             images = self.list_sibling_page_images(path_str)
+            atlas_dir = str(Path(path_str).resolve().parent)
             result = self._evaluate_js_promise(
                 f"window.loadAtlasFromNative({json.dumps(atlas_file['base64'])}, "
-                f"{json.dumps(atlas_file['name'])}, {json.dumps(images)})"
+                f"{json.dumps(atlas_file['name'])}, {json.dumps(images)}, "
+                f"{json.dumps(atlas_dir)})"
             )
             ok = bool(result)
             if not ok:

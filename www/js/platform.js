@@ -118,10 +118,14 @@ export async function pickAtlasFile() {
  * Pick a folder to save into. pywebview: native folder dialog (returns a
  * plain path string). Browser: File System Access API (returns a
  * FileSystemDirectoryHandle). Returns null if unsupported or cancelled.
+ * @param {string} [defaultDir] Starting directory for the native dialog (old
+ *   Python engine always opened extract/save dialogs at the loaded atlas's
+ *   folder; the initial JS port never passed one — found via parity audit,
+ *   2026-08-23). No effect on the browser File System Access API path.
  */
-export async function pickSaveFolder() {
+export async function pickSaveFolder(defaultDir = '') {
   if (_isPywebview() && window.pywebview.api.pick_save_folder) {
-    return (await window.pywebview.api.pick_save_folder()) || null;
+    return (await window.pywebview.api.pick_save_folder(defaultDir)) || null;
   }
   if (typeof window.showDirectoryPicker !== 'function') return null;
   try {
@@ -172,10 +176,14 @@ export async function writeFilesToFolder(target, files) {
  * Returns a FileSystemFileHandle (browser, truthy — pass back in as
  * `startIn` for the next save), `true` (pywebview — no handle concept), or
  * `null`/`false` if the user cancelled. Never throws on cancel.
+ * @param {object} [opts]
+ * @param {*} [opts.startIn] Browser File System Access API resume point.
+ * @param {string} [opts.defaultDir] pywebview native dialog starting directory
+ *   (see pickSaveFolder's doc comment for why this exists).
  */
-export async function saveFileWithDialog(filename, blob, { startIn = null } = {}) {
+export async function saveFileWithDialog(filename, blob, { startIn = null, defaultDir = '' } = {}) {
   if (_isPywebview() && window.pywebview.api.pick_save_file) {
-    const path = await window.pywebview.api.pick_save_file(filename);
+    const path = await window.pywebview.api.pick_save_file(filename, defaultDir);
     if (!path) return null;
     await window.pywebview.api.write_file_bytes(path, await blobToBase64(blob));
     return true;
