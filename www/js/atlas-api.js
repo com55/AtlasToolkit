@@ -5,8 +5,8 @@
  */
 
 import { autoConvertAtlas } from './atlas-converter.js';
-import { AtlasProcessor } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile } from './platform.js';
+import { AtlasProcessor, canvasToPreviewUrl } from './atlas-extracter.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 
@@ -25,6 +25,20 @@ let _session = null;               // AtlasSession — owns modify-mode state / 
 let _lastSaveHandle = null;
 let _currentSkel = null; // { name, blob } | null
 let _previewMemo = { key: null, value: null };
+
+function _clearPreviewMemo() {
+  if (_previewMemo.value && String(_previewMemo.value).startsWith('blob:')) {
+    URL.revokeObjectURL(_previewMemo.value);
+  }
+  _previewMemo = { key: null, value: null };
+}
+
+/** Drop the memo if it still points at *url* (already revoked by the caller). */
+function _forgetPreviewMemoUrl(url) {
+  if (url && _previewMemo.value === url) {
+    _previewMemo = { key: null, value: null };
+  }
+}
 
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
@@ -340,7 +354,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
     _currentAtlasDirectory = sourceDir;
     _currentAtlasText = convertedText;
     _currentSkel = null;
-    _previewMemo = { key: null, value: null };
+    _clearPreviewMemo();
 
     // Fresh session bound to the pristine processor + atlas text.
     _session = new AtlasSession(_processor, _currentAtlasText, _currentAtlasFilename);
@@ -447,8 +461,9 @@ export const AtlasAPI = {
     const gen = _session ? _session.modGeneration : 0;
     const key = `${[...names].sort().join(',')}:${gen}`;
     if (_previewMemo.key === key) return _previewMemo.value;
+    _clearPreviewMemo();
     try {
-      const url = _processor.getPreviewDataURL(names);
+      const url = await _processor.getPreviewDataURL(names);
       _previewMemo = { key, value: url };
       return url;
     } catch (e) {
@@ -535,7 +550,11 @@ export const AtlasAPI = {
       if (!baseImg) return null;
 
       // Entering modify mode always starts from a clean batch list.
+      // Drop the view-mode preview memo so a later exit can't reuse a
+      // blob: URL that setPreviewSrc is about to revoke (broken-image
+      // after Edit→View, 2026-08-23).
       _session.clearModifyState();
+      _clearPreviewMemo();
 
       // Build region bounds for overlay: { name: [x, y, w, h, rotate] }.
       // Scaled per page to the real loaded image size (see
@@ -543,14 +562,14 @@ export const AtlasAPI = {
       // when a page's PNG doesn't match the atlas's declared `size:`.
       const regionBounds = _session.getModifyRegionBounds();
 
-      // Convert base image to data URL for preview
+      // Preview as a blob: URL — see canvasToPreviewUrl (avoids toDataURL).
       const baseCanvas = document.createElement('canvas');
       baseCanvas.width = baseImg.naturalWidth || baseImg.width;
       baseCanvas.height = baseImg.naturalHeight || baseImg.height;
       baseCanvas.getContext('2d').drawImage(baseImg, 0, 0);
 
       return {
-        image: baseCanvas.toDataURL('image/png'),
+        image: await canvasToPreviewUrl(baseCanvas),
         regions: regionBounds,
         pages: pages.map(p => p.filename),
         regionPages: _getRegionPageMap(),
@@ -564,6 +583,13 @@ export const AtlasAPI = {
 
   exit_modify_mode() {
     if (_session) _session.clearModifyState();
+    _clearPreviewMemo();
+  },
+
+  /** Called by setPreviewSrc when it revokes a blob: URL that get_preview
+   *  may still be memoizing — otherwise Edit→View serves a dead blob. */
+  forget_preview_url(url) {
+    _forgetPreviewMemoUrl(url);
   },
 
   /**
@@ -591,7 +617,7 @@ export const AtlasAPI = {
         canvas.height = baseImg.naturalHeight || baseImg.height;
         canvas.getContext('2d').drawImage(baseImg, 0, 0);
       }
-      return { image: canvas.toDataURL('image/png'), activePage: pageFilename };
+      return { image: await canvasToPreviewUrl(canvas), activePage: pageFilename };
     } catch (e) {
       console.error('get_modify_page_preview error:', e);
       return null;
@@ -624,9 +650,10 @@ export const AtlasAPI = {
     if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
       const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
       if (!path) return null;
-      // fetch(file://) instead of read_file_as_base64 -- see
-      // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
-      file = await platform.loadFileAsFile(path);
+      // Pass a file:// URL straight to process_mod_image — Image() loads
+      // it directly (no fetch→File copy, no toDataURL). Same trick as
+      // applyNativeModImageDrop (perf fix, 2026-08-23).
+      file = pathToFileUrl(path);
     } else {
       const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
       if (files.length === 0) return null;

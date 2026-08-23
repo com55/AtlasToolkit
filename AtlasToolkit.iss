@@ -9,7 +9,6 @@
 #define MyAppName "AtlasToolkit"
 #define MyAppExeName "AtlasToolkit.exe"
 #define MyAppProgId "AtlasToolkit.atlas"
-#define MyAppMutex "AtlasToolkitSingleInstanceMutex"
 #define MyAppPublisher "com55"
 #define MyAppURL "https://github.com/com55/AtlasToolkit"
 
