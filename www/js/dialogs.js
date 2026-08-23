@@ -1,4 +1,4 @@
-import { isTouchDevice, fileMatchesAccept } from './platform.js';
+import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile } from './platform.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -69,7 +69,7 @@ export function showToast(message, type = 'info') {
     toast.offsetHeight;
     toast.style.animation = 'fadeOut 0.5s ease-out forwards';
     toast.addEventListener('animationend', () => toast.remove());
-  }, 3000);
+  }, 5000); // matches the old Python engine's ui/js/ui.js (parity fix, 2026-08-23)
 }
 
 const IMAGE_ACCEPT = 'image/png,.png';
@@ -114,7 +114,47 @@ export function formatSelectedImageLabel(file, pageName) {
   return rawName;
 }
 
-export function showMissingAtlasImagesDialog(missingPages) {
+/** Row currently under (clientX, clientY) — used both by pointer-based native
+ * drag-hover feedback and by `applyMissingImageDrop` below. */
+function missingImageRowAt(clientX, clientY) {
+  if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
+  const el = document.elementFromPoint(clientX, clientY);
+  return el ? el.closest('.missing-images-row') : null;
+}
+
+/**
+ * Set while the missing-images dialog is open — lets `applyMissingImageDrop`
+ * (called from Python for native OS drops, see bridge.py's on_drop) resolve a
+ * dropped page image without the dialog needing to expose its whole closure.
+ * Mirrors the old Python engine's `ui/js/missing-images.js` `_missingDialogState`.
+ */
+let _missingDialogState = null;
+
+/**
+ * Called from Python (`bridge.py`'s on_drop) when a PNG is natively dropped
+ * while this dialog is open — native OS drops never carry readable bytes
+ * client-side (only `pywebviewFullPath` on the Python side), so the row's own
+ * browser-side `drop` handler below intentionally no-ops under pywebview and
+ * defers here instead (parity fix, 2026-08-23; old app: `applyMissingImageDrop`).
+ */
+window.applyMissingImageDrop = async function (path, clientX, clientY) {
+  if (!_missingDialogState || !path || !/\.png$/i.test(path)) return false;
+  const row = missingImageRowAt(clientX, clientY);
+  if (!row) return false;
+  const pageName = row.dataset.pageName;
+  if (!pageName) return false;
+  try {
+    const info = await window.pywebview.api.read_file_as_base64(path);
+    const file = base64ToFile(info.base64, info.name, 'image/png');
+    _missingDialogState.applySelection(pageName, file);
+    return true;
+  } catch (e) {
+    console.error('applyMissingImageDrop error:', e);
+    return false;
+  }
+};
+
+export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
   return new Promise((resolve) => {
     const pages = Array.from(new Set((missingPages || []).filter(Boolean)));
     if (pages.length === 0) { resolve({}); return; }
@@ -164,6 +204,7 @@ export function showMissingAtlasImagesDialog(missingPages) {
     for (const pageName of pages) {
       const row = document.createElement('div');
       row.className = 'missing-images-row';
+      row.dataset.pageName = pageName; // read by applyMissingImageDrop's elementFromPoint lookup
 
       const pageEl = document.createElement('div');
       pageEl.className = 'missing-images-page';
@@ -178,6 +219,20 @@ export function showMissingAtlasImagesDialog(missingPages) {
       actionBtn.type = 'button';
       actionBtn.innerText = 'Add image';
       actionBtn.addEventListener('click', async () => {
+        // pywebview: native Open dialog at the atlas's own folder, matching
+        // the old Python engine's pick_page_image() call (parity fix,
+        // 2026-08-23) — a plain <input type=file> can't set a starting dir.
+        if (isPywebviewDesktop() && window.pywebview.api.pick_page_image) {
+          try {
+            const path = await window.pywebview.api.pick_page_image(pageName, atlasDir || '');
+            if (!path) return;
+            const info = await window.pywebview.api.read_file_as_base64(path);
+            applySelection(pageName, base64ToFile(info.base64, info.name, 'image/png'));
+          } catch (e) {
+            console.error('pick_page_image error:', e);
+          }
+          return;
+        }
         const file = await pickSingleImageFile();
         if (file) applySelection(pageName, file);
       });
@@ -198,6 +253,11 @@ export function showMissingAtlasImagesDialog(missingPages) {
         e.preventDefault();
         e.stopPropagation();
         row.classList.remove('drag-over');
+        // Native OS drops under pywebview carry a File with no readable bytes
+        // client-side — bridge.py's on_drop calls window.applyMissingImageDrop
+        // (above) with the real path instead. Only handle the drop here for a
+        // genuine in-browser drag (File System-backed FileList).
+        if (isPywebviewDesktop()) return;
         const file = Array.from(e.dataTransfer?.files || []).find(isPngFile);
         if (file) applySelection(pageName, file);
       });
@@ -210,6 +270,8 @@ export function showMissingAtlasImagesDialog(missingPages) {
       statusByPage.set(pageName, statusEl);
       btnByPage.set(pageName, actionBtn);
     }
+
+    _missingDialogState = { rowByPage, applySelection };
 
     // Backdrop: swallow stray drag events so they never reach drop.js's
     // global window-level listeners while this dialog is open.
@@ -227,12 +289,15 @@ export function showMissingAtlasImagesDialog(missingPages) {
     const confirmBtn = document.createElement('button');
     confirmBtn.className = 'btn-primary';
     confirmBtn.type = 'button';
-    confirmBtn.innerText = 'Load atlas';
+    confirmBtn.innerText = 'Load'; // matches old Python engine's ui/js/missing-images.js
     confirmBtn.disabled = true;
 
     const close = (result) => {
       window.removeEventListener('keydown', onKeyDown);
       delete document.body.dataset.missingDialogOpen;
+      _missingDialogState = null;
+      const dropOverlay = document.getElementById('drop-overlay');
+      if (dropOverlay) dropOverlay.style.pointerEvents = '';
       overlay.remove();
       resolve(result);
     };
@@ -258,6 +323,15 @@ export function showMissingAtlasImagesDialog(missingPages) {
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     document.body.dataset.missingDialogOpen = 'true';
+    // Force-hide any drop-overlay left showing mid-drag (old app did the same
+    // in ui/js/missing-images.js) — belt-and-suspenders alongside drop.js's
+    // own missingDialogOpen check, since a drag that started just before this
+    // dialog opened could otherwise leave the overlay visible on top of it.
+    const dropOverlay = document.getElementById('drop-overlay');
+    if (dropOverlay) {
+      dropOverlay.classList.add('hidden');
+      dropOverlay.style.pointerEvents = 'none';
+    }
 
     window.addEventListener('keydown', onKeyDown);
     updateConfirmState();

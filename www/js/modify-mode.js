@@ -35,7 +35,7 @@ export function setMode(mode) {
     modifyControls.classList.remove('hidden');
     repackOptions.classList.remove('hidden');
     saveModBtn.classList.remove('hidden');
-    dropMsg.textContent = 'Drop image to edit, or .atlas to load';
+    dropMsg.textContent = 'Drop image to modify, or .atlas to load'; // matches old Python engine's ui/js/mode.js
   } else {
     extractControls.classList.remove('hidden');
     modifyControls.classList.add('hidden');
@@ -82,24 +82,24 @@ export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
-      const statusMsg = (Array.isArray(data.pages) && data.pages.length > 1)
-        ? 'Multi-page atlas — select regions and click Modify Selected.'
-        : 'Select regions and click Modify Selected.';
-      applyModifyView(data, statusMsg);
+      // Same status regardless of page count, matching old Python engine's
+      // ui/js/mode.js exactly (parity fix, 2026-08-23).
+      applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
     } else {
       showToast('Load an atlas first.', 'error');
     }
   } catch (e) {
     console.error(e);
-    showToast('Failed to enter edit mode.', 'error');
+    showToast('Failed to enter modify mode.', 'error'); // matches old ui/js/mode.js
   }
 }
 
 export async function exitEditMode() {
   if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
-      'You have unsaved atlas modifications. Continue and discard them?',
+      // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
+      'You have unsaved atlas modifications.\nContinue and discard them?',
       'Discard modifications?',
     );
     if (!ok) return;
@@ -124,7 +124,8 @@ export async function exitEditMode() {
 export async function resetModify() {
   if (!state.hasModImage) return;
   const ok = await showConfirm(
-    'Discard all modifications and restore the original atlas?',
+    // matches old Python engine's ui/js/ui.js RESET_MOD_MESSAGE exactly
+    'Reset all modifications and restore the original atlas preview?',
     'Reset modifications?',
   );
   if (!ok) return;
@@ -132,7 +133,7 @@ export async function resetModify() {
     // enter_modify_mode clears the batch list and returns a pristine view.
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
-      applyModifyView(data, 'Select regions and click Modify Selected.');
+      applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
       showToast('Modifications reset.', 'success');
     } else {
@@ -146,7 +147,7 @@ export async function resetModify() {
 
 export async function ReplaceSelected() {
   const names = getSelectedNames();
-  if (names.length === 0) { showToast('Select at least one region to edit.', 'error'); return; }
+  if (names.length === 0) { showToast('Select at least one region to modify.', 'error'); return; } // matches old ui/js/modify.js
   try {
     setStatus('Selecting mod image...');
     const repack = document.getElementById('chk-repack').checked;
@@ -188,10 +189,9 @@ export async function onModPreviewReceived(data) {
     const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
-    const statusMsg = data.pageCount > 1
-      ? `Merged across ${data.pageCount} pages. Ready to save.`
-      : `Merged preview (${imgW}x${imgH}). Ready to save.`;
-    setStatus(statusMsg);
+    // Always the WxH form, regardless of page count — matches old Python
+    // engine's ui/js/modify.js exactly (parity fix, 2026-08-23).
+    setStatus(`Merged preview (${imgW}x${imgH}). Ready to save.`);
     const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
     if (fitScale !== null) {
       state.viewState.scale = fitScale;

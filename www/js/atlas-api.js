@@ -307,7 +307,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
       let selectedByPage = null;
 
       if (typeof window !== 'undefined' && typeof window.showMissingAtlasImages === 'function') {
-        selectedByPage = await window.showMissingAtlasImages(missingPages);
+        selectedByPage = await window.showMissingAtlasImages(missingPages, sourceDir);
       } else {
         const proceed = await _confirmDialog(
           `Missing image files for atlas pages:\n${missingPages.map(pageName => `- ${pageName}`).join('\n')}`,
@@ -676,8 +676,14 @@ export const AtlasAPI = {
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs);
         _session.markSaved();
-        const fileNames = outputs.map(o => o.name).join(', ');
-        return `Saved to selected folder: ${fileNames}`;
+        // Matches old Python engine's bridge.py save_merged_to() exactly
+        // (`f"Saved to: {result[0]}"`) when a real path is available
+        // (pywebview: folder is a plain string; browser: a
+        // FileSystemDirectoryHandle never exposes a full path) — parity fix,
+        // 2026-08-23.
+        return typeof folder === 'string'
+          ? `Saved to: ${folder}`
+          : 'Saved to selected folder.';
       }
 
       // Browser tab: bundle all outputs into a single zip download.

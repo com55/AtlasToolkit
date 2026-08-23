@@ -28,7 +28,8 @@ async function processDroppedFiles(files) {
   // edit session would discard unsaved modifications — confirm first.
   if (hasNonImage && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
-      'You have unsaved atlas modifications. Load a new atlas and discard them?',
+      // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
+      'You have unsaved atlas modifications.\nContinue and discard them?',
       'Discard modifications?',
     );
     if (!ok) return;
@@ -125,16 +126,54 @@ previewContainer.addEventListener('contextmenu', (e) => {
 window.addEventListener('click', () => contextMenu.classList.add('hidden'));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') contextMenu.classList.add('hidden'); });
 
+/**
+ * Read back the PNG bytes actually behind the visible <img> instead of
+ * re-encoding via canvas.toBlob() — a canvas round-trip softens edges
+ * (port of old Python engine's ui/js/preview.js getPreviewPngBlob(); the old
+ * app avoided this by writing the PIL-generated PNG directly). previewImg.src
+ * is always a data: URL here, so fetch() resolves it synchronously with no
+ * network I/O. Falls back to a canvas capture only if that somehow fails.
+ */
+async function getPreviewPngBlob() {
+  const img = previewImg;
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+
+  if (img.src) {
+    try {
+      const response = await fetch(img.src);
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob && blob.size > 0) return blob;
+      }
+    } catch (e) {
+      console.warn('fetch preview PNG failed, using canvas fallback', e);
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+/** Port of old Python engine's ui/js/extract.js previewSaveDefaultName(). */
+function previewSaveDefaultName(names) {
+  if (!names || names.length === 0) return 'image.png';
+  const safe = names.map(n => String(n).replace(/[<>:"/\\|?*]/g, '_'));
+  if (safe.length === 1) return `${safe[0]}.png`;
+  if (safe.length <= 5) return `${safe.join('+')}.png`;
+  const more = safe.length - 5;
+  return `${safe.slice(0, 5).join('+')}+ ${more} more.png`;
+}
+
 export async function copyPreviewImage() {
   contextMenu.classList.add('hidden');
   try {
-    if (!previewImg.naturalWidth) { showToast('No image to copy.', 'error'); return; }
-    const canvas = document.createElement('canvas');
-    canvas.width  = previewImg.naturalWidth;
-    canvas.height = previewImg.naturalHeight;
-    canvas.getContext('2d').drawImage(previewImg, 0, 0);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) { showToast('Failed to copy image.', 'error'); return; }
+    const blob = await getPreviewPngBlob();
+    if (!blob) { showToast('No image to copy.', 'error'); return; }
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     showToast('Image copied to clipboard.', 'success');
   } catch (e) {
@@ -146,20 +185,10 @@ export async function copyPreviewImage() {
 export async function savePreviewImageAs() {
   contextMenu.classList.add('hidden');
   try {
-    if (!previewImg.naturalWidth) { showToast('No image to save.', 'error'); return; }
-    const canvas = document.createElement('canvas');
-    canvas.width  = previewImg.naturalWidth;
-    canvas.height = previewImg.naturalHeight;
-    canvas.getContext('2d').drawImage(previewImg, 0, 0);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) { showToast('Failed to save image.', 'error'); return; }
+    const blob = await getPreviewPngBlob();
+    if (!blob) { showToast('Error: No image to save.', 'error'); return; }
 
-    const selectedNames  = getSelectedNames();
-    const rawPageName    = selectedNames.length > 0 ? AtlasAPI.get_region_page_name(selectedNames[0]) : '';
-    const sanitize       = (v) => String(v || '').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_').trim().replace(/\s+/g, '-');
-    const pageName       = sanitize(rawPageName) || 'page';
-    const regionsJoined  = selectedNames.map(sanitize).filter(Boolean).join('-') || 'preview';
-    const filename       = `${pageName}_${regionsJoined}.png`;
+    const filename = previewSaveDefaultName(getSelectedNames());
 
     // platform.js branches browser (File System Access API) vs pywebview
     // (native save dialog + write_file_bytes) — see D1's revised split.
@@ -169,7 +198,7 @@ export async function savePreviewImageAs() {
         defaultDir: AtlasAPI.get_current_atlas_directory(),
       });
       if (saved) { showToast('Image saved.', 'success'); return; }
-      showToast('Save cancelled.', 'info');
+      showToast('Cancelled', 'info'); // matches old ui/js/extract.js's "Cancelled"
       return;
     }
 
