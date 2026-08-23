@@ -10,6 +10,7 @@ export const state = {
   modifyPages: [],
   modifyRegionPages: {},
   modifyActivePage: null,
+  modifyActivePageIndex: 0,
   viewState: { scale: 1, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
 };
 

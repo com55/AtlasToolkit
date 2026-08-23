@@ -59,6 +59,7 @@ export function drawRegionOverlay() {
   canvas.height = containerH * dpr;
   canvas.style.width  = containerW + 'px';
   canvas.style.height = containerH + 'px';
+  canvas.style.pointerEvents = 'none';
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, containerW, containerH);
   if (state.currentMode !== 'modify' || state.selectedIndices.size === 0) return;
@@ -176,7 +177,7 @@ export function updateSaveMergedButton() {
 }
 
 // ─── Pan & Zoom ───────────────────────────────────────────────────────────────
-previewContainer.addEventListener('wheel', (e) => {
+function onPreviewWheel(e) {
   e.preventDefault();
   const direction = -Math.sign(e.deltaY);
   const newScale = state.viewState.scale + direction * 0.1 * state.viewState.scale;
@@ -189,7 +190,12 @@ previewContainer.addEventListener('wheel', (e) => {
     state.viewState.scale = newScale;
     applyTransform();
   }
-});
+}
+// {passive:false} so preventDefault actually stops WebView2/page scroll.
+// Also listen on the img — a full-page merge (no-repack) leaves a huge
+// intrinsic box and some engines deliver wheel there, not the container.
+previewContainer.addEventListener('wheel', onPreviewWheel, { passive: false });
+previewImg.addEventListener('wheel', onPreviewWheel, { passive: false });
 
 previewContainer.addEventListener('mousedown', (e) => {
   if (e.button !== 0 && e.button !== 1) return;

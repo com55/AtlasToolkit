@@ -6,9 +6,13 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor, canvasToPreviewUrl } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
+import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
+
+/** Returned by load helpers when the user cancels a missing-images dialog. */
+export const LOAD_CANCELLED = 'cancelled';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -327,17 +331,17 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
           `Missing image files for atlas pages:\n${missingPages.map(pageName => `- ${pageName}`).join('\n')}`,
           'Missing Atlas Page Images'
         );
-        if (!proceed) return false;
+        if (!proceed) return LOAD_CANCELLED;
 
         selectedByPage = {};
         for (const pageName of missingPages) {
           const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
-          if (files.length === 0) return false;
+          if (files.length === 0) return LOAD_CANCELLED;
           selectedByPage[pageName] = files[0];
         }
       }
 
-      if (!selectedByPage) return false;
+      if (!selectedByPage) return LOAD_CANCELLED;
 
       for (const pageName of missingPages) {
         const chosenFile = selectedByPage[pageName];
@@ -388,22 +392,50 @@ export const AtlasAPI = {
    */
   async choose_file() {
     if (isPywebviewDesktop() && window.pywebview.api.pick_atlas_file) {
-      const path = await window.pywebview.api.pick_atlas_file();
+      const picked = await window.pywebview.api.pick_atlas_file();
+      const path = Array.isArray(picked) ? picked[0] : picked;
       if (!path) return false;
       try {
-        // Atlas text is small (plain text, typically a few KB) -- base64 is
-        // fine there. Sibling PNGs are not -- see platform.loadFileAsFile's
-        // doc comment for why those go through fetch(file://) instead.
         const atlasInfo = await window.pywebview.api.read_file_as_base64(path);
-        const imagePaths = await window.pywebview.api.list_sibling_page_images(path);
         const atlasFile = base64ToFile(atlasInfo.base64, atlasInfo.name, 'text/plain');
+        const dir = _dirnameOf(String(path));
         const imageFileMap = {};
-        for (const [name, imgPath] of Object.entries(imagePaths || {})) {
-          imageFileMap[name] = await platform.loadFileAsFile(imgPath);
+        // Resolve each atlas page line against the .atlas folder — same rule
+        // as Python session.resolve_page_images (drag/CLI). Do not depend on
+        // list_sibling_page_images's js_api dict (Open was showing missing
+        // even when siblings existed, 2026-08-24). Image() loads file://
+        // directly, same as native mod-image drop.
+        let resolved = {};
+        let resolverUsed = false;
+        if (window.pywebview.api.resolve_sibling_page_images) {
+          resolverUsed = true;
+          const pairs = await window.pywebview.api.resolve_sibling_page_images(path);
+          if (Array.isArray(pairs)) {
+            for (const row of pairs) {
+              if (row && row.name && row.path) resolved[row.name] = row.path;
+            }
+          } else if (pairs && typeof pairs === 'object') {
+            resolved = pairs;
+          }
         }
-        return _loadAtlasFiles(atlasFile, imageFileMap, _dirnameOf(path));
+        if (!resolverUsed) {
+          // Older bridge without the exists()-checked resolver: try dirname
+          // + page line. Do not do this after an empty resolver result —
+          // missing files must stay out of the map so the missing-images
+          // dialog still appears.
+          for (const pageName of _extractRequiredPages(autoConvertAtlas(await _readFileAsText(atlasFile)))) {
+            resolved[pageName] = joinNativePath(dir, pageName);
+          }
+        }
+        for (const [pageName, imgPath] of Object.entries(resolved)) {
+          if (imgPath) imageFileMap[pageName] = pathToFileUrl(imgPath);
+        }
+        return _loadAtlasFiles(atlasFile, imageFileMap, dir);
       } catch (e) {
         console.error('choose_file (pywebview) error:', e);
+        if (typeof window.showToast === 'function') {
+          window.showToast(`Failed to load atlas file: ${e.message || e}`, 'error');
+        }
         return false;
       }
     }
@@ -593,31 +625,29 @@ export const AtlasAPI = {
   },
 
   /**
-   * Preview data for a single atlas page, for the multi-page switcher. Prefers
-   * the current merged/repacked page image (`_session.getActivePageCanvas`) so
-   * mods already applied to that page stay visible when navigating away and
-   * back — falls back to the pristine page (reusing _processor.getPageImage)
-   * before any mod has been applied yet. Region overlay filtering by page is
-   * done client-side (state.modifyRegionPages), so this only shapes the image.
-   * @param {string} pageFilename
-   * @returns {Promise<{image: string, activePage: string}|null>}
+   * Preview data for one atlas page. Accepts a 0-based index (old Python
+   * `get_modify_page_image(index)`) or a page filename. Prefers the merged
+   * slot at that index once mods exist.
+   * @param {number|string} pageFilenameOrIndex
+   * @returns {Promise<{image: string, activePage: string, activeIndex: number}|null>}
    */
-  async get_modify_page_preview(pageFilename) {
-    if (!_processor || !pageFilename) return null;
+  async get_modify_page_preview(pageFilenameOrIndex) {
+    if (!_processor || !_session) return null;
     try {
-      const activeCanvas = _session ? _session.getActivePageCanvas(pageFilename) : null;
-      let canvas;
-      if (activeCanvas) {
-        canvas = activeCanvas;
-      } else {
-        const baseImg = _processor.getPageImage(pageFilename);
-        if (!baseImg) return null;
-        canvas = document.createElement('canvas');
-        canvas.width = baseImg.naturalWidth || baseImg.width;
-        canvas.height = baseImg.naturalHeight || baseImg.height;
-        canvas.getContext('2d').drawImage(baseImg, 0, 0);
+      let index = pageFilenameOrIndex;
+      if (typeof pageFilenameOrIndex === 'string') {
+        index = _session.processor.pages.findIndex(p => p.filename === pageFilenameOrIndex);
+        if (index < 0 && _session.active && _session.active.text) {
+          index = AtlasDocument.parse(_session.active.text).pageFilenames()
+            .indexOf(pageFilenameOrIndex);
+        }
       }
-      return { image: await canvasToPreviewUrl(canvas), activePage: pageFilename };
+      index = Number(index);
+      if (!Number.isInteger(index) || index < 0) return null;
+      const canvas = _session.getModifyPageImage(index);
+      if (!canvas) return null;
+      const activePage = (_session.processor.pages[index] || {}).filename || String(pageFilenameOrIndex);
+      return { image: await canvasToPreviewUrl(canvas), activePage, activeIndex: index };
     } catch (e) {
       console.error('get_modify_page_preview error:', e);
       return null;
@@ -685,15 +715,14 @@ export const AtlasAPI = {
       const outputs = [];
 
       if (merged.pages && merged.pages.length > 0) {
+        const pageNames = pngNamesForSave(merged.text, merged.pages.length, _currentAtlasFilename);
         for (let i = 0; i < merged.pages.length; i++) {
-          const pageName = (_processor && _processor.pages[i])
-            ? _processor.pages[i].filename
-            : `page${i}.png`;
-          outputs.push({ name: pageName, data: await _canvasToBlob(merged.pages[i]) });
+          if (!merged.pages[i]) continue;
+          outputs.push({ name: pageNames[i], data: await _canvasToBlob(merged.pages[i]) });
         }
       } else if (merged.canvas) {
-        const base = _currentAtlasFilename.replace(/\.[^.]+$/, '');
-        outputs.push({ name: `${base}.png`, data: await _canvasToBlob(merged.canvas) });
+        const pageName = pngNamesForSave(merged.text, 1, _currentAtlasFilename)[0];
+        outputs.push({ name: pageName, data: await _canvasToBlob(merged.canvas) });
       } else {
         return 'Error: No merged data to save.';
       }

@@ -1,4 +1,4 @@
-import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile } from './platform.js';
+import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -58,18 +58,31 @@ export function showAlert(message, title = 'Notice') {
   });
 }
 
+/** Visible time for a toast: 3s, stretched for long copy, capped at 8s. */
+export function toastDurationMs(message) {
+  const len = String(message || '').length;
+  if (len <= 48) return 3000;
+  return Math.min(8000, 3000 + (len - 48) * 40);
+}
+
 export function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
+  if (!container) return;
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.innerText = message;
   container.appendChild(toast);
+  // Pin the post-slideIn state before clearing the animation — otherwise
+  // `animation: none` snaps back to `.toast { opacity: 0 }` and fadeOut
+  // plays from invisible to invisible (old ui/js/ui.js did this).
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateY(0)';
   setTimeout(() => {
     toast.style.animation = 'none';
     toast.offsetHeight;
     toast.style.animation = 'fadeOut 0.5s ease-out forwards';
     toast.addEventListener('animationend', () => toast.remove());
-  }, 5000); // matches the old Python engine's ui/js/ui.js (parity fix, 2026-08-23)
+  }, toastDurationMs(message));
 }
 
 const IMAGE_ACCEPT = 'image/png,.png';
@@ -117,8 +130,10 @@ export function formatSelectedImageLabel(file, pageName) {
 /** Row currently under (clientX, clientY) — used both by pointer-based native
  * drag-hover feedback and by `applyMissingImageDrop` below. */
 function missingImageRowAt(clientX, clientY) {
-  if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
-  const el = document.elementFromPoint(clientX, clientY);
+  const x = Number(clientX);
+  const y = Number(clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const el = document.elementFromPoint(x, y);
   return el ? el.closest('.missing-images-row') : null;
 }
 
@@ -137,9 +152,23 @@ let _missingDialogState = null;
  * browser-side `drop` handler below intentionally no-ops under pywebview and
  * defers here instead (parity fix, 2026-08-23; old app: `applyMissingImageDrop`).
  */
-window.applyMissingImageDrop = async function (path, clientX, clientY) {
+function isMissingDialogOpen() {
+  return typeof document !== 'undefined'
+    && document.body?.dataset?.missingDialogOpen === 'true';
+}
+
+async function applyMissingImageDrop(path, clientX, clientY) {
   if (!_missingDialogState || !path || !/\.png$/i.test(path)) return false;
-  const row = missingImageRowAt(clientX, clientY);
+  let row = missingImageRowAt(clientX, clientY);
+  if (!row && _missingDialogState.rowByPage) {
+    const pageNames = [..._missingDialogState.rowByPage.keys()];
+    const matched = matchDroppedPngToPage(path, pageNames);
+    if (matched) row = _missingDialogState.rowByPage.get(matched);
+    else {
+      const empty = pageNames.find((n) => !_missingDialogState.selectedByPage?.[n]);
+      row = _missingDialogState.rowByPage.get(empty || pageNames[0]);
+    }
+  }
   if (!row) return false;
   const pageName = row.dataset.pageName;
   if (!pageName) return false;
@@ -153,7 +182,12 @@ window.applyMissingImageDrop = async function (path, clientX, clientY) {
     console.error('applyMissingImageDrop error:', e);
     return false;
   }
-};
+}
+
+if (typeof window !== 'undefined') {
+  window.isMissingDialogOpen = isMissingDialogOpen;
+  window.applyMissingImageDrop = applyMissingImageDrop;
+}
 
 export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
   return new Promise((resolve) => {
@@ -273,7 +307,7 @@ export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
       btnByPage.set(pageName, actionBtn);
     }
 
-    _missingDialogState = { rowByPage, applySelection };
+    _missingDialogState = { rowByPage, applySelection, selectedByPage };
 
     // Backdrop: swallow stray drag events so they never reach drop.js's
     // global window-level listeners while this dialog is open.

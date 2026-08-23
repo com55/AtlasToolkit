@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v27';
+const CACHE_NAME = 'atlas-toolkit-v29';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
