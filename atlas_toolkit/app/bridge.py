@@ -300,6 +300,8 @@ class Api:
             )
 
         if len(sys.argv) > 1 and sys.argv[1].endswith(".atlas"):
+            if not self._confirm_discard_modifications():
+                return False
             return self._open_atlas_path_native(sys.argv[1])
         return False
 
@@ -621,6 +623,16 @@ class Api:
                 return
 
             if path_lower.endswith(".atlas"):
+                # Native drops bypass script.js's openFile() entirely (that's
+                # the JS-only "Open" button's own guard), so loading a new
+                # atlas here would silently discard unsaved modifications
+                # with no confirmation — regression found via user testing,
+                # 2026-08-23. Mirror openFile()'s check: this call is safe to
+                # make synchronously here (unlike on_closing) because DOM drop
+                # events already run off the main GUI thread, same as any
+                # other js_api-bound bridge method.
+                if not self._confirm_discard_modifications():
+                    return
                 self._open_atlas_path_native(path)
             elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                 self._handle_image_drop(path)
