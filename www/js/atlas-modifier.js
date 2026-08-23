@@ -328,9 +328,25 @@ function _shelfPack(items) {
 
 async function _canvasHash(canvas) {
   const ctx = canvas.getContext('2d');
+  // Priming read + copy-before-digest — see 2026-08-23 investigation (real-world
+  // repro: two selected regions ("CH0355"/"CH0355C") sharing ONE literal canvas
+  // object via a shared-canvas mod). Empirically, when a large (multi-megapixel,
+  // photographic, non-solid-color) canvas is read via getImageData() for the
+  // FIRST time since it was last drawn to, and that raw data.buffer is fed
+  // straight into crypto.subtle.digest(), Chromium can return a WRONG digest —
+  // NOT reproducible with the same content on the 2nd+ read/digest of the same
+  // canvas (those are stable and match each other). A byte-for-byte compare of
+  // two consecutive getImageData() reads showed zero differences, so the bug is
+  // in the GPU-canvas → digest() pipeline, not the pixel data itself. This is
+  // why the earlier synthetic dedup tests (solid-fill canvases) never caught
+  // it, and why dedup silently failed for real sprite art sharing a canvas.
+  // Fix: do one throwaway priming getImageData() read to force materialization,
+  // then read again for the real hash, and copy into a fresh exactly-sized
+  // Uint8Array (not the live ImageData's own .buffer) before digesting.
+  ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   try {
-    const buf = await crypto.subtle.digest('SHA-256', data.buffer);
+    const buf = await crypto.subtle.digest('SHA-256', new Uint8Array(data).buffer);
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
   } catch (_) {
     // Fallback: djb2
