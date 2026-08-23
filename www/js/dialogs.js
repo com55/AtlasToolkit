@@ -1,4 +1,4 @@
-import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile } from './platform.js';
+import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile } from './platform.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -144,8 +144,9 @@ window.applyMissingImageDrop = async function (path, clientX, clientY) {
   const pageName = row.dataset.pageName;
   if (!pageName) return false;
   try {
-    const info = await window.pywebview.api.read_file_as_base64(path);
-    const file = base64ToFile(info.base64, info.name, 'image/png');
+    // fetch(file://) instead of read_file_as_base64 -- see
+    // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
+    const file = await loadFileAsFile(path);
     _missingDialogState.applySelection(pageName, file);
     return true;
   } catch (e) {
@@ -226,8 +227,9 @@ export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
           try {
             const path = await window.pywebview.api.pick_page_image(pageName, atlasDir || '');
             if (!path) return;
-            const info = await window.pywebview.api.read_file_as_base64(path);
-            applySelection(pageName, base64ToFile(info.base64, info.name, 'image/png'));
+            // fetch(file://) instead of read_file_as_base64 -- see
+            // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
+            applySelection(pageName, await loadFileAsFile(path));
           } catch (e) {
             console.error('pick_page_image error:', e);
           }
