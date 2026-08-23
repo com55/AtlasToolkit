@@ -563,6 +563,15 @@ export const AtlasAPI = {
     return !!_session && _session.hasPendingModifications();
   },
 
+  /** Names of regions touched by any pending mod batch — old Python engine's
+   * `AtlasSession.modified_regions` property, used by region-list.js to render
+   * the bold-green "name*" highlight it had. Mirrors `moddedSprites`, which
+   * (like Python's `modded_sprites` dict) persists across repack toggles and
+   * accumulates across every mod apply, not just the latest. */
+  get_modified_region_names() {
+    return _session ? Object.keys(_session.moddedSprites) : [];
+  },
+
   /** Pick a mod PNG and process it. */
   async select_mod_image(selectedNames, repack = false) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
