@@ -27,6 +27,15 @@ log = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".png"}
 
 
+def _dialog_first_path(result: Any) -> Optional[str]:
+    """Normalize create_file_dialog's return (tuple/list/str/None) to one path."""
+    if not result:
+        return None
+    if isinstance(result, (list, tuple)):
+        return str(result[0]) if result else None
+    return str(result)
+
+
 def _modify_view_to_payload(
     view: ModifyViewData, cache: PreviewCache
 ) -> dict[str, object]:
@@ -83,6 +92,108 @@ class Api:
     def set_window(self, window: webview.Window) -> None:
         self._window = window
 
+    def _native_hwnd(self) -> int | None:
+        window = self._window
+        if not window or sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+
+            native = getattr(window, "native", None)
+            handle = getattr(native, "Handle", None) if native is not None else None
+            if handle is None:
+                return None
+            hwnd = int(handle)
+            root = ctypes.windll.user32.GetAncestor(hwnd, 2)  # GA_ROOT
+            return int(root) if root else hwnd
+        except Exception:
+            return None
+
+    def _raise_window(self, *, pin: bool = False) -> None:
+        """Bring the app in front of other windows so an in-app confirm is
+        visible after the user clicks Close / Alt+F4 while another app is
+        focused (otherwise the vetoed close looks like a hang).
+
+        `pin=True` leaves the window topmost until `_unpin_window()`.
+        Explorer keeps the foreground lock, so dropping topmost (or any
+        later focus change, e.g. the confirm button) lets it cover us
+        again — stay pinned for the life of that modal."""
+        window = self._window
+        if not window:
+            return
+        try:
+            window.restore()
+        except Exception:
+            pass
+        try:
+            window.show()
+        except Exception:
+            pass
+        try:
+            window.on_top = True
+            if not pin:
+                window.on_top = False
+        except Exception:
+            pass
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            hwnd = self._native_hwnd()
+            if not hwnd:
+                return
+            user32 = ctypes.windll.user32
+            flags = 0x0001 | 0x0002 | 0x0040  # NOSIZE | NOMOVE | SHOWWINDOW
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)  # HWND_TOPMOST
+            if not pin:
+                user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)  # HWND_NOTOPMOST
+            user32.SetForegroundWindow(hwnd)
+        except Exception as e:
+            log.debug("bring-to-front failed: %s", e)
+
+    def _unpin_window(self) -> None:
+        """Drop the temporary always-on-top from `_raise_window(pin=True)`.
+
+        Call only after the user has clicked the in-app confirm — that
+        click gives us the foreground lock, so Explorer stays behind."""
+        window = self._window
+        if not window:
+            return
+        try:
+            window.on_top = False
+        except Exception:
+            pass
+        hwnd = self._native_hwnd()
+        if not hwnd:
+            return
+        try:
+            import ctypes
+
+            flags = 0x0001 | 0x0002 | 0x0040  # NOSIZE | NOMOVE | SHOWWINDOW
+            ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception as e:
+            log.debug("unpin window failed: %s", e)
+
+    def on_closed(self) -> None:
+        """`window.events.closed` — drop the handle so later evaluate_js /
+        destroy during teardown cannot hit a None native browser (FormClosed
+        NoneType in the release app, 2026-08-23)."""
+        self._window = None
+
+    def _hide_js_drop_overlay(self) -> None:
+        if not self._window:
+            return
+        try:
+            self._window.evaluate_js(
+                "var o=document.getElementById('drop-overlay');"
+                "if(o){o.classList.add('hidden');o.style.pointerEvents='none';}"
+            )
+        except Exception:
+            pass
+
     def get_pref(self, key: str, default: Any = None) -> Any:
         return self._config.get(key, default)
 
@@ -129,6 +240,27 @@ class Api:
             log.warning("Failed listing sibling images in %s: %s", parent, e)
         return images
 
+    def resolve_sibling_page_images(self, atlas_path: str) -> list[dict[str, str]]:
+        """Map each atlas page line to an on-disk sibling, if the file exists.
+
+        Returns a list of `{name, path}` (not a dict) so the js_api
+        serializer cannot drop keys. Used by the Open button — same rule as
+        `AtlasSession.resolve_page_images` that drag/CLI already used.
+        """
+        p = Path(atlas_path)
+        try:
+            content = p.read_text(encoding="utf-8")
+        except OSError as e:
+            log.warning("resolve_sibling_page_images read failed: %s", e)
+            return []
+        resolved = self._session.required_page_names(content)
+        out: list[dict[str, str]] = []
+        for name in resolved:
+            candidate = p.parent / name
+            if candidate.is_file():
+                out.append({"name": name, "path": str(candidate.resolve())})
+        return out
+
     def set_window_title(self, atlas_filename: str) -> None:
         """Update the native OS window title to reflect the loaded atlas —
         the old Python engine's `load_atlas` did this on every open; the new
@@ -156,7 +288,7 @@ class Api:
         result = self._window.create_file_dialog(
             webview.FileDialog.OPEN, allow_multiple=False, file_types=file_types
         )
-        return result[0] if result else None
+        return _dialog_first_path(result)
 
     def pick_mod_image(self, default_dir: str = "") -> Optional[str]:
         """Native single-file Open dialog for a mod PNG ("Modify Selected"),
@@ -223,18 +355,23 @@ class Api:
             log.warning("has_pending_modifications check failed: %s", e)
             pending = False
         if not pending:
+            self._unpin_window()
             return True
+        self._raise_window(pin=True)
         # In-app modal (www/js/dialogs.js showConfirm), not the OS native
         # MessageBox — user request 2026-08-23: confirmation dialogs should
         # match the rest of the www/ UI. Safe here because every caller
         # already runs off the GUI thread (on_closing's background thread,
         # on_drop / startup_check via js_api worker thread).
-        result = self._evaluate_js_promise(
-            "window.showConfirm("
-            "'You have unsaved atlas modifications.\\nContinue and discard them?', "
-            "'Discard modifications?')",
-            timeout=None,
-        )
+        try:
+            result = self._evaluate_js_promise(
+                "window.showConfirm("
+                "'You have unsaved atlas modifications.\\nContinue and discard them?', "
+                "'Discard modifications?')",
+                timeout=None,
+            )
+        finally:
+            self._unpin_window()
         return bool(result)
 
     def on_closing(self) -> bool:
@@ -248,6 +385,7 @@ class Api:
         confirms it's OK to close, `window.destroy()` closes it for real."""
         if self._closing_confirmed:
             return True
+        self._raise_window(pin=True)
         if not self._close_check_in_progress:
             self._close_check_in_progress = True
             threading.Thread(target=self._check_and_close, daemon=True).start()
@@ -258,9 +396,13 @@ class Api:
             proceed = self._confirm_discard_modifications()
         finally:
             self._close_check_in_progress = False
-        if proceed and self._window:
+        window = self._window
+        if proceed and window is not None:
             self._closing_confirmed = True
-            self._window.destroy()
+            try:
+                window.destroy()
+            except Exception as e:
+                log.warning("window.destroy failed: %s", e)
 
     def _evaluate_js_promise(
         self, script: str, timeout: float | None = 30.0
@@ -281,7 +423,8 @@ class Api:
         `timeout=None` waits indefinitely — required for in-app confirm
         modals where the user may sit on the dialog longer than 30s.
         """
-        if not self._window:
+        window = self._window
+        if not window:
             return None
         holder: dict[str, object] = {}
         done = threading.Event()
@@ -290,13 +433,17 @@ class Api:
             holder["value"] = value
             done.set()
 
-        self._window.evaluate_js(script, on_result)
+        try:
+            window.evaluate_js(script, on_result)
+        except Exception as e:
+            log.warning("evaluate_js failed: %s", e)
+            return None
         if not done.wait(timeout=timeout):
             log.warning("evaluate_js promise timed out: %s", script[:120])
             return None
         return holder.get("value")
 
-    def _open_atlas_path_native(self, path_str: str) -> bool:
+    def _open_atlas_path_native(self, path_str: str, via_drop: bool = False) -> bool:
         """Load an `.atlas` file opened via a native path (CLI arg, file
         association, or native drag-drop) into the JS engine."""
         if not self._window:
@@ -308,15 +455,26 @@ class Api:
             atlas_file = self.read_file_as_base64(path_str)
             image_paths = self.list_sibling_page_images(path_str)
             atlas_dir = str(Path(path_str).resolve().parent)
+            # timeout=None: missing-images dialog can sit open for minutes
+            # (30s default was logging a truncated-base64 warning and
+            # toasting Failed to load while the dialog was still up).
             result = self._evaluate_js_promise(
                 f"window.loadAtlasFromNative({json.dumps(atlas_file['base64'])}, "
                 f"{json.dumps(atlas_file['name'])}, {json.dumps(image_paths)}, "
-                f"{json.dumps(atlas_dir)})"
+                f"{json.dumps(atlas_dir)})",
+                timeout=None,
             )
+            if result == "cancelled":
+                self._window.evaluate_js("showToast('Cancelled', 'info')")
+                return False
             ok = bool(result)
             if not ok:
                 self._window.evaluate_js(
                     "showToast('Failed to load atlas file.', 'error')"
+                )
+            elif via_drop:
+                self._window.evaluate_js(
+                    "showToast('Atlas loaded via drag & drop.', 'success')"
                 )
             # Window title update happens centrally in script.js's
             # _resetUiAfterFreshLoad() (via set_window_title below), so it
@@ -326,7 +484,11 @@ class Api:
         except Exception as e:
             log.error("Native atlas open error: %s", e)
             msg = json.dumps(f"Error: {e}")
-            self._window.evaluate_js(f"showToast({msg}, 'error')")
+            if self._window:
+                try:
+                    self._window.evaluate_js(f"showToast({msg}, 'error')")
+                except Exception:
+                    pass
             return False
 
     def startup_check(self) -> bool:
@@ -371,14 +533,18 @@ class Api:
             return {"ok": False, "error": f"Failed to open URL: {e}"}
 
     def choose_file(self) -> bool:
+        """Unused by the JS Open button (that path is pick_atlas_file +
+        AtlasAPI.choose_file). Kept as a fallback that drives the JS engine
+        rather than the retired Python AtlasSession.load."""
         if not self._window:
             return False
         file_types = ("Atlas Files (*.atlas)", "All files (*.*)")
         result = self._window.create_file_dialog(
             webview.FileDialog.OPEN, allow_multiple=False, file_types=file_types
         )
-        if result:
-            return self.load_atlas(result[0])
+        path = _dialog_first_path(result)
+        if path:
+            return self._open_atlas_path_native(path)
         return False
 
     def pick_page_image(self, page_name: str, default_dir: str = "") -> Optional[str]:
@@ -389,7 +555,7 @@ class Api:
             webview.FileDialog.OPEN,
             allow_multiple=False,
             file_types=file_types,
-            directory=default_dir or None,
+            directory=default_dir or "",
         )
         if not result:
             return None
@@ -648,6 +814,7 @@ class Api:
             if not path or not self._window:
                 return
 
+            self._hide_js_drop_overlay()
             path_lower = path.lower()
 
             missing_open = self._window.evaluate_js(
@@ -659,15 +826,19 @@ class Api:
                 # missing-page dialog's own per-row `drop` handler no-ops
                 # under pywebview and defers to this instead — mirrors the
                 # old Python engine's applyMissingImageDrop() (parity fix,
-                # 2026-08-23). clientX/clientY come along on every DOM event
-                # pywebview forwards (standard MouseEvent properties), used
-                # here to figure out which row the file was dropped onto.
+                # 2026-08-23). clientX/clientY may be missing on some
+                # WebView2 drops; JS then matches the PNG filename to a row.
                 if path_lower.endswith(".png"):
                     client_x = e.get("clientX")
                     client_y = e.get("clientY")
-                    self._window.evaluate_js(
+                    if client_x is None:
+                        client_x = e.get("x")
+                    if client_y is None:
+                        client_y = e.get("y")
+                    self._evaluate_js_promise(
                         f"window.applyMissingImageDrop({json.dumps(path)}, "
-                        f"{json.dumps(client_x)}, {json.dumps(client_y)})"
+                        f"{json.dumps(client_x)}, {json.dumps(client_y)})",
+                        timeout=None,
                     )
                 return
 
@@ -682,7 +853,7 @@ class Api:
                 # other js_api-bound bridge method.
                 if not self._confirm_discard_modifications():
                     return
-                self._open_atlas_path_native(path)
+                self._open_atlas_path_native(path, via_drop=True)
             elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                 self._handle_image_drop(path)
             else:

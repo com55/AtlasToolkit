@@ -214,9 +214,14 @@ async function openFile() {
     const success = await AtlasAPI.choose_file();
     // Open lives in the always-visible app-bar left zone, so it can be
     // clicked mid-edit. The pending-mods guard above already handled discard.
+    if (success === 'cancelled') {
+      showToast('Cancelled', 'info');
+      return;
+    }
     if (success) await _resetUiAfterFreshLoad();
   } catch (e) {
     console.error(e);
+    showToast(`Open failed: ${e.message || e}`, 'error');
   }
 }
 
@@ -241,10 +246,14 @@ async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, at
     const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
     for (const [name, imgPath] of Object.entries(imagePathsMap || {})) {
-      imageFileMap[name] = await loadFileAsFile(imgPath);
+      try {
+        imageFileMap[name] = await loadFileAsFile(imgPath);
+      } catch (imgErr) {
+        console.warn('loadAtlasFromNative: sibling image unread, will prompt:', imgErr);
+      }
     }
     const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap, atlasDirectory || '');
-    if (ok) await _resetUiAfterFreshLoad();
+    if (ok === true) await _resetUiAfterFreshLoad();
     return ok;
   } catch (e) {
     console.error('loadAtlasFromNative error:', e);

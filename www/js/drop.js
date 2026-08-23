@@ -37,6 +37,11 @@ async function processDroppedFiles(files) {
 
   const loaded = await AtlasAPI.load_from_files(files, { showNoAtlasToast: false });
 
+  if (loaded === 'cancelled') {
+    showToast('Cancelled', 'info');
+    return;
+  }
+
   if (loaded) {
     if (state.currentMode === 'modify') {
       setMode('extract');

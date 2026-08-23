@@ -57,6 +57,7 @@ function applyModifyView(data, statusMsg) {
   state.modifyPages = Array.isArray(data.pages) ? data.pages : [];
   state.modifyRegionPages = data.regionPages || {};
   state.modifyActivePage = data.activePage || (state.modifyPages[0] || null);
+  state.modifyActivePageIndex = Math.max(0, state.modifyPages.indexOf(state.modifyActivePage));
   state.hasModImage = false;
   setMode('modify');
   setStatus(statusMsg);
@@ -110,6 +111,7 @@ export async function exitEditMode() {
   state.modifyPages        = [];
   state.modifyRegionPages  = {};
   state.modifyActivePage   = null;
+  state.modifyActivePageIndex = 0;
   state.hasModImage        = false;
   setMode('extract');
   clearOverlay();
@@ -166,15 +168,23 @@ export async function ReplaceSelected() {
 export async function onModPreviewReceived(data) {
   state.hasModImage = true;
   if (data.regions) state.modifyRegionBounds = data.regions;
+  if (Array.isArray(data.pages) && data.pages.length > 0) {
+    state.modifyPages = data.pages;
+  }
+  if (data.regionPages) state.modifyRegionPages = data.regionPages;
+  if (state.modifyActivePageIndex < 0
+      || state.modifyActivePageIndex >= state.modifyPages.length) {
+    state.modifyActivePageIndex = 0;
+  }
+  state.modifyActivePage = state.modifyPages[state.modifyActivePageIndex] || state.modifyActivePage;
+  updatePageSwitcher();
 
-  // _buildResult() (atlas-session.js) always returns page-0's image for a
-  // multi-page result, regardless of which page was active when the mod was
-  // applied — found via parity audit, 2026-08-23: modifying a region on page
-  // 2+ would silently jump the preview back to page 1. Re-fetch the correct
-  // page's (now-merged) image for whichever page is actually active.
+  // _buildResult() still ships page-0's image as `data.image`. Re-fetch the
+  // active index (Python get_modify_page_image) so a mod on page 2+ stays
+  // on that page's merged canvas.
   let image = data.image;
-  if (state.modifyPages.length > 1 && state.modifyActivePage) {
-    const pageData = await AtlasAPI.get_modify_page_preview(state.modifyActivePage);
+  if (state.modifyPages.length > 1) {
+    const pageData = await AtlasAPI.get_modify_page_preview(state.modifyActivePageIndex);
     if (pageData && pageData.image) image = pageData.image;
   }
 

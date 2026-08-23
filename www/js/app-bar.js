@@ -30,8 +30,12 @@ export function updatePageSwitcher() {
   switcher.classList.toggle('hidden', !multi);
   if (!multi) return;
 
-  let idx = state.modifyPages.indexOf(state.modifyActivePage);
+  let idx = Number.isInteger(state.modifyActivePageIndex)
+    ? state.modifyActivePageIndex
+    : state.modifyPages.indexOf(state.modifyActivePage);
   if (idx < 0) idx = 0;
+  state.modifyActivePageIndex = idx;
+  state.modifyActivePage = state.modifyPages[idx] || state.modifyActivePage;
   document.getElementById('page-indicator').innerText =
     `Page ${idx + 1} / ${state.modifyPages.length}`;
   document.getElementById('page-prev').disabled = idx <= 0;
@@ -57,11 +61,11 @@ function fitPreviewOnLoad() {
 
 async function goToPage(newIndex) {
   if (newIndex < 0 || newIndex >= state.modifyPages.length) return;
-  const pageName = state.modifyPages[newIndex];
-  state.modifyActivePage = pageName;
+  state.modifyActivePageIndex = newIndex;
+  state.modifyActivePage = state.modifyPages[newIndex];
   updatePageSwitcher();
   try {
-    const data = await AtlasAPI.get_modify_page_preview(pageName);
+    const data = await AtlasAPI.get_modify_page_preview(newIndex);
     if (!data || !data.image) return;
     setPreviewSrc(data.image);
     previewImg.style.display = 'block';
@@ -85,10 +89,10 @@ export function initAppBar() {
   });
 
   document.getElementById('page-prev').addEventListener('click', () => {
-    goToPage(state.modifyPages.indexOf(state.modifyActivePage) - 1);
+    goToPage(state.modifyActivePageIndex - 1);
   });
   document.getElementById('page-next').addEventListener('click', () => {
-    goToPage(state.modifyPages.indexOf(state.modifyActivePage) + 1);
+    goToPage(state.modifyActivePageIndex + 1);
   });
 
   updateModeToggleUI();

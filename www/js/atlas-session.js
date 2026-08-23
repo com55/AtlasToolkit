@@ -12,6 +12,7 @@
 
 import { AtlasProcessor, _loadImage, canvasToPreviewUrl } from './atlas-extracter.js';
 import { AtlasModifier, repackMultiPage } from './atlas-modifier.js';
+import { AtlasDocument } from './atlas-document.js';
 
 /** One mod apply: the region names it targeted plus the (durable) mod image. */
 export class ModBatch {
@@ -89,9 +90,33 @@ export class AtlasSession {
    */
   getActivePageCanvas(pageFilename) {
     if (!this.active || !Array.isArray(this.active.pages)) return null;
-    const idx = this.processor.pages.findIndex(p => p.filename === pageFilename);
+    let idx = -1;
+    if (this.active.text) {
+      idx = AtlasDocument.parse(this.active.text).pageFilenames().indexOf(pageFilename);
+    }
+    if (idx < 0) {
+      idx = this.processor.pages.findIndex(p => p.filename === pageFilename);
+    }
     if (idx < 0 || idx >= this.active.pages.length) return null;
     return this.active.pages[idx] || null;
+  }
+
+  /**
+   * Page canvas by index — port of session.py::get_modify_page_image.
+   * Prefers the merged/repacked slot once mods exist; otherwise the pristine
+   * loaded page. The old Python UI switched pages by index, not filename.
+   */
+  getModifyPageImage(index) {
+    const i = Number(index);
+    if (!Number.isInteger(i) || i < 0) return null;
+    if (this.active && Array.isArray(this.active.pages) && i < this.active.pages.length) {
+      return this.active.pages[i] || null;
+    }
+    if (this.processor && i < this.processor.pages.length) {
+      const img = this.processor.getPageImage(this.processor.pages[i].filename);
+      return img ? _toCanvas(img) : null;
+    }
+    return null;
   }
 
   // ─── Cache invalidation ─────────────────────────────────────────────────
@@ -272,7 +297,10 @@ export class AtlasSession {
       }
     }
 
-    const pages = pageOrder.map(p => pageImages[p]).filter(Boolean);
+    // Keep index alignment with processor.pages / modifyPages — dropping a
+    // hole here made getActivePageCanvas map page 2 onto page 1's canvas
+    // (or miss it and show the pristine page-1 preview).
+    const pages = pageOrder.map(p => pageImages[p] || null);
     return { pages, text };
   }
 
@@ -334,12 +362,31 @@ export class AtlasSession {
     for (const [name, info] of Object.entries(proc.regions)) {
       regionBounds[name] = [info.x, info.y, info.w, info.h, info.rotate];
     }
-    if (a.pages) {
-      const previewPage = proc.pages.length > 0 ? proc.pages[0].filename : null;
-      const image = a.pages.length > 0 ? await canvasToPreviewUrl(a.pages[0]) : null;
-      return { image, regions: regionBounds, pageCount: a.pages.length, previewPage };
+    const regionPages = {};
+    for (const [name, info] of Object.entries(proc.regions)) {
+      regionPages[name] = info.pageFilename || '';
     }
-    return { image: await canvasToPreviewUrl(a.canvas), regions: regionBounds };
+    const pageNames = proc.pages.map(p => p.filename);
+    if (a.pages) {
+      const previewPage = pageNames[0] || null;
+      const image = a.pages.length > 0 && a.pages[0]
+        ? await canvasToPreviewUrl(a.pages[0])
+        : null;
+      return {
+        image,
+        regions: regionBounds,
+        regionPages,
+        pages: pageNames,
+        pageCount: a.pages.length,
+        previewPage,
+      };
+    }
+    return {
+      image: await canvasToPreviewUrl(a.canvas),
+      regions: regionBounds,
+      regionPages,
+      pages: pageNames,
+    };
   }
 
   // ─── Public: apply a mod image ───────────────────────────────────────────
