@@ -75,6 +75,25 @@ export class AtlasSession {
     return this.active;
   }
 
+  /**
+   * Merged/repacked canvas for one page, when a mod has already been applied —
+   * old Python engine's `get_modify_page_image()` preferred `merged_pages[index]`
+   * over the pristine source once mods existed; the JS port initially always
+   * re-read the pristine page (found via parity audit, 2026-08-23), so
+   * navigating the page switcher after modifying a region silently reverted to
+   * the unmodified image. Index-aligned with `processor.pages`: every rebuild
+   * path (`_rebuildMultiPage{Merge,Repack}`) only ever drops a page's slot when
+   * that page has no loaded image at all, which the missing-page-image dialog
+   * already prevents before modify mode is reachable — so page N's pristine
+   * index always matches `active.pages[N]` in practice.
+   */
+  getActivePageCanvas(pageFilename) {
+    if (!this.active || !Array.isArray(this.active.pages)) return null;
+    const idx = this.processor.pages.findIndex(p => p.filename === pageFilename);
+    if (idx < 0 || idx >= this.active.pages.length) return null;
+    return this.active.pages[idx] || null;
+  }
+
   // ─── Cache invalidation ─────────────────────────────────────────────────
   _invalidateMergeCache() { this.preRepack = null; }
   _invalidateRepackCache() { this.repacked = null; }
