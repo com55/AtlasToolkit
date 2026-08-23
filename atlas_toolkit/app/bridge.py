@@ -110,17 +110,21 @@ class Api:
     def list_sibling_page_images(self, atlas_path: str) -> dict[str, str]:
         """Glob the `.atlas` file's parent directory for `*.png` siblings —
         pure I/O, no atlas-text parsing (the JS side already knows which page
-        names it needs; this just hands over every candidate by filename)."""
+        names it needs; this just hands over every candidate by filename).
+
+        Returns `{filename: full_path}`, NOT base64 bytes (changed 2026-08-23,
+        perf fix): the JS side reads the bytes itself via
+        `fetch(file://...)` (see platform.js's `loadFileAsFile`) instead of
+        round-tripping through the js_api bridge, which base64-encodes AND
+        regex-escapes the whole payload twice before embedding it as a
+        literal in an `eval()`-wrapped script — measured over 1 second for a
+        single ~5MB PNG, vs. under 10ms via fetch(file://) for the same file.
+        """
         parent = Path(atlas_path).parent
         images: dict[str, str] = {}
         try:
             for png in parent.glob("*.png"):
-                try:
-                    images[png.name] = base64.b64encode(png.read_bytes()).decode(
-                        "ascii"
-                    )
-                except OSError as e:
-                    log.warning("Failed reading sibling image %s: %s", png, e)
+                images[png.name] = str(png.resolve())
         except OSError as e:
             log.warning("Failed listing sibling images in %s: %s", parent, e)
         return images
@@ -284,12 +288,15 @@ class Api:
         if not self._window:
             return False
         try:
+            # Atlas text is small and still crosses as base64; sibling image
+            # PATHS (not bytes, see list_sibling_page_images's doc comment --
+            # perf fix, 2026-08-23) are read client-side via fetch(file://...).
             atlas_file = self.read_file_as_base64(path_str)
-            images = self.list_sibling_page_images(path_str)
+            image_paths = self.list_sibling_page_images(path_str)
             atlas_dir = str(Path(path_str).resolve().parent)
             result = self._evaluate_js_promise(
                 f"window.loadAtlasFromNative({json.dumps(atlas_file['base64'])}, "
-                f"{json.dumps(atlas_file['name'])}, {json.dumps(images)}, "
+                f"{json.dumps(atlas_file['name'])}, {json.dumps(image_paths)}, "
                 f"{json.dumps(atlas_dir)})"
             )
             ok = bool(result)
@@ -673,14 +680,16 @@ class Api:
         """Apply a natively-dropped PNG as a mod image via the JS engine's
         AtlasAPI (client-side selection/repack state) — `applyNativeModImageDrop`
         (www/script.js) itself no-ops with a toast if Edit mode/a selection
-        isn't active, mirroring the old Python-session guard here."""
+        isn't active, mirroring the old Python-session guard here.
+
+        Hands over the plain PATH, not base64 bytes (perf fix, 2026-08-23) --
+        the JS side reads it via fetch(file://...) instead; see
+        list_sibling_page_images's doc comment for why."""
         if not self._window:
             return
         try:
-            image = self.read_file_as_base64(path)
             self._window.evaluate_js(
-                f"window.applyNativeModImageDrop({json.dumps(image['base64'])}, "
-                f"{json.dumps(image['name'])})"
+                f"window.applyNativeModImageDrop({json.dumps(path)})"
             )
         except Exception as e:
             log.error("Native image drop error: %s", e)

@@ -377,12 +377,15 @@ export const AtlasAPI = {
       const path = await window.pywebview.api.pick_atlas_file();
       if (!path) return false;
       try {
+        // Atlas text is small (plain text, typically a few KB) -- base64 is
+        // fine there. Sibling PNGs are not -- see platform.loadFileAsFile's
+        // doc comment for why those go through fetch(file://) instead.
         const atlasInfo = await window.pywebview.api.read_file_as_base64(path);
-        const imagesInfo = await window.pywebview.api.list_sibling_page_images(path);
+        const imagePaths = await window.pywebview.api.list_sibling_page_images(path);
         const atlasFile = base64ToFile(atlasInfo.base64, atlasInfo.name, 'text/plain');
         const imageFileMap = {};
-        for (const [name, b64] of Object.entries(imagesInfo || {})) {
-          imageFileMap[name] = base64ToFile(b64, name, 'image/png');
+        for (const [name, imgPath] of Object.entries(imagePaths || {})) {
+          imageFileMap[name] = await platform.loadFileAsFile(imgPath);
         }
         return _loadAtlasFiles(atlasFile, imageFileMap, _dirnameOf(path));
       } catch (e) {
@@ -621,8 +624,9 @@ export const AtlasAPI = {
     if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
       const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
       if (!path) return null;
-      const info = await window.pywebview.api.read_file_as_base64(path);
-      file = base64ToFile(info.base64, info.name, 'image/png');
+      // fetch(file://) instead of read_file_as_base64 -- see
+      // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
+      file = await platform.loadFileAsFile(path);
     } else {
       const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
       if (files.length === 0) return null;
