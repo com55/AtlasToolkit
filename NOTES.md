@@ -1,4 +1,4 @@
-# Design notes (js-project)
+# Design notes
 
 ## Removed: "Repack All Pages To One" (Task 4b)
 
@@ -7,9 +7,9 @@ atlas into a single page (`sel-repack-mode` = `all`, backed by
 `_repackAllPagesToSingle` / `_packCanvasesSimple` in `atlas-api.js`). It was
 removed because:
 
-- It has **no Python equivalent** — the reference engine
-  (`atlas_toolkit/`) only does per-page repack; identical-logic parity with
-  Python is the top priority for this port.
+- It has **no equivalent in the historical Python engine** (pinned SHA
+  `9655e3c`; that source is no longer in this tree) — that engine only did
+  per-page repack; identical-logic parity with it is the top priority.
 - It had **no real use case** and only ever carried the *active* page's modded
   pixels into the combined canvas (mods on other pages silently reverted to
   original pixels), so it was subtly wrong for the one scenario it targeted.
@@ -31,14 +31,15 @@ rotation semantics for the cross-page combine.
 `_registerModBatch`'s multi-page branch) so each page's regions are scaled
 against *that page's own* loaded image size.
 
-Python's `session.py::build_modify_view` instead builds a single
-`AtlasModifier` from only the first page's image and applies its scale
-factor to every region's bounds, regardless of which page they're on. For
-single-page atlases (the common case, and the one this fixed a real bug for
-— see the "scale-mismatch" case in `test/browser/verify-app-e2e.mjs`) the two
-approaches are identical. They'd only diverge for a multi-page atlas whose
-pages mismatch their declared `size:` by *different* ratios, which is
-pathological and untested on either side. `_register_mod_batch` in
-`session.py` already goes per-page for the exact same reason, so
-`build_modify_view`'s first-page-only scale looks like an oversight there,
-not an intentional contract — this port intentionally does not reproduce it.
+The historical Python `session.py::build_modify_view` (pinned SHA `9655e3c`)
+instead built a single `AtlasModifier` from only the first page's image and
+applied its scale factor to every region's bounds, regardless of which page
+they're on. For single-page atlases (the common case, and the one this fixed
+a real bug for — see the "scale-mismatch" case in
+`tests/browser/verify-app-e2e.mjs`) the two approaches are identical. They'd
+only diverge for a multi-page atlas whose pages mismatch their declared
+`size:` by *different* ratios, which is pathological and untested on either
+side. `_register_mod_batch` in that same historical `session.py` already went
+per-page for the exact same reason, so `build_modify_view`'s first-page-only
+scale looks like an oversight there, not an intentional contract — this
+engine intentionally does not reproduce it.
