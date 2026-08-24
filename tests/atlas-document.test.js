@@ -50,8 +50,8 @@ bounds: 5, 0, 5, 5
 `;
 
 // Expected canonical serialization of FIXTURE. Hand-computed, then verified
-// against a direct run of the real `document.py` (extracted from
-// `git show main:atlas_toolkit/core/document.py`) via a standalone Python
+// against a direct run of the historical `document.py` (extracted from
+// `git show 9655e3c:atlas_toolkit/core/document.py`) via a standalone Python
 // script — see task-2-report.md for the transcript. Notably, the unknown
 // region key `customKey` comes back out as lowercase `customkey`, because
 // both the Python source and this port lowercase keys during parsing before
