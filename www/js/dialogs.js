@@ -287,13 +287,13 @@ export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
       });
       row.addEventListener('drop', (e) => {
         e.preventDefault();
-        e.stopPropagation();
         row.classList.remove('drag-over');
-        // Native OS drops under pywebview carry a File with no readable bytes
-        // client-side — bridge.py's on_drop calls window.applyMissingImageDrop
-        // (above) with the real path instead. Only handle the drop here for a
-        // genuine in-browser drag (File System-backed FileList).
+        // Native OS drops: pywebviewFullPath exists only on the Python
+        // event (Context7 / pywebview FAQ). stopPropagation here used to
+        // swallow the drop before document's DOMEventHandler (bridge.on_drop)
+        // could call applyMissingImageDrop — Add image worked, drag did not.
         if (isPywebviewDesktop()) return;
+        e.stopPropagation();
         const file = Array.from(e.dataTransfer?.files || []).find(isPngFile);
         if (file) applySelection(pageName, file);
       });
@@ -312,7 +312,10 @@ export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
     // Backdrop: swallow stray drag events so they never reach drop.js's
     // global window-level listeners while this dialog is open.
     overlay.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
-    overlay.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); });
+    overlay.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!isPywebviewDesktop()) e.stopPropagation();
+    });
 
     const buttons = document.createElement('div');
     buttons.className = 'missing-images-buttons';
