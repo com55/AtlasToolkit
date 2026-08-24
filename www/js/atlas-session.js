@@ -11,8 +11,38 @@
  */
 
 import { AtlasProcessor, _loadImage, canvasToPreviewUrl } from './atlas-extracter.js';
-import { AtlasModifier, repackMultiPage } from './atlas-modifier.js';
+import { AtlasModifier } from './atlas-modifier.js';
 import { AtlasDocument } from './atlas-document.js';
+
+/**
+ * Page filenames that a multi-page rebuild may rewrite, in `pageOrder`.
+ * Only pages that own at least one region named in a mod batch — untouched
+ * pages stay pristine (per-page pack; see NOTES.md "Repack All Pages To One").
+ */
+export function pagesTouchedByModBatches(regionPageMap, batchNamesList, pageOrder = null) {
+  const touched = new Set();
+  for (const names of batchNamesList || []) {
+    for (const name of names || []) {
+      const page = regionPageMap[name];
+      if (page) touched.add(page);
+    }
+  }
+  if (!Array.isArray(pageOrder)) return [...touched];
+  return pageOrder.filter((p) => touched.has(p));
+}
+
+/** Swap one page in a multi-page atlas for a single-page pack result. */
+export function replacePageInAtlas(fullText, pageFilename, packedPageText) {
+  const doc = AtlasDocument.parse(fullText || '');
+  const packed = AtlasDocument.parse(packedPageText || '');
+  if (packed.pages.length === 0) return fullText || '';
+  const idx = doc.pages.findIndex((p) => p.filename === pageFilename);
+  if (idx < 0) return fullText || '';
+  const page = packed.pages[0];
+  page.filename = pageFilename;
+  doc.pages[idx] = page;
+  return doc.serialize();
+}
 
 /** One mod apply: the region names it targeted plus the (durable) mod image. */
 export class ModBatch {
@@ -305,44 +335,38 @@ export class AtlasSession {
   }
 
   async _rebuildMultiPageRepack() {
-    // Extract every region's raw sprite from the pristine pages, overlay the
-    // flattened moddedSprites (latest-mod-per-region wins), then repack across
-    // all pages. Mirrors session.py's _rebuild_multi_page_repack.
-    const allSprites = {};
-    for (const name of Object.keys(this.processor.regions)) {
-      const c = this.processor.extractRegion(name);
-      if (c) allSprites[name] = c;
-    }
-    for (const [name, sprite] of Object.entries(this.moddedSprites)) {
-      if (name in allSprites) allSprites[name] = _toCanvas(sprite);
-    }
-    // fullCanvasRegions is intentionally NOT threaded here: repackMultiPage emits
-    // no offsets line at all, which is identical to Python repack_multi_page's
-    // result (both the in-full-canvas (0,0,w,h) and not-in branches serialize to
-    // an omitted offsets line). So multi-page repack never preserves pristine
-    // offsets — the offsets asymmetry is a single-page-only distinction.
-
-    const numPages = this.processor.pages.length;
-    const pageInfos = this.processor.pages.map(p => ({
-      page: p.filename,
-      format: p.format,
-      filter: `${p.filter[0]}, ${p.filter[1]}`,
-      repeat: p.repeat,
-      pma: p.pma,
-    }));
-    const regionMetas = {};
+    // Per-page pack: only rewrite pages that own a modified region.
+    // The previous global first-fit across every sprite (repackMultiPage)
+    // moved page-1's CH0355C onto page 2 and rebuilt both sheets — the
+    // Test2Pages / checklist item the user hit with Repack on.
+    // Untouched pages keep their pristine canvas + atlas text (same rule
+    // as _rebuildMultiPageMerge). Each touched page uses the single-page
+    // packer (dedup + offset asymmetry) via AtlasModifier.
+    const pageOrder = this.processor.pages.map(p => p.filename);
+    const regionPages = {};
     for (const [name, r] of Object.entries(this.processor.regions)) {
-      regionMetas[name] = {
-        atlasName: r.atlasName || r.name || name,
-        index: Number.isFinite(r.index) ? r.index : -1,
-        split: r.split,
-        pad: r.pad,
-        extraPairs: Array.isArray(r.extraPairs) ? r.extraPairs : [],
-      };
+      regionPages[name] = r.pageFilename;
+    }
+    const touched = new Set(pagesTouchedByModBatches(
+      regionPages,
+      this.modBatches.map(b => b.names),
+      pageOrder,
+    ));
+
+    const pageImages = this._originalPageCanvases();
+    let text = this.atlasText;
+
+    for (const pageName of pageOrder) {
+      if (!touched.has(pageName) || !pageImages[pageName]) continue;
+      const modifier = new AtlasModifier(text, this.filename, pageImages[pageName], pageName);
+      const packed = await modifier.repackWithModdedSprites(
+        this.moddedSprites, this._fullCanvasRegions());
+      text = replacePageInAtlas(text, pageName, packed.atlasText);
+      pageImages[pageName] = packed.canvas;
     }
 
-    const { pages, atlasText } = await repackMultiPage(allSprites, numPages, pageInfos, regionMetas);
-    return { pages, text: atlasText };
+    const pages = pageOrder.map(p => pageImages[p] || null);
+    return { pages, text };
   }
 
   // ─── Active result / payload ─────────────────────────────────────────────

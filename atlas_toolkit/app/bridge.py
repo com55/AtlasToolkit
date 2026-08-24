@@ -835,10 +835,14 @@ class Api:
                         client_x = e.get("x")
                     if client_y is None:
                         client_y = e.get("y")
-                    self._evaluate_js_promise(
-                        f"window.applyMissingImageDrop({json.dumps(path)}, "
-                        f"{json.dumps(client_x)}, {json.dumps(client_y)})",
-                        timeout=None,
+                    # Fire-and-forget: applyMissingImageDrop is async and
+                    # on_drop may run on the GUI thread (DOMEventHandler).
+                    # Awaiting the Promise here deadlocks the same way
+                    # on_closing did (pywebview#1699). Starting the call is
+                    # enough — the dialog updates when the File loads.
+                    self._window.evaluate_js(
+                        f"void window.applyMissingImageDrop({json.dumps(path)}, "
+                        f"{json.dumps(client_x)}, {json.dumps(client_y)})"
                     )
                 return
 
