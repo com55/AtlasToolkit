@@ -303,6 +303,17 @@ const browser = await chromium.launch({ headless: true });
   const download2 = await dl2;
   check('desktop: Save As downloads a zip', download2.suggestedFilename().endsWith('.zip'), download2.suggestedFilename());
   await page.waitForTimeout(300);
+  const afterSave = await page.evaluate(() => ({
+    status: document.getElementById('status-text').innerText,
+    toast: [...document.querySelectorAll('#toast-container .toast')].map((el) => el.innerText),
+  }));
+  const toastText = afterSave.toast.join('\n');
+  check('desktop: save outcome is toasted', /Saved/i.test(toastText), toastText);
+  check(
+    'desktop: status bar does not echo the toast',
+    afterSave.status && toastText && afterSave.status !== toastText && !/^Saved\b/i.test(afterSave.status),
+    `status=${afterSave.status}`,
+  );
   await page.click('#mode-extract');
   await page.waitForTimeout(150);
   ui = await readUi(page);
