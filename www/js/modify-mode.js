@@ -4,7 +4,7 @@ import {
   previewImg, previewContainer,
   resetPreview, applyTransform,
   drawRegionOverlay, clearOverlay,
-  updatePreview, updateSaveMergedButton, setPreviewSrc,
+  updatePreview, updateModifyPreview, updateSaveMergedButton, setPreviewSrc,
   fitScaleIfOversized,
 } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
@@ -220,10 +220,14 @@ export async function saveModified() {
     } else {
       showToast(result, 'success');
     }
-    setStatus(result);
+    // Outcome lives in the toast only — don't echo the same string into
+    // the status bar (e.g. "Saved to: …"). Restore the durable edit-mode
+    // status from current selection / merged state.
+    updateModifyPreview(getSelectedNames());
   } catch (e) {
     console.error(e);
     showToast('Save failed.', 'error');
+    updateModifyPreview(getSelectedNames());
   }
 }
 
