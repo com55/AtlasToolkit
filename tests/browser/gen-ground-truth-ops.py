@@ -1,17 +1,18 @@
 """Extended Python reference-oracle ground truth for Task 5 (Phase F partial).
 
-PINNED ORACLE COMMIT: main @ 9655e3c (confirm with `git rev-parse --short main`;
-atlas_toolkit/ is byte-identical between main and dev at time of writing, but
-dev moves -- this script always diffs against the pinned SHA via
-`git show <sha>:<path>`, never a moving branch ref).
+PINNED ORACLE COMMIT: 9655e3c — a historical snapshot of the retired Python
+atlas engine (`atlas_toolkit/core`, `atlas_toolkit/atlas`). That source is
+no longer in the working tree. `9655e3c` is a commit SHA, not a live branch
+name; this script loads files with `git show <sha>:<path>` and never a
+moving branch ref such as `main:`.
 
-Execs the REAL main-branch atlas_toolkit/core/document.py,
+Execs the REAL historical atlas_toolkit/core/document.py,
 atlas_toolkit/core/region_ops.py, atlas_toolkit/atlas/repacker.py and
 atlas_toolkit/atlas/modifier.py (stubbing only their internal
 `atlas_toolkit.*` cross-imports, since all four are exec'd into one shared
 namespace -- same pattern as gen-ground-truth.py already uses for
 region_ops.py alone) against:
-  - the two checked-in Deliverable-1 fixtures (test/browser/fixtures/), and
+  - the two checked-in Deliverable-1 fixtures (tests/browser/fixtures/), and
   - small hand-picked synthetic scenarios for merge (full-canvas /
     offset-padded / rotated-placement) and repack (single-page dedup,
     multi-page no-dedup), and
@@ -38,7 +39,7 @@ anti-aliased pixel data exercising the actual no-dedup code path, just not
 sourced from a pre-existing multi-page atlas (none exist locally).
 
 Run from the repo (needs Pillow + git):
-  python3 test/browser/gen-ground-truth-ops.py
+  python3 tests/browser/gen-ground-truth-ops.py
 """
 
 import base64
@@ -58,16 +59,6 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 FIXTURES = os.path.join(HERE, "fixtures")
 PINNED_SHA = "9655e3c"
 
-actual_sha = subprocess.check_output(
-    ["git", "-C", REPO, "rev-parse", "--short", "main"], text=True
-).strip()
-if actual_sha != PINNED_SHA:
-    print(
-        f"NOTE: main has moved to {actual_sha} since this script was written "
-        f"(pinned {PINNED_SHA}); diffing against the pinned SHA regardless, "
-        "per the brief."
-    )
-
 
 def show(path):
     return subprocess.check_output(
@@ -75,7 +66,7 @@ def show(path):
     )
 
 
-# ─── Load the REAL main-branch modules into one shared namespace ──────────
+# ─── Load the historical Python modules (pinned SHA) into one namespace ───
 ns = {}
 ns.update(Image=Image)
 

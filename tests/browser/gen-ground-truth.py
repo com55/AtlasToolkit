@@ -1,15 +1,16 @@
 """Regenerate PIL ground-truth fixtures for the rotation verification.
 
-Execs the ACTUAL main-branch region_ops.py (crop_and_rotate /
+Execs the historical Python region_ops.py at pinned SHA 9655e3c (crop_and_rotate /
 extract_region_from_page) against small asymmetric fixtures and dumps each
-case's source grid + expected output pixels to ground_truth.json. The browser
-harness (verify-rotation.mjs) then runs the JS Canvas 2D implementation in
-core-region-ops.js on the same source grids and asserts pixel-identical output
-— PIL is the normative reference the whole port targets, so a pixel match is
-correctness by definition (and distinct-per-pixel colours make a mirror
-impossible to mistake for a rotation).
+case's source grid + expected output pixels to ground_truth.json. That Python
+source is no longer in the working tree; this script loads it with
+`git show <sha>:<path>`. The browser harness (verify-rotation.mjs) then runs
+the JS Canvas 2D implementation in core-region-ops.js on the same source grids
+and asserts pixel-identical output — PIL is the normative reference the whole
+port targets, so a pixel match is correctness by definition (and
+distinct-per-pixel colours make a mirror impossible to mistake for a rotation).
 
-Run from the repo (needs Pillow + git):  python3 test/browser/gen-ground-truth.py
+Run from the repo (needs Pillow + git):  python3 tests/browser/gen-ground-truth.py
 """
 
 import json
@@ -20,10 +21,11 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+PINNED_SHA = "9655e3c"
 
-# Load the real main-branch region_ops functions, stubbing the project import.
+# Load the historical Python region_ops functions, stubbing the project import.
 src = subprocess.check_output(
-    ["git", "-C", REPO, "show", "main:atlas_toolkit/core/region_ops.py"],
+    ["git", "-C", REPO, "show", f"{PINNED_SHA}:atlas_toolkit/core/region_ops.py"],
     text=True,
 )
 src = src.replace("from atlas_toolkit.core.document import Page, Region", "")
