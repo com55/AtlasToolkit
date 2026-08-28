@@ -106,6 +106,25 @@ export function matchDroppedPngToPage(path, pageNames) {
   return names.find((p) => String(p).toLowerCase() === lower) || null;
 }
 
+/** Sibling `.skel` name for an atlas file — Python `Path.with_suffix(".skel")`. */
+export function siblingSkelFilename(atlasFilename) {
+  const name = String(atlasFilename || '');
+  if (!name) return '';
+  const idx = name.lastIndexOf('.');
+  const stem = idx > 0 ? name.slice(0, idx) : name;
+  return `${stem}.skel`;
+}
+
+/** First file in `files` whose name is the atlas's sibling `.skel` (case-insensitive). */
+export function pickSiblingSkelFile(atlasFilename, files) {
+  const want = siblingSkelFilename(atlasFilename).toLowerCase();
+  if (!want) return null;
+  for (const file of files || []) {
+    if (String(file?.name || '').toLowerCase() === want) return file;
+  }
+  return null;
+}
+
 export function pathToFileUrl(path) {
   let p = String(path).replace(/\\/g, '/');
   if (!p.startsWith('/')) p = '/' + p; // Windows: "C:/foo" -> "/C:/foo"
@@ -172,7 +191,7 @@ export async function pickAtlasFile() {
   return await new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.atlas,.txt,text/plain,image/png,.png';
+    input.accept = '.atlas,.txt,text/plain,image/png,.png,.skel';
     input.multiple = true;
     let settled = false;
     input.addEventListener('change', (e) => {

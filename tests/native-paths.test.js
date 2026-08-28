@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { nativePathBasename, matchDroppedPngToPage, joinNativePath } from '../www/js/platform.js';
+import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile } from '../www/js/platform.js';
 
 test('joinNativePath keeps Windows or POSIX separators', () => {
   assert.equal(joinNativePath('C:\\atlas', 'page.png'), 'C:\\atlas\\page.png');
@@ -19,4 +19,21 @@ test('matchDroppedPngToPage matches page name case-insensitively', () => {
   assert.equal(matchDroppedPngToPage('C:\\\\drop\\\\Hero.png', pages), 'Hero.png');
   assert.equal(matchDroppedPngToPage('/tmp/HERO.PNG', pages), 'Hero.png');
   assert.equal(matchDroppedPngToPage('/tmp/other.png', pages), null);
+});
+
+test('siblingSkelFilename matches Python Path.with_suffix(".skel")', () => {
+  assert.equal(siblingSkelFilename('hero.atlas'), 'hero.skel');
+  assert.equal(siblingSkelFilename('Hero.ATLAS'), 'Hero.skel');
+  assert.equal(siblingSkelFilename('spine-boy.atlas.txt'), 'spine-boy.atlas.skel');
+  assert.equal(siblingSkelFilename('hero'), 'hero.skel');
+  assert.equal(siblingSkelFilename(''), '');
+});
+
+test('pickSiblingSkelFile finds the matching .skel in a dropped file list', () => {
+  const skel = { name: 'hero.skel' };
+  const files = [{ name: 'hero.atlas' }, { name: 'hero.png' }, skel];
+  assert.equal(pickSiblingSkelFile('hero.atlas', files), skel);
+  assert.equal(pickSiblingSkelFile('hero.atlas', [{ name: 'other.skel' }]), null);
+  const upper = { name: 'HERO.SKEL' };
+  assert.equal(pickSiblingSkelFile('Hero.atlas', [upper]), upper);
 });

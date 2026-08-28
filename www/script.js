@@ -2,7 +2,7 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedNames } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initRepackInfoOverlay, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived } from './js/modify-mode.js';
+import { initRepackInfoOverlay, initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
@@ -55,8 +55,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const repackPref = await AtlasAPI.get_pref('repack', false);
   document.getElementById('chk-repack').checked = repackPref;
+  const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
+  document.getElementById('chk-copy-skel').checked = copySkelPref;
 
   initRepackInfoOverlay();
+  initSaveSplitMenu();
 
   // PWA open-with (File Handling API): the browser hands us the launched
   // file via launchQueue instead of process args.
