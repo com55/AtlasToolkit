@@ -27,20 +27,21 @@ export function setMode(mode) {
   const extractControls = document.getElementById('extract-controls');
   const modifyControls  = document.getElementById('modify-controls');
   const repackOptions   = document.getElementById('repack-options');
-  const saveModBtn      = document.getElementById('btn-save-mod');
+  const saveSplit       = document.getElementById('save-split');
   const dropMsg         = document.getElementById('drop-message-text');
 
   if (mode === 'modify') {
     extractControls.classList.add('hidden');
     modifyControls.classList.remove('hidden');
     repackOptions.classList.remove('hidden');
-    saveModBtn.classList.remove('hidden');
+    saveSplit.classList.remove('hidden');
     dropMsg.textContent = 'Drop image to modify, or .atlas to load'; // matches old Python engine's ui/js/mode.js
   } else {
     extractControls.classList.remove('hidden');
     modifyControls.classList.add('hidden');
     repackOptions.classList.add('hidden');
-    saveModBtn.classList.add('hidden');
+    saveSplit.classList.add('hidden');
+    closeSaveMenu();
     dropMsg.textContent = 'Drop .atlas file here to load';
     clearOverlay();
   }
@@ -213,6 +214,7 @@ export async function onModPreviewReceived(data) {
 
 export async function saveModified() {
   try {
+    closeSaveMenu();
     setStatus('Saving...');
     const result = await AtlasAPI.save_modified();
     if (result.startsWith('Error') || result === 'Cancelled') {
@@ -229,6 +231,35 @@ export async function saveModified() {
     showToast('Save failed.', 'error');
     updateModifyPreview(getSelectedNames());
   }
+}
+
+function closeSaveMenu() {
+  const menu = document.getElementById('save-menu');
+  const btn = document.getElementById('btn-save-menu');
+  if (menu) menu.classList.remove('open');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+export function initSaveSplitMenu() {
+  const menuBtn = document.getElementById('btn-save-menu');
+  const menu = document.getElementById('save-menu');
+  const chk = document.getElementById('chk-copy-skel');
+  if (!menuBtn || !menu || !chk) return;
+
+  menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = !menu.classList.contains('open');
+    menu.classList.toggle('open', open);
+    menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => closeSaveMenu());
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSaveMenu();
+  });
+  chk.addEventListener('change', () => {
+    AtlasAPI.set_pref('copySkel', chk.checked);
+  });
 }
 
 export function initRepackInfoOverlay() {

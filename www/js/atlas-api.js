@@ -6,7 +6,7 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor, canvasToPreviewUrl } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
@@ -175,7 +175,7 @@ async function _confirmDialog(message, title = 'Confirm') {
 }
 
 async function _findAtlasTextFile(files) {
-  const nonImageFiles = files.filter(file => !_isImageFile(file));
+  const nonImageFiles = files.filter(file => !_isImageFile(file) && !/\.skel$/i.test(file.name || ''));
   const prioritized = nonImageFiles.sort((a, b) => {
     const aAtlas = /\.atlas$/i.test(a.name || '');
     const bAtlas = /\.atlas$/i.test(b.name || '');
@@ -213,7 +213,7 @@ async function _loadAtlasFromFileList(files, options = {}) {
     if (_isImageFile(file)) imageFileMap[file.name] = file;
   }
 
-  return _loadAtlasFiles(atlasFile, imageFileMap);
+  return _loadAtlasFiles(atlasFile, imageFileMap, '', list);
 }
 
 async function _saveBlobWithDialog(filename, blob, { defaultDir = '' } = {}) {
@@ -309,9 +309,11 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
  * Load an atlas from File objects.
  * @param {File} atlasFile
  * @param {Object.<string, File>} imageFileMap  { pageName: File }  (may be partial)
+ * @param {string} sourceDir  native folder the atlas was opened from, or ''
+ * @param {Array<File>} extraFiles  dropped/picked siblings (may include a .skel)
  * @returns {Promise<boolean>}
  */
-async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
+async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFiles = []) {
   try {
     const rawText = await _readFileAsText(atlasFile);
     const convertedText = autoConvertAtlas(rawText);
@@ -357,7 +359,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
     _currentAtlasFilename = atlasFile.name;
     _currentAtlasDirectory = sourceDir;
     _currentAtlasText = convertedText;
-    _currentSkel = null;
+    await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
     _clearPreviewMemo();
 
     // Fresh session bound to the pristine processor + atlas text.
@@ -368,6 +370,62 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '') {
     console.error('load_atlas error:', e);
     return false;
   }
+}
+
+/** Hold the sibling `.skel` (same stem as the atlas) so Save As can copy it.
+ *  Desktop: load from the atlas folder (Python `Path.with_suffix(".skel")`).
+ *  Browser: only if the user included the .skel in the picked/dropped files. */
+async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
+  _currentSkel = null;
+  const skelName = siblingSkelFilename(atlasFile?.name);
+  if (!skelName) return;
+
+  const fromList = pickSiblingSkelFile(atlasFile.name, extraFiles);
+  if (fromList) {
+    _currentSkel = { name: skelName, blob: fromList };
+    return;
+  }
+
+  if (!sourceDir) return;
+  try {
+    let skelPath = joinNativePath(sourceDir, skelName);
+    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
+      const atlasPath = joinNativePath(sourceDir, atlasFile.name);
+      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
+      if (!resolved) return;
+      skelPath = resolved;
+    }
+    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    if (file && file.size > 0) {
+      _currentSkel = { name: skelName, blob: file };
+    }
+  } catch (_) {
+    // No sibling on disk — Copy .skel is a no-op for this atlas.
+  }
+}
+
+/** Prefer the skel captured at load; otherwise retry from the atlas folder
+ *  at save time (historical Python copied at save, not at open). */
+async function _skelForSave() {
+  const copySkel = await AtlasAPI.get_pref('copySkel', true);
+  if (!copySkel) return null;
+  if (_currentSkel) return _currentSkel;
+  const skelName = siblingSkelFilename(_currentAtlasFilename);
+  if (!skelName || !_currentAtlasDirectory) return null;
+  try {
+    let skelPath = joinNativePath(_currentAtlasDirectory, skelName);
+    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
+      const atlasPath = joinNativePath(_currentAtlasDirectory, _currentAtlasFilename);
+      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
+      if (!resolved) return null;
+      skelPath = resolved;
+    }
+    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    if (file && file.size > 0) return { name: skelName, blob: file };
+  } catch (_) {
+    // Still no sibling .skel.
+  }
+  return null;
 }
 
 // ─── Public API (mirrors pywebview.api) ───────────────────────────────────────
@@ -441,7 +499,7 @@ export const AtlasAPI = {
     }
 
     const files = await _pickFiles({
-      accept: '.atlas,.txt,text/plain,image/png,.png',
+      accept: '.atlas,.txt,text/plain,image/png,.png,.skel',
       multiple: true,
     });
     return _loadAtlasFromFileList(files, {
@@ -728,7 +786,10 @@ export const AtlasAPI = {
       }
 
       outputs.push({ name: _currentAtlasFilename, data: merged.text });
-      if (_currentSkel) outputs.push({ name: _currentSkel.name, data: _currentSkel.blob });
+      const skel = await _skelForSave();
+      if (skel) {
+        outputs.push({ name: skel.name, data: skel.blob });
+      }
 
       // Installed PWA / pywebview desktop: pick a folder and write all outputs into it.
       if (_useFolderPicker()) {
