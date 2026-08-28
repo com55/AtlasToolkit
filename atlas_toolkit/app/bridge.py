@@ -228,6 +228,21 @@ class Api:
                 out.append({"name": name, "path": str(candidate.resolve())})
         return out
 
+    def resolve_sibling_skel(self, atlas_path: str) -> Optional[str]:
+        """Path of `{stem}.skel` next to the atlas, or None.
+
+        Historical Python copied this at save via `Path.with_suffix(".skel")`
+        (pinned SHA 9655e3c). Exists-check here so JS does not fetch(file://)
+        a missing sibling.
+        """
+        p = Path(atlas_path).with_suffix(".skel")
+        try:
+            if p.is_file():
+                return str(p.resolve())
+        except OSError as e:
+            log.warning("resolve_sibling_skel failed: %s", e)
+        return None
+
     def set_window_title(self, atlas_filename: str) -> None:
         """Update the native OS window title to reflect the loaded atlas —
         the old Python engine's `load_atlas` did this on every open; the new

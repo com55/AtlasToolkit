@@ -133,7 +133,8 @@ const readUi = (page) => page.evaluate(() => ({
   prevDisabled: document.getElementById('page-prev').disabled,
   nextDisabled: document.getElementById('page-next').disabled,
   saveEnabled: !document.getElementById('btn-save-mod').disabled,
-  saveVisible: !document.getElementById('btn-save-mod').classList.contains('hidden'),
+  saveVisible: !document.getElementById('save-split').classList.contains('hidden'),
+  saveMenuOpen: document.getElementById('save-menu').classList.contains('open'),
   repackRowVisible: !document.getElementById('repack-options').classList.contains('hidden'),
   resetEnabled: !document.getElementById('btn-reset-mod').disabled,
   saveMergedEnabled: !document.getElementById('btn-save-merged').disabled,
@@ -191,6 +192,15 @@ const browser = await chromium.launch({ headless: true });
   ui = await readUi(page);
   check('desktop: mode toggle enters edit mode', ui.mode === 'modify' && ui.modifyControlsVisible);
   check('desktop: repack row + Save As appear in edit mode', ui.repackRowVisible && ui.saveVisible);
+  check('desktop: Save As chevron is visible', await page.locator('#btn-save-menu').isVisible());
+  await page.click('#btn-save-menu');
+  await page.waitForTimeout(80);
+  ui = await readUi(page);
+  check('desktop: chevron opens Copy .skel menu', ui.saveMenuOpen);
+  await page.click('#sidebar-head');
+  await page.waitForTimeout(80);
+  ui = await readUi(page);
+  check('desktop: click away closes save menu', !ui.saveMenuOpen);
   check('desktop: multi-page switcher visible, Page 1 / 2, prev disabled', ui.switcherVisible && ui.indicator === 'Page 1 / 2' && ui.prevDisabled && !ui.nextDisabled, ui.indicator);
 
   // 5. Page switcher next/prev
@@ -346,6 +356,15 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(250);
   ui = await readUi(page);
   check('touch: edit mode + page switcher on stacked layout', ui.mode === 'modify' && ui.switcherVisible && ui.indicator === 'Page 1 / 2', ui.indicator);
+  check('touch: Save As split is visible', ui.saveVisible);
+  await page.locator('#btn-save-menu').tap();
+  await page.waitForTimeout(80);
+  ui = await readUi(page);
+  check('touch: chevron opens Copy .skel menu', ui.saveMenuOpen);
+  await page.locator('#sidebar-head').tap();
+  await page.waitForTimeout(80);
+  ui = await readUi(page);
+  check('touch: tap away closes save menu', !ui.saveMenuOpen);
 
   await page.locator('#page-next').tap();
   await page.waitForTimeout(250);
