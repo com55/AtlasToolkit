@@ -96,6 +96,20 @@ window.runCase = async (name) => {
     // rectangle would stay opaque red everywhere, including this corner.
     const outsideCorner = alpha(c, 95, 95);
     check('fast-path output is masked (corner outside mesh bbox is transparent)', outsideCorner === 0, 'outsideCorner=' + outsideCorner);
+    // Symmetric check (found missing by Fable scrutinize review, 2026-08-31):
+    // the check above alone would still pass if masking over-erased the
+    // ENTIRE region (e.g. a mask that draws nothing at all) -- it only
+    // proves one exterior pixel went transparent, never that any interior
+    // pixel survived. Count both across the whole canvas, same pattern as
+    // the shape-check case below, to rule out that failure mode too.
+    const fpData = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let fpOpaque = 0, fpTransparent = 0;
+    for (let i = 3; i < fpData.length; i += 4) {
+      if (fpData[i] > 200) fpOpaque++;
+      else if (fpData[i] === 0) fpTransparent++;
+    }
+    check('fast-path output has both opaque (mesh interior survived) and transparent (masked out) pixels',
+      fpOpaque > 0 && fpTransparent > 0, 'opaque=' + fpOpaque + ' transparent=' + fpTransparent);
   } else if (name === 'shape-checks-non-degenerate-for-all-three') {
     // Design spec Testing item 4: an asymmetric mask must be non-uniform --
     // both fully-opaque and fully-transparent pixels present, not
