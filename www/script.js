@@ -2,7 +2,7 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedNames } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initRepackInfoOverlay, initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived } from './js/modify-mode.js';
+import { initRepackInfoOverlay, initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
@@ -65,6 +65,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('chk-repack').checked = repackPref;
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
+  await AtlasAPI.init_mesh_mask_from_pref();
+  updateMeshCroppingUI();
 
   initRepackInfoOverlay();
   initSaveSplitMenu();
@@ -200,9 +202,7 @@ async function _resetUiAfterFreshLoad() {
   resetPreview();
   updateButtons();
   await loadRegions();
-  const { available, enabled } = await AtlasAPI.get_mesh_mask_state();
-  document.getElementById('chk-mesh-mask').checked = enabled;
-  document.getElementById('chk-mesh-mask').disabled = !available;
+  updateMeshCroppingUI();
 
   // Native window title (old Python engine's load_atlas() used to do this;
   // the JS engine has no equivalent hook, so it's centralized here instead

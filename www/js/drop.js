@@ -1,7 +1,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedNames } from './state.js';
 import { loadRegions, updateButtons } from './region-list.js';
-import { setMode, onModPreviewReceived } from './modify-mode.js';
+import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
 import { showToast, showConfirm } from './dialogs.js';
 import { platform, isPywebviewDesktop } from './platform.js';
@@ -55,9 +55,7 @@ async function processDroppedFiles(files) {
     clearOverlay();
     updateButtons();
     await loadRegions();
-    const { available, enabled } = await AtlasAPI.get_mesh_mask_state();
-    document.getElementById('chk-mesh-mask').checked = enabled;
-    document.getElementById('chk-mesh-mask').disabled = !available;
+    updateMeshCroppingUI();
     showToast('Atlas loaded via drag & drop.', 'success');
     return;
   }

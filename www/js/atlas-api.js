@@ -32,7 +32,17 @@ let _lastSaveHandle = null;
 let _currentSkel = null; // { name, blob } | null
 let _parsedSkeleton = null;   // {version, attachments} | null
 let _meshLookup = null;       // Map<name, {uvs,triangles}> | null
-let _meshMaskEnabled = false; // user toggle state, reset per atlas load
+// User preference, persisted like the Repack toggle -- does NOT reset per
+// atlas load. Initialized once from the 'meshCropping' pref at startup via
+// init_mesh_mask_from_pref(); changed only by an explicit user toggle
+// (set_mesh_mask_enabled). Independent of whether the CURRENT atlas's
+// .skel is actually usable -- see _meshUnavailableReason for that.
+let _meshMaskEnabled = true;
+// null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
+// why the current .skel (if any) can't be used, for the picker button's
+// tooltip. null when there's no .skel captured yet, or when it parsed with
+// usable Mesh geometry.
+let _meshUnavailableReason = null;
 let _previewMemo = { key: null, value: null };
 
 function _clearPreviewMemo() {
@@ -412,27 +422,33 @@ async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
 /** Parses _currentSkel.blob (if set) into _parsedSkeleton/_meshLookup and
  *  pushes the result into _processor, then clears the preview memo since
  *  the effective output for already-cached selections has changed. Safe
- *  to call with _currentSkel === null (clears mask state instead). */
+ *  to call with _currentSkel === null (clears mask state instead).
+ *  Does NOT touch _meshMaskEnabled -- that's a persisted user preference
+ *  (like Repack's), not something that resets per atlas load. Sets
+ *  _meshUnavailableReason to explain why the current .skel (if any) can't
+ *  be used, for the picker button's tooltip. */
 async function _reparseSkelAndPushToProcessor() {
   _parsedSkeleton = null;
   _meshLookup = null;
+  _meshUnavailableReason = null;
   if (_currentSkel) {
     try {
       const bytes = new Uint8Array(await _currentSkel.blob.arrayBuffer());
       _parsedSkeleton = parseSkeleton(bytes);
       _meshLookup = buildMeshLookup(_parsedSkeleton);
-      // Default on only if there's actually usable geometry — buildMeshLookup
-      // always returns a Map (never null), so an all-Region .skel or one with
-      // zero Mesh attachments would otherwise report available+enabled with
-      // no pixel this feature could ever mask (found by Fable scrutinize
-      // review, 2026-08-31).
-      _meshMaskEnabled = _meshLookup.size > 0;
+      // buildMeshLookup always returns a Map (never null), so an all-Region
+      // .skel or one with zero Mesh attachments parses "successfully" but
+      // has nothing this feature could ever mask (found by Fable scrutinize
+      // review, 2026-08-31) -- report that distinctly from a parse failure.
+      if (_meshLookup.size === 0) _meshUnavailableReason = 'no-mesh-attachments';
     } catch (e) {
-      if (!(e instanceof UnsupportedVersionError)) console.error('skel parse error:', e);
-      _meshMaskEnabled = false;
+      if (e instanceof UnsupportedVersionError) {
+        _meshUnavailableReason = 'unsupported-version';
+      } else {
+        console.error('skel parse error:', e);
+        _meshUnavailableReason = 'parse-error';
+      }
     }
-  } else {
-    _meshMaskEnabled = false;
   }
   if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
   _clearPreviewMemo();
@@ -475,13 +491,25 @@ export const AtlasAPI = {
     platform.savePref(key, value);
   },
 
+  /** Reads the persisted 'meshCropping' pref into _meshMaskEnabled. Call
+   *  once at app startup (mirrors the Repack pref's own init in script.js) —
+   *  NOT per atlas load, since this toggle persists like Repack's does. */
+  async init_mesh_mask_from_pref() {
+    _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
+  },
+
   get_mesh_mask_state() {
-    return { available: !!_meshLookup && _meshLookup.size > 0, enabled: _meshMaskEnabled };
+    return {
+      available: !!_meshLookup && _meshLookup.size > 0,
+      enabled: _meshMaskEnabled,
+      skelFileName: _currentSkel ? _currentSkel.name : null,
+      unavailableReason: _meshUnavailableReason,
+    };
   },
 
   async set_mesh_mask_enabled(enabled) {
-    if (!_meshLookup || _meshLookup.size === 0) return; // nothing to toggle
     _meshMaskEnabled = !!enabled;
+    AtlasAPI.set_pref('meshCropping', _meshMaskEnabled);
     if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
     _clearPreviewMemo();
   },
