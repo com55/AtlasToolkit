@@ -122,6 +122,39 @@ window.runCase = (name) => {
     check('(11,10) opaque under correct origW/origH mapping, transparent under packed-size regression (alpha > 200)', discriminator > 200, 'discriminator=' + discriminator);
     const masked = alpha(out, 16, 10);
     check('(16,10) masked to transparent under correct mapping — proves masking happened at all (alpha === 0)', masked === 0, 'masked=' + masked);
+  } else if (name === 'rotate90-masks-at-canonical-post-unrotate-dimensions') {
+    // Design spec Testing item 4 (rotation half — previously prose-only,
+    // found missing by whole-feature scrutinize review, 2026-08-31):
+    // cropAndRotate's output canvas is always canonical w x h regardless of
+    // rotate (core-region-ops.js sets canvas.width=w; canvas.height=h
+    // unconditionally), and maskInPlace reads the mask dimensions from that
+    // already-un-rotated sprite's own .width/.height -- so no rotate-swap
+    // compensation should be needed at mask time. This proves it rather
+    // than trusting the argument: w=20,h=10 (asymmetric, so a transpose
+    // would be visible) with rotate=90, same top-left-half triangle shape
+    // used elsewhere in this feature.
+    const src = makeSourceCanvas(30, 30, '#f00');
+    const region = { x: 0, y: 0, w: 20, h: 10, rotate: 90, offsets: null };
+    const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
+    const out = extractRegionFromPage(src, region, null, meshGeometry);
+    check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
+    check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
+    const inside = alpha(out, 2, 1);
+    const outside = alpha(out, 18, 8);
+    check('inside triangle stays opaque at canonical dimensions (alpha > 200)', inside > 200, 'inside=' + inside);
+    check('outside triangle masked to transparent at canonical dimensions (alpha === 0)', outside === 0, 'outside=' + outside);
+  } else if (name === 'rotate270-masks-at-canonical-post-unrotate-dimensions') {
+    // Same as rotate90 above, for the other swapped-footprint rotation value.
+    const src = makeSourceCanvas(30, 30, '#f00');
+    const region = { x: 0, y: 0, w: 20, h: 10, rotate: 270, offsets: null };
+    const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
+    const out = extractRegionFromPage(src, region, null, meshGeometry);
+    check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
+    check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
+    const inside = alpha(out, 2, 1);
+    const outside = alpha(out, 18, 8);
+    check('inside triangle stays opaque at canonical dimensions (alpha > 200)', inside > 200, 'inside=' + inside);
+    check('outside triangle masked to transparent at canonical dimensions (alpha === 0)', outside === 0, 'outside=' + outside);
   } else if (name === 'existing-3-arg-calls-unaffected') {
     const src = makeSourceCanvas(5, 5, '#0f0');
     const region = { x: 0, y: 0, w: 5, h: 5, rotate: 0, offsets: null };
@@ -152,7 +185,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['no-offsets-masks-at-sprite-size', 'offsets-branch-masks-at-origWH-not-packed-size', 'existing-3-arg-calls-unaffected'];
+const cases = ['no-offsets-masks-at-sprite-size', 'offsets-branch-masks-at-origWH-not-packed-size', 'rotate90-masks-at-canonical-post-unrotate-dimensions', 'rotate270-masks-at-canonical-post-unrotate-dimensions', 'existing-3-arg-calls-unaffected'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
