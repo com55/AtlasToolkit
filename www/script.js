@@ -47,6 +47,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   await _waitForPywebviewReady();
   initPanelResizer();
   initAppBar();
+  // Stamp the initial body.mode-extract class setMode()'s CSS-gated controls
+  // (Task 6: #repack-toggle-row vs #mesh-mask-toggle-row) depend on --
+  // setMode() is otherwise only called reactively (entering/exiting modify
+  // mode, or on a fresh atlas load while already in modify mode), so
+  // without this call both option rows would show simultaneously on first
+  // page load until the user toggles modes at least once (found via
+  // adversarial DOM smoke test, 2026-08-31).
+  setMode('extract');
   if (window.pywebview) {
     await _clearStaleServiceWorkerUnderDesktop();
   } else {
@@ -192,6 +200,9 @@ async function _resetUiAfterFreshLoad() {
   resetPreview();
   updateButtons();
   await loadRegions();
+  const { available, enabled } = await AtlasAPI.get_mesh_mask_state();
+  document.getElementById('chk-mesh-mask').checked = enabled;
+  document.getElementById('chk-mesh-mask').disabled = !available;
 
   // Native window title (old Python engine's load_atlas() used to do this;
   // the JS engine has no equivalent hook, so it's centralized here instead

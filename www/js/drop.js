@@ -55,6 +55,9 @@ async function processDroppedFiles(files) {
     clearOverlay();
     updateButtons();
     await loadRegions();
+    const { available, enabled } = await AtlasAPI.get_mesh_mask_state();
+    document.getElementById('chk-mesh-mask').checked = enabled;
+    document.getElementById('chk-mesh-mask').disabled = !available;
     showToast('Atlas loaded via drag & drop.', 'success');
     return;
   }
