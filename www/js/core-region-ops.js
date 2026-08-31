@@ -102,6 +102,18 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingEnabled = false;
 
+  // save()/restore() scope the translate+rotate to just this one drawImage
+  // call. Without it, the transform leaks onto this canvas's 2D context
+  // (canvas.getContext('2d') always returns the same context object), so
+  // any LATER drawing on this same canvas -- e.g. maskInPlace's
+  // destination-in composite, core-region-ops.js's own caller for the
+  // no-offsets + meshGeometry case -- silently inherits the leftover
+  // rotate/translate and lands in the wrong place. Was harmless before
+  // that caller existed (every other caller of this function only ever
+  // uses the returned canvas as a drawImage *source* elsewhere, never
+  // draws onto it a second time) -- found by a rotation acceptance test
+  // added during a whole-feature scrutinize review, 2026-08-31.
+  ctx.save();
   if (rotate === 90) {
     // Stored in atlas as h×w; un-rotate 90° CW (PIL ROTATE_270) → w×h.
     ctx.translate(w, 0);
@@ -119,6 +131,7 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   } else {
     ctx.drawImage(img, x, y, cropW, cropH, 0, 0, w, h);
   }
+  ctx.restore();
 
   return canvas;
 }
