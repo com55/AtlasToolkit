@@ -123,7 +123,7 @@ window.runCase = (name) => {
     const masked = alpha(out, 16, 10);
     check('(16,10) masked to transparent under correct mapping — proves masking happened at all (alpha === 0)', masked === 0, 'masked=' + masked);
   } else if (name === 'rotate90-masks-at-canonical-post-unrotate-dimensions') {
-    // Design spec Testing item 4 (rotation half — previously prose-only,
+    // Design spec Testing item 4 (rotation half -- previously prose-only,
     // found missing by whole-feature scrutinize review, 2026-08-31):
     // cropAndRotate's output canvas is always canonical w x h regardless of
     // rotate (core-region-ops.js sets canvas.width=w; canvas.height=h
@@ -133,6 +133,20 @@ window.runCase = (name) => {
     // than trusting the argument: w=20,h=10 (asymmetric, so a transpose
     // would be visible) with rotate=90, same top-left-half triangle shape
     // used elsewhere in this feature.
+    //
+    // This same test run found a REAL bug (fixed in core-region-ops.js):
+    // cropAndRotate's translate+rotate for rotate 90/180/270 was never
+    // reset, so it leaked onto the canvas's own 2D context and corrupted
+    // maskInPlace's later destination-in composite. The (2,1)/(18,8)
+    // check points below are proven discriminators, not guessed -- a
+    // round-2 review found the ANALOGOUS rotate270 points below (18,8 as
+    // the "outside" probe) coincidentally passed under BOTH the correct
+    // and the leaked-transform code (the corruption for rotate270 wipes
+    // that whole region to transparent either way), so all three rotate
+    // cases' points here were empirically re-derived: simulate both the
+    // correct code path and the leaked-transform-reintroduced path in a
+    // headless page, and only keep points where they actually disagree
+    // (with a 3x3-neighborhood stability check, not just a single sample).
     const src = makeSourceCanvas(30, 30, '#f00');
     const region = { x: 0, y: 0, w: 20, h: 10, rotate: 90, offsets: null };
     const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
@@ -140,21 +154,39 @@ window.runCase = (name) => {
     check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
     check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
     const inside = alpha(out, 2, 1);
-    const outside = alpha(out, 18, 8);
+    const outside = alpha(out, 16, 8);
+    check('inside triangle stays opaque at canonical dimensions (alpha > 200)', inside > 200, 'inside=' + inside);
+    check('outside triangle masked to transparent at canonical dimensions (alpha === 0)', outside === 0, 'outside=' + outside);
+  } else if (name === 'rotate180-masks-at-canonical-post-unrotate-dimensions') {
+    // Same as rotate90 above, for the third swapped-transform rotation
+    // value that had zero mesh-mask coverage before or after the
+    // save()/restore() fix (round-2 review finding, same pass as the
+    // rotate270 point re-derivation above).
+    const src = makeSourceCanvas(30, 30, '#f00');
+    const region = { x: 0, y: 0, w: 20, h: 10, rotate: 180, offsets: null };
+    const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
+    const out = extractRegionFromPage(src, region, null, meshGeometry);
+    check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
+    check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
+    const inside = alpha(out, 2, 1);
+    const outside = alpha(out, 7, 8);
     check('inside triangle stays opaque at canonical dimensions (alpha > 200)', inside > 200, 'inside=' + inside);
     check('outside triangle masked to transparent at canonical dimensions (alpha === 0)', outside === 0, 'outside=' + outside);
   } else if (name === 'rotate270-masks-at-canonical-post-unrotate-dimensions') {
-    // Same as rotate90 above, for the other swapped-footprint rotation value.
+    // Discriminator re-derived empirically (see rotate90's comment above)
+    // after the original (18,8) point was found to coincidentally pass
+    // under both correct and leaked-transform code for this rotation
+    // value specifically -- the leaked-270 transform only ever paints
+    // device x in [0,10), so any probe at x>=10 gets wiped to transparent
+    // by destination-in regardless of whether masking is correct.
     const src = makeSourceCanvas(30, 30, '#f00');
     const region = { x: 0, y: 0, w: 20, h: 10, rotate: 270, offsets: null };
     const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
     const out = extractRegionFromPage(src, region, null, meshGeometry);
     check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
     check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
-    const inside = alpha(out, 2, 1);
-    const outside = alpha(out, 18, 8);
-    check('inside triangle stays opaque at canonical dimensions (alpha > 200)', inside > 200, 'inside=' + inside);
-    check('outside triangle masked to transparent at canonical dimensions (alpha === 0)', outside === 0, 'outside=' + outside);
+    const discriminator = alpha(out, 8, 2);
+    check('(8,2) opaque under correct mapping -- reads transparent under the leaked-transform regression (alpha > 200)', discriminator > 200, 'discriminator=' + discriminator);
   } else if (name === 'existing-3-arg-calls-unaffected') {
     const src = makeSourceCanvas(5, 5, '#0f0');
     const region = { x: 0, y: 0, w: 5, h: 5, rotate: 0, offsets: null };
@@ -185,7 +217,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['no-offsets-masks-at-sprite-size', 'offsets-branch-masks-at-origWH-not-packed-size', 'rotate90-masks-at-canonical-post-unrotate-dimensions', 'rotate270-masks-at-canonical-post-unrotate-dimensions', 'existing-3-arg-calls-unaffected'];
+const cases = ['no-offsets-masks-at-sprite-size', 'offsets-branch-masks-at-origWH-not-packed-size', 'rotate90-masks-at-canonical-post-unrotate-dimensions', 'rotate180-masks-at-canonical-post-unrotate-dimensions', 'rotate270-masks-at-canonical-post-unrotate-dimensions', 'existing-3-arg-calls-unaffected'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
