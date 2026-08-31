@@ -88,12 +88,20 @@ window.runCase = (name) => {
     // ORIGINAL 40x40 UV space). Two thresholds fall out of this:
     //   correct (origW=40, post-paste):        canvas x = 0.37*40   = 14.8
     //   packed-size regression (currentW=15, pre-paste, +pasteX 3): canvas x = 0.37*15+3 = 8.55
-    // Three query pixels, each with a numerically-verified >=1-full-pixel
-    // margin from every relevant threshold/edge (no anti-aliasing ambiguity):
-    //   x=8  (margin 5)   : opaque under BOTH mappings — sanity, content exists at all.
-    //   x=11 (margin 2.45): opaque under correct, transparent under the
-    //                       packed-size regression — the coordinate-space discriminator.
-    //   x=16 (margin 1)   : transparent under correct mapping — proves the mask
+    // Three query pixels:
+    //   x=8  (margin 5.8 from the correct threshold 14.8): opaque under the
+    //                       correct mapping — sanity, content exists at all.
+    //                       NOT a discriminator itself: the packed-size
+    //                       regression's threshold (8.55) falls inside this
+    //                       pixel's own span [8,9), so it reads partially
+    //                       opaque (not cleanly one way or the other) under
+    //                       that mapping — that ambiguity is fine here since
+    //                       x=11 below is the actual discriminator.
+    //   x=11 (margin 2.45, full-pixel, no AA ambiguity): opaque under correct,
+    //                       transparent under the packed-size regression —
+    //                       the coordinate-space discriminator.
+    //   x=16 (margin 1, full-pixel, no AA ambiguity): transparent under
+    //                       correct mapping — proves the mask
     //                       actually removes content on this branch at all (this
     //                       case previously had no such assertion: deleting the
     //                       offsets-branch maskInPlace() call outright still
@@ -109,7 +117,7 @@ window.runCase = (name) => {
     check('out.width === 40', out.width === 40, 'width=' + out.width);
     check('out.height === 40', out.height === 40, 'height=' + out.height);
     const sanity = alpha(out, 8, 10);
-    check('content visible well inside opaque range of both mappings (alpha > 200)', sanity > 200, 'sanity=' + sanity);
+    check('content visible under the correct mapping, well before its threshold (alpha > 200)', sanity > 200, 'sanity=' + sanity);
     const discriminator = alpha(out, 11, 10);
     check('(11,10) opaque under correct origW/origH mapping, transparent under packed-size regression (alpha > 200)', discriminator > 200, 'discriminator=' + discriminator);
     const masked = alpha(out, 16, 10);
