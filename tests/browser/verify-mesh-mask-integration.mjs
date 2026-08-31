@@ -137,16 +137,16 @@ window.runCase = (name) => {
     // This same test run found a REAL bug (fixed in core-region-ops.js):
     // cropAndRotate's translate+rotate for rotate 90/180/270 was never
     // reset, so it leaked onto the canvas's own 2D context and corrupted
-    // maskInPlace's later destination-in composite. The (2,1)/(18,8)
-    // check points below are proven discriminators, not guessed -- a
-    // round-2 review found the ANALOGOUS rotate270 points below (18,8 as
-    // the "outside" probe) coincidentally passed under BOTH the correct
-    // and the leaked-transform code (the corruption for rotate270 wipes
-    // that whole region to transparent either way), so all three rotate
-    // cases' points here were empirically re-derived: simulate both the
-    // correct code path and the leaked-transform-reintroduced path in a
-    // headless page, and only keep points where they actually disagree
-    // (with a 3x3-neighborhood stability check, not just a single sample).
+    // maskInPlace's later destination-in composite. The (2,1)/(16,8)
+    // check points below are proven discriminators, not guessed -- the
+    // original naive choice (18,8) coincidentally passed under BOTH the
+    // correct and the leaked-transform code for the rotate270 case
+    // specifically (the corruption for rotate270 wipes that whole region
+    // to transparent either way), so all three rotate cases' points here
+    // were empirically re-derived: simulate both the correct code path
+    // and the leaked-transform-reintroduced path in a headless page, and
+    // only keep points where they actually disagree (with a 3x3-
+    // neighborhood stability check, not just a single sample).
     const src = makeSourceCanvas(30, 30, '#f00');
     const region = { x: 0, y: 0, w: 20, h: 10, rotate: 90, offsets: null };
     const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
@@ -179,6 +179,14 @@ window.runCase = (name) => {
     // value specifically -- the leaked-270 transform only ever paints
     // device x in [0,10), so any probe at x>=10 gets wiped to transparent
     // by destination-in regardless of whether masking is correct.
+    //
+    // A round-2 review of THAT fix found this case still had a separate
+    // gap: it only ever asserted the discriminator was opaque, with no
+    // alpha===0 check anywhere -- so a "masking silently does nothing for
+    // rotate270" regression (the same class of blind spot 299bab1 already
+    // fixed once elsewhere in this feature) would ship undetected. (16,8)
+    // is transparent under the correct mapping (confirmed empirically,
+    // same as rotate90's own outside probe) and serves that role here.
     const src = makeSourceCanvas(30, 30, '#f00');
     const region = { x: 0, y: 0, w: 20, h: 10, rotate: 270, offsets: null };
     const meshGeometry = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
@@ -186,7 +194,9 @@ window.runCase = (name) => {
     check('out.width === 20 (canonical, not swapped to 10)', out.width === 20, 'width=' + out.width);
     check('out.height === 10 (canonical, not swapped to 20)', out.height === 10, 'height=' + out.height);
     const discriminator = alpha(out, 8, 2);
+    const outside = alpha(out, 16, 8);
     check('(8,2) opaque under correct mapping -- reads transparent under the leaked-transform regression (alpha > 200)', discriminator > 200, 'discriminator=' + discriminator);
+    check('(16,8) masked to transparent -- proves masking happened at all (alpha === 0)', outside === 0, 'outside=' + outside);
   } else if (name === 'existing-3-arg-calls-unaffected') {
     const src = makeSourceCanvas(5, 5, '#0f0');
     const region = { x: 0, y: 0, w: 5, h: 5, rotate: 0, offsets: null };
