@@ -47,11 +47,15 @@ export function setMode(mode) {
   updateModeToggleUI();
   updatePageSwitcher();
   // #repack-options is always-visible now (round-4-reviewed design decision
-  // -- see the mesh-mask design spec's UI section), but its own height still
-  // changes as Repack vs. Mesh-mask controls show/hide per mode above, so
-  // the stacked-layout splitter's floor (panel-resizer.js's
-  // minRightHeight()) still needs to re-clamp here -- same call, different
-  // reason than before.
+  // -- see the mesh-mask design spec's UI section) and its own height is
+  // fixed (--panel-header-h), unaffected by which of its children show per
+  // mode -- so panel-resizer.js's minRightHeight() (repackOptions height +
+  // statusBar height) no longer actually changes across a mode switch.
+  // Keeping this call anyway: harmless (a no-op re-clamp to the same
+  // floor), and it stays correct if minRightHeight()'s inputs ever change
+  // again (corrected post-review, Fable, 2026-08-31 -- the previous comment
+  // here claimed #repack-options' height still changed, which stopped being
+  // true once this task removed its whole-container .hidden toggle).
   refreshPanelSplit();
 }
 
