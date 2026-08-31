@@ -131,14 +131,16 @@ window.runCase = async (name) => {
     const proc = new AtlasProcessor(ATLAS_TEXT);
     await proc.loadImages({ 'page1.png': solidDataUrl(10, 10, '#f0f') });
     let threw = false;
+    let threwMessage = '';
     let out = null;
     try {
       proc.setMeshMaskData(null, true); // enabled, but no lookup at all
       out = proc.extractRegion('myregion');
     } catch (e) {
       threw = true;
+      threwMessage = e && e.message;
     }
-    check('does not throw when lookup is null and enabled is true', !threw, 'threw=' + threw);
+    check('does not throw when lookup is null and enabled is true', !threw, 'threw=' + threw + (threwMessage ? ' (' + threwMessage + ')' : ''));
     if (!threw) {
       const outsideWhereATriangleWouldHaveMasked = alpha(out, 8, 8);
       check('null lookup -> meshGeometry null -> unmasked full rectangle (alpha === 255)', outsideWhereATriangleWouldHaveMasked === 255, 'outside=' + outsideWhereATriangleWouldHaveMasked);
