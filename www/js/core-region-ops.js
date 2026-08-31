@@ -21,6 +21,7 @@
  * Node (used by `node --test`); the canvas helpers require a DOM/Canvas and
  * are exercised via a headless-browser pixel test.
  */
+import { rasterizeMeshMask } from './region-mesh-mask.js';
 
 /**
  * Python `round()` parity (banker's rounding): on an exact .5 tie, round to
@@ -131,12 +132,18 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
  * banker's-rounding of scaled coordinates and the Y-flip paste
  * (paste_y = origH - offY - spriteH).
  *
+ * When `meshGeometry` is provided, the result is additionally masked in place
+ * via destination-in: the no-offsets path masks the packed `sprite` at its own
+ * (currentW, currentH); the offsets path masks the `canvas` at (origW, origH)
+ * AFTER the sprite is pasted — never at the packed sprite's size.
+ *
  * @param {CanvasImageSource} pageImage
  * @param {{x:number,y:number,w:number,h:number,rotate:number,offsets:?number[]}} region
  * @param {?{scaleX:number,scaleY:number}} [page]
+ * @param {?{uvs:number[],triangles:number[]}} [meshGeometry]
  * @returns {HTMLCanvasElement}
  */
-export function extractRegionFromPage(pageImage, region, page = null) {
+export function extractRegionFromPage(pageImage, region, page = null, meshGeometry = null) {
   let { x, y, w: rawW, h: rawH } = region;
   const rot = region.rotate;
 
@@ -153,7 +160,10 @@ export function extractRegionFromPage(pageImage, region, page = null) {
   const currentW = sprite.width;
   const currentH = sprite.height;
 
-  if (!region.offsets) return sprite;
+  if (!region.offsets) {
+    if (meshGeometry) maskInPlace(sprite, meshGeometry, currentW, currentH);
+    return sprite;
+  }
 
   let [offX, offY, origW, origH] = region.offsets;
   if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
@@ -173,5 +183,19 @@ export function extractRegionFromPage(pageImage, region, page = null) {
   const pasteX = offX;
   const pasteY = origH - offY - currentH;
   ctx.drawImage(sprite, pasteX, pasteY);
+  if (meshGeometry) maskInPlace(canvas, meshGeometry, origW, origH);
   return canvas;
+}
+
+/** Composites a mesh mask onto `canvas` in place via destination-in —
+ *  correct for straight (non-premultiplied) alpha. PMA gating happens at
+ *  the caller (AtlasProcessor.extractRegion, a later task) — meshGeometry
+ *  should already be null for PMA pages by the time it reaches here. */
+function maskInPlace(canvas, meshGeometry, width, height) {
+  const mask = rasterizeMeshMask(meshGeometry.uvs, meshGeometry.triangles, width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask, 0, 0);
+  ctx.restore();
 }
