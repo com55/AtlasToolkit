@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v35';
+const CACHE_NAME = 'atlas-toolkit-v36';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
@@ -25,9 +25,15 @@ const CORE_ASSETS = [
   'js/platform.js',
   'js/preview.js',
   'js/region-list.js',
+  'js/region-mesh-lookup.js',
   'js/region-mesh-mask.js',
   'js/state.js',
   'js/updates.js',
+  'js/vendor/spine-skeleton-binary/binary-reader.js',
+  'js/vendor/spine-skeleton-binary/detect-version.js',
+  'js/vendor/spine-skeleton-binary/index.js',
+  'js/vendor/spine-skeleton-binary/read-skeleton-38.js',
+  'js/vendor/spine-skeleton-binary/read-skeleton-42.js',
   'js/zip.js',
 ].map((path) => new URL(path, APP_BASE_URL).href);
 

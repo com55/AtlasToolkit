@@ -10,6 +10,8 @@ import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64T
 import { createZip } from './zip.js';
 import { AtlasSession } from './atlas-session.js';
 import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
+import { parseSkeleton, UnsupportedVersionError } from './vendor/spine-skeleton-binary/index.js';
+import { buildMeshLookup } from './region-mesh-lookup.js';
 
 /** Returned by load helpers when the user cancels a missing-images dialog. */
 export const LOAD_CANCELLED = 'cancelled';
@@ -28,6 +30,9 @@ let _currentAtlasText = '';
 let _session = null;               // AtlasSession — owns modify-mode state / mod batches
 let _lastSaveHandle = null;
 let _currentSkel = null; // { name, blob } | null
+let _parsedSkeleton = null;   // {version, attachments} | null
+let _meshLookup = null;       // Map<name, {uvs,triangles}> | null
+let _meshMaskEnabled = false; // user toggle state, reset per atlas load
 let _previewMemo = { key: null, value: null };
 
 function _clearPreviewMemo() {
@@ -378,30 +383,54 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
 async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
   _currentSkel = null;
   const skelName = siblingSkelFilename(atlasFile?.name);
-  if (!skelName) return;
+  if (!skelName) { await _reparseSkelAndPushToProcessor(); return; }
 
   const fromList = pickSiblingSkelFile(atlasFile.name, extraFiles);
   if (fromList) {
     _currentSkel = { name: skelName, blob: fromList };
+    await _reparseSkelAndPushToProcessor();
     return;
   }
 
-  if (!sourceDir) return;
+  if (!sourceDir) { await _reparseSkelAndPushToProcessor(); return; }
   try {
     let skelPath = joinNativePath(sourceDir, skelName);
     if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
       const atlasPath = joinNativePath(sourceDir, atlasFile.name);
       const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
-      if (!resolved) return;
-      skelPath = resolved;
+      if (resolved) skelPath = resolved;
+      else { await _reparseSkelAndPushToProcessor(); return; }
     }
     const file = await loadFileAsFile(skelPath, 'application/octet-stream');
-    if (file && file.size > 0) {
-      _currentSkel = { name: skelName, blob: file };
-    }
+    if (file && file.size > 0) _currentSkel = { name: skelName, blob: file };
   } catch (_) {
-    // No sibling on disk — Copy .skel is a no-op for this atlas.
+    // No sibling on disk — Copy .skel is a no-op; mask state stays unavailable.
   }
+  await _reparseSkelAndPushToProcessor();
+}
+
+/** Parses _currentSkel.blob (if set) into _parsedSkeleton/_meshLookup and
+ *  pushes the result into _processor, then clears the preview memo since
+ *  the effective output for already-cached selections has changed. Safe
+ *  to call with _currentSkel === null (clears mask state instead). */
+async function _reparseSkelAndPushToProcessor() {
+  _parsedSkeleton = null;
+  _meshLookup = null;
+  if (_currentSkel) {
+    try {
+      const bytes = new Uint8Array(await _currentSkel.blob.arrayBuffer());
+      _parsedSkeleton = parseSkeleton(bytes);
+      _meshLookup = buildMeshLookup(_parsedSkeleton);
+      _meshMaskEnabled = true; // default on when a compatible .skel parses
+    } catch (e) {
+      if (!(e instanceof UnsupportedVersionError)) console.error('skel parse error:', e);
+      _meshMaskEnabled = false;
+    }
+  } else {
+    _meshMaskEnabled = false;
+  }
+  if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
+  _clearPreviewMemo();
 }
 
 /** Prefer the skel captured at load; otherwise retry from the atlas folder
@@ -439,6 +468,27 @@ export const AtlasAPI = {
 
   set_pref(key, value) {
     platform.savePref(key, value);
+  },
+
+  get_mesh_mask_state() {
+    return { available: !!_meshLookup, enabled: _meshMaskEnabled };
+  },
+
+  async set_mesh_mask_enabled(enabled) {
+    if (!_meshLookup) return; // nothing to toggle
+    _meshMaskEnabled = !!enabled;
+    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
+    _clearPreviewMemo();
+  },
+
+  /** Manual .skel picker — covers sibling auto-resolve misses and the
+   *  browser/PWA target where .skel isn't in the picked/dropped file set. */
+  async pick_skel_file() {
+    const files = await _pickFiles({ accept: '.skel', multiple: false });
+    if (files.length === 0) return false;
+    _currentSkel = { name: files[0].name, blob: files[0] };
+    await _reparseSkelAndPushToProcessor();
+    return true;
   },
 
   /**
