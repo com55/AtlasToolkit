@@ -49,6 +49,16 @@ jobs:
       - name: Install Dependencies
         run: uv export --no-hashes -o requirements.txt && pip install -r requirements.txt
 
+      - name: Pull vendor dependencies
+        shell: bash
+        env:
+          VENDOR_SOURCE_REPO: ${{ secrets.VENDOR_SOURCE_REPO }}
+          VENDOR_SOURCE_TAG: ${{ secrets.VENDOR_SOURCE_TAG }}
+        run: |
+          git clone --quiet --depth 1 --branch "$VENDOR_SOURCE_TAG" "$VENDOR_SOURCE_REPO" "$RUNNER_TEMP/vendor-src"
+          mkdir -p www/js/vendor/spine-skeleton-binary
+          cp "$RUNNER_TEMP"/vendor-src/src/*.js www/js/vendor/spine-skeleton-binary/
+
       - name: Get version for build
         id: build_version
         shell: powershell

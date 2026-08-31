@@ -28,6 +28,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Pull vendor dependencies
+        env:
+          VENDOR_SOURCE_REPO: ${{ secrets.VENDOR_SOURCE_REPO }}
+          VENDOR_SOURCE_TAG: ${{ secrets.VENDOR_SOURCE_TAG }}
+        run: |
+          git clone --quiet --depth 1 --branch "$VENDOR_SOURCE_TAG" "$VENDOR_SOURCE_REPO" "$RUNNER_TEMP/vendor-src"
+          mkdir -p www/js/vendor/spine-skeleton-binary
+          cp "$RUNNER_TEMP"/vendor-src/src/*.js www/js/vendor/spine-skeleton-binary/
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
