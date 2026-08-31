@@ -247,6 +247,11 @@ body.resizing {
   gap: 6px;
 }
 
+body.mode-modify #mesh-mask-toggle-row,
+body.mode-modify #btn-pick-skel { display: none; }
+body.mode-extract #repack-toggle-row,
+body.mode-extract #btn-repack-info { display: none; }
+
 #status-bar {
   padding: 0 12px;
 }

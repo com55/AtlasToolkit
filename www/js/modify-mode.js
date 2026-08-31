@@ -24,22 +24,21 @@ function updateModifyActionButtons() {
 
 export function setMode(mode) {
   state.currentMode = mode;
+  document.body.classList.toggle('mode-modify', mode === 'modify');
+  document.body.classList.toggle('mode-extract', mode !== 'modify');
   const extractControls = document.getElementById('extract-controls');
   const modifyControls  = document.getElementById('modify-controls');
-  const repackOptions   = document.getElementById('repack-options');
   const saveSplit       = document.getElementById('save-split');
   const dropMsg         = document.getElementById('drop-message-text');
 
   if (mode === 'modify') {
     extractControls.classList.add('hidden');
     modifyControls.classList.remove('hidden');
-    repackOptions.classList.remove('hidden');
     saveSplit.classList.remove('hidden');
     dropMsg.textContent = 'Drop image to modify, or .atlas to load'; // matches old Python engine's ui/js/mode.js
   } else {
     extractControls.classList.remove('hidden');
     modifyControls.classList.add('hidden');
-    repackOptions.classList.add('hidden');
     saveSplit.classList.add('hidden');
     closeSaveMenu();
     dropMsg.textContent = 'Drop .atlas file here to load';
@@ -47,8 +46,12 @@ export function setMode(mode) {
   }
   updateModeToggleUI();
   updatePageSwitcher();
-  // repack-options just appeared/disappeared -- re-clamp the stacked-layout
-  // split so the splitter follows instead of leaving it stranded.
+  // #repack-options is always-visible now (round-4-reviewed design decision
+  // -- see the mesh-mask design spec's UI section), but its own height still
+  // changes as Repack vs. Mesh-mask controls show/hide per mode above, so
+  // the stacked-layout splitter's floor (panel-resizer.js's
+  // minRightHeight()) still needs to re-clamp here -- same call, different
+  // reason than before.
   refreshPanelSplit();
 }
 
@@ -292,5 +295,21 @@ document.getElementById('chk-repack').addEventListener('change', async (e) => {
   } catch (err) {
     console.error(err);
     showToast('Repack toggle failed.', 'error');
+  }
+});
+
+// --- Mesh-mask Event Listeners ---
+document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
+  await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
+  updatePreview(getSelectedNames());
+});
+
+document.getElementById('btn-pick-skel').addEventListener('click', async () => {
+  const picked = await AtlasAPI.pick_skel_file();
+  if (picked) {
+    const { available, enabled } = AtlasAPI.get_mesh_mask_state();
+    document.getElementById('chk-mesh-mask').checked = enabled;
+    document.getElementById('chk-mesh-mask').disabled = !available;
+    updatePreview(getSelectedNames());
   }
 });
