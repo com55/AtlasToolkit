@@ -29,6 +29,11 @@ const CORE_ASSETS = [
   'js/region-mesh-mask.js',
   'js/state.js',
   'js/updates.js',
+  // These 5 filenames are pinned to spine-skeleton-binary-js@v1.0.0's own
+  // src/*.js file list (see scripts/pull-vendor-deps.sh) -- cache.addAll()
+  // below is atomic, so a future vendor-tag bump that adds/renames a file
+  // here without a matching edit fails the whole SW install, not just
+  // masking. Keep this list in sync with that script's TAG when bumping it.
   'js/vendor/spine-skeleton-binary/binary-reader.js',
   'js/vendor/spine-skeleton-binary/detect-version.js',
   'js/vendor/spine-skeleton-binary/index.js',
