@@ -95,7 +95,7 @@ body {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  min-width: 220px;
+  min-width: 150px;
   background: #2d2d2d;
   border: 1px solid #555;
   border-radius: 3px;
@@ -533,6 +533,39 @@ button {
   color: #fff;
   border-color: #6a6a6a;
   background-color: #3a3a3a;
+}
+
+/* .skel picker button (Mesh Cropping row) -- text button, not the round
+   icon buttons above, since its content is a dynamic filename/message. */
+.skel-picker-btn {
+  min-width: 0;
+  max-width: 160px;
+  padding: 0 10px;
+  border-radius: 3px;
+  border: 1px solid #555;
+  background-color: #2f2f2f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skel-picker-btn:hover {
+  border-color: #6a6a6a;
+  background-color: #3a3a3a;
+}
+/* No .skel picked yet. */
+.skel-picker-btn.skel-missing {
+  color: #ffc107;
+  border-color: #806400;
+}
+/* .skel picked but unusable (wrong version / parse error / no Mesh attachments). */
+.skel-picker-btn.skel-invalid {
+  color: #f44336;
+  border-color: #7a2620;
+}
+/* .skel picked and usable. */
+.skel-picker-btn.skel-ok {
+  color: #4caf50;
+  border-color: #2d6930;
 }
 
 #repack-info-overlay {

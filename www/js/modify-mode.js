@@ -302,18 +302,57 @@ document.getElementById('chk-repack').addEventListener('change', async (e) => {
   }
 });
 
-// --- Mesh-mask Event Listeners ---
+// --- Mesh Cropping Event Listeners ---
+
+const MESH_UNAVAILABLE_MESSAGES = {
+  'unsupported-version': 'This .skel file uses a Spine version this app does not support (3.8.x and 4.2.x only).',
+  'parse-error': 'This .skel file could not be read -- it may be corrupted or not a valid Spine skeleton file.',
+  'no-mesh-attachments': 'This .skel file parsed successfully but contains no Mesh attachments to crop with.',
+};
+
+/** Syncs the Mesh Cropping toggle + .skel picker button from
+ *  AtlasAPI.get_mesh_mask_state(). Call after anything that can change that
+ *  state: an atlas load (either load path), the toggle itself, or a
+ *  successful pick_skel_file(). The toggle's checked state always reflects
+ *  the user's persisted preference (like Repack's), independent of the
+ *  current atlas's .skel availability -- the picker button communicates
+ *  availability instead, and is hidden entirely while the toggle is off. */
+export function updateMeshCroppingUI() {
+  const { available, enabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
+  document.getElementById('chk-mesh-mask').checked = enabled;
+
+  const btn = document.getElementById('btn-pick-skel');
+  if (!enabled) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.classList.remove('skel-missing', 'skel-invalid', 'skel-ok');
+  if (!skelFileName) {
+    btn.textContent = '⚠️ Choose .skel file';
+    btn.classList.add('skel-missing');
+    btn.title = 'Pick a .skel file to enable mesh-based cropping.';
+  } else if (!available) {
+    btn.textContent = '⚠️ ' + skelFileName;
+    btn.classList.add('skel-invalid');
+    btn.title = MESH_UNAVAILABLE_MESSAGES[unavailableReason] || 'This .skel file cannot be used for mesh cropping.';
+  } else {
+    btn.textContent = skelFileName;
+    btn.classList.add('skel-ok');
+    btn.title = `Mesh Cropping active using ${skelFileName}. Click to choose a different file.`;
+  }
+}
+
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
   await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
+  updateMeshCroppingUI();
   updatePreview(getSelectedNames());
 });
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();
   if (picked) {
-    const { available, enabled } = AtlasAPI.get_mesh_mask_state();
-    document.getElementById('chk-mesh-mask').checked = enabled;
-    document.getElementById('chk-mesh-mask').disabled = !available;
+    updateMeshCroppingUI();
     updatePreview(getSelectedNames());
   }
 });
