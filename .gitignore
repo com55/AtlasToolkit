@@ -28,3 +28,6 @@ test*
 .worktrees
 # Real-world atlas fixtures for the pixel-oracle harness (local scratch data)
 .workspaces
+
+# Pulled fresh at build/dev time -- never committed.
+www/js/vendor/spine-skeleton-binary
