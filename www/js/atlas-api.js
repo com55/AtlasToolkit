@@ -421,7 +421,12 @@ async function _reparseSkelAndPushToProcessor() {
       const bytes = new Uint8Array(await _currentSkel.blob.arrayBuffer());
       _parsedSkeleton = parseSkeleton(bytes);
       _meshLookup = buildMeshLookup(_parsedSkeleton);
-      _meshMaskEnabled = true; // default on when a compatible .skel parses
+      // Default on only if there's actually usable geometry — buildMeshLookup
+      // always returns a Map (never null), so an all-Region .skel or one with
+      // zero Mesh attachments would otherwise report available+enabled with
+      // no pixel this feature could ever mask (found by Fable scrutinize
+      // review, 2026-08-31).
+      _meshMaskEnabled = _meshLookup.size > 0;
     } catch (e) {
       if (!(e instanceof UnsupportedVersionError)) console.error('skel parse error:', e);
       _meshMaskEnabled = false;
@@ -471,11 +476,11 @@ export const AtlasAPI = {
   },
 
   get_mesh_mask_state() {
-    return { available: !!_meshLookup, enabled: _meshMaskEnabled };
+    return { available: !!_meshLookup && _meshLookup.size > 0, enabled: _meshMaskEnabled };
   },
 
   async set_mesh_mask_enabled(enabled) {
-    if (!_meshLookup) return; // nothing to toggle
+    if (!_meshLookup || _meshLookup.size === 0) return; // nothing to toggle
     _meshMaskEnabled = !!enabled;
     if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
     _clearPreviewMemo();
