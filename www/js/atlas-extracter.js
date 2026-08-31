@@ -52,6 +52,8 @@ export class AtlasProcessor {
     this.regions = {};       // name → AtlasRegion (ordered by insertion)
     this._loadedImages = {}; // pageName → HTMLImageElement
     this._pageMap = {};      // pageName → AtlasPage
+    this._meshLookup = null;   // Map<regionName, {uvs, triangles}> | null
+    this._maskEnabled = false;
     this._parse();
   }
 
@@ -126,6 +128,14 @@ export class AtlasProcessor {
     return coreCropAndRotate(img, x, y, w, h, rotate);
   }
 
+  /** Wired from atlas-api.js whenever the sibling .skel is (re)parsed or
+   *  the mesh-mask toggle flips. `lookup` may be null (no .skel / parse
+   *  failed / unsupported version). */
+  setMeshMaskData(lookup, enabled) {
+    this._meshLookup = lookup;
+    this._maskEnabled = enabled;
+  }
+
   /** Extract a single region as a canvas (includes offset padding). */
   extractRegion(name) {
     const region = this.regions[name];
@@ -133,7 +143,10 @@ export class AtlasProcessor {
     const baseImg = this._loadedImages[region.pageFilename];
     if (!baseImg) return null;
     const page = this._pageMap[region.pageFilename];
-    return extractRegionFromPage(baseImg, region, page);
+    const meshGeometry = (this._maskEnabled && this._meshLookup && !page?.pma)
+      ? (this._meshLookup.get(name) ?? null)
+      : null;
+    return extractRegionFromPage(baseImg, region, page, meshGeometry);
   }
 
   /** Extract a single region as a blob: URL (no base64). */
