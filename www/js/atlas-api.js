@@ -617,12 +617,15 @@ export const AtlasAPI = {
 
   get_region_names() {
     if (!_processor) return [];
-    return Object.keys(_processor.regions);
+    return Object.entries(_processor.regions).map(([key, region]) => ({
+      key,
+      label: region.atlasName || key,
+    }));
   },
 
-  get_region_page_name(regionName) {
-    if (!_processor || !regionName) return '';
-    const region = _processor.regions[regionName];
+  get_region_page_name(key) {
+    if (!_processor || !key) return '';
+    const region = _processor.regions[key];
     return region ? region.pageFilename : '';
   },
 
@@ -647,26 +650,26 @@ export const AtlasAPI = {
 
   /**
    * Extract regions to files (downloads).
-   * @param {string[]|null} regionNames  null = extract all
+   * @param {{key:string,label:string}[]|null} regions  null = extract all
    */
-  async extract_files(regionNames) {
+  async extract_files(regions) {
     if (!_processor) return 'No atlas loaded.';
-    const targets = regionNames || Object.keys(_processor.regions);
+    const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
     const extracted = [];
 
     let count = 0;
-    for (const name of targets) {
-      const canvas = _processor.extractRegion(name);
+    for (const { key, label } of targets) {
+      const canvas = _processor.extractRegion(key);
       if (!canvas) continue;
       try {
-        const safeName = name.replace(/[^\w.\- ]/g, '_');
+        const safeName = label.replace(/[^\w.\- ]/g, '_');
         const blob = await _canvasToBlob(canvas);
         extracted.push({ filename: `${safeName}.png`, blob });
         count++;
       } catch (e) {
-        console.error(`Failed to extract ${name}:`, e);
+        console.error(`Failed to extract ${key}:`, e);
       }
     }
 
@@ -914,5 +917,22 @@ export const AtlasAPI = {
   },
 
 };
+
+/**
+ * Test-only: force a region's display label to diverge from its stable
+ * internal key, so a test can verify the key/label split is wired
+ * correctly end-to-end (nothing in production behavior creates this
+ * divergence yet -- see the region-identity-key-refactor spec's §
+ * Acceptance criterion). Deliberately a plain named export, NOT attached
+ * to the `AtlasAPI` object or `window` -- reachable only via a direct ES
+ * module import (`import { __testOnlySetLabel } from './atlas-api.js'`),
+ * the same access pattern `tests/browser/verify-ui-flows.mjs` already
+ * uses for other module internals. Not part of the public API.
+ */
+export function __testOnlySetLabel(key, label) {
+  if (_processor && _processor.regions[key]) {
+    _processor.regions[key].atlasName = label;
+  }
+}
 
 export { _loadAtlasFiles };
