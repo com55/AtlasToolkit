@@ -1,5 +1,5 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedNames } from './state.js';
+import { state, getSelectedRegions } from './state.js';
 import { isPortrait } from './platform.js';
 
 export const previewContainer = document.getElementById('preview-container');
@@ -75,13 +75,17 @@ export function drawRegionOverlay() {
   const lineWidth = 3;
 
   const multiPage = state.modifyPages.length > 1;
-  for (const name of getSelectedNames()) {
-    const bounds = state.modifyRegionBounds[name];
+  for (const { key, label } of getSelectedRegions()) {
+    // Bounds/page lookups below are keyed by the engine's internal key
+    // (state.modifyRegionBounds/modifyRegionPages, built in atlas-session.js
+    // from the pristine parse) -- .label is only ever used for the drawn
+    // text at the bottom of this loop.
+    const bounds = state.modifyRegionBounds[key];
     if (!bounds) continue;
     // Multi-page: a region's bounds are page-relative, so only draw regions
     // that belong to the page currently shown in the preview.
-    if (multiPage && state.modifyRegionPages[name]
-        && state.modifyRegionPages[name] !== state.modifyActivePage) continue;
+    if (multiPage && state.modifyRegionPages[key]
+        && state.modifyRegionPages[key] !== state.modifyActivePage) continue;
     const [bx, by, bw, bh, rotate] = bounds;
     const isRotated = rotate === 90 || rotate === 270;
     const drawW = isRotated ? bh : bw;
@@ -97,13 +101,13 @@ export function drawRegionOverlay() {
 
     const fontSize = 13;
     ctx.font = `bold ${fontSize}px "Segoe UI", sans-serif`;
-    const textW = ctx.measureText(name).width;
+    const textW = ctx.measureText(label).width;
     const labelX = rx;
     const labelY = ry - lineWidth - 2;
     ctx.fillStyle = 'rgba(255, 60, 60, 0.85)';
     ctx.fillRect(labelX - 1, labelY - fontSize, textW + 8, fontSize + 4);
     ctx.fillStyle = 'white';
-    ctx.fillText(name, labelX + 3, labelY - 1);
+    ctx.fillText(label, labelX + 3, labelY - 1);
   }
 }
 
@@ -112,27 +116,29 @@ export function clearOverlay() {
   if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
 }
 
-export async function updatePreview(names) {
+export async function updatePreview(regions) {
   const status = document.getElementById('status-text');
-  if (!names || names.length === 0) {
+  if (!regions || regions.length === 0) {
     previewImg.style.display = 'none';
     status.innerText = 'No selection';
     updateSaveMergedButton();
     return;
   }
-  const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(names) : null;
+  const keys = regions.map(r => r.key);
+  const labels = regions.map(r => r.label);
+  const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(keys) : null;
   if (base64Img) {
     setPreviewSrc(base64Img);
     previewImg.style.display = 'block';
-    status.innerText = names.length === 1 ? `Previewing: ${names[0]}` : `Previewing: ${names.length} regions`;
+    status.innerText = labels.length === 1 ? `Previewing: ${labels[0]}` : `Previewing: ${labels.length} regions`;
     previewImg.onload = function () {
       resetPreview();
       const containerW = previewContainer.clientWidth - 40;
       const containerH = previewContainer.clientHeight - 40;
       const imgW = previewImg.naturalWidth, imgH = previewImg.naturalHeight;
-      status.innerText = names.length === 1
-        ? `Previewing: ${names[0]} (${imgW}x${imgH})`
-        : `Previewing: ${names.length} regions (${imgW}x${imgH})`;
+      status.innerText = labels.length === 1
+        ? `Previewing: ${labels[0]} (${imgW}x${imgH})`
+        : `Previewing: ${labels.length} regions (${imgW}x${imgH})`;
       const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
       if (fitScale !== null) {
         state.viewState.scale = fitScale;
