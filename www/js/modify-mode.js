@@ -1,5 +1,5 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedNames } from './state.js';
+import { state, getSelectedRegions, getSelectedKeys } from './state.js';
 import {
   previewImg, previewContainer,
   resetPreview, applyTransform,
@@ -127,7 +127,7 @@ export async function exitEditMode() {
   resetPreview();
   setStatus('Ready');
   updateSaveMergedButton();
-  updatePreview(getSelectedNames());
+  updatePreview(getSelectedRegions());
 }
 
 /** Discard all modifications and restore the pristine atlas, staying in edit mode. */
@@ -156,12 +156,12 @@ export async function resetModify() {
 }
 
 export async function ReplaceSelected() {
-  const names = getSelectedNames();
-  if (names.length === 0) { showToast('Select at least one region to modify.', 'error'); return; } // matches old ui/js/modify.js
+  const keys = getSelectedKeys();
+  if (keys.length === 0) { showToast('Select at least one region to modify.', 'error'); return; } // matches old ui/js/modify.js
   try {
     setStatus('Selecting mod image...');
     const repack = document.getElementById('chk-repack').checked;
-    const result = await AtlasAPI.select_mod_image(names, repack);
+    const result = await AtlasAPI.select_mod_image(keys, repack);
     if (result) {
       await onModPreviewReceived(result);
     } else {
@@ -232,11 +232,11 @@ export async function saveModified() {
     // Outcome lives in the toast only — don't echo the same string into
     // the status bar (e.g. "Saved to: …"). Restore the durable edit-mode
     // status from current selection / merged state.
-    updateModifyPreview(getSelectedNames());
+    updateModifyPreview(getSelectedKeys());
   } catch (e) {
     console.error(e);
     showToast('Save failed.', 'error');
-    updateModifyPreview(getSelectedNames());
+    updateModifyPreview(getSelectedKeys());
   }
 }
 
@@ -346,13 +346,13 @@ export function updateMeshCroppingUI() {
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
   await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
   updateMeshCroppingUI();
-  updatePreview(getSelectedNames());
+  updatePreview(getSelectedRegions());
 });
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();
   if (picked) {
     updateMeshCroppingUI();
-    updatePreview(getSelectedNames());
+    updatePreview(getSelectedRegions());
   }
 });
