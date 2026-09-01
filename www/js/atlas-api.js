@@ -664,7 +664,7 @@ export const AtlasAPI = {
       const canvas = _processor.extractRegion(key);
       if (!canvas) continue;
       try {
-        const safeName = label.replace(/[^\w.\- ]/g, '_');
+        const safeName = key.replace(/[^\w.\- ]/g, '_');
         const blob = await _canvasToBlob(canvas);
         extracted.push({ filename: `${safeName}.png`, blob });
         count++;
