@@ -20,6 +20,9 @@ export const LOAD_CANCELLED = 'cancelled';
 
 let _processor = null;
 let _currentAtlasFilename = '';
+// Test-only label overrides, keyed by region key. In production this map is
+// always empty, so get_region_names() reports label === key for every region.
+const _testLabelOverrides = new Map();
 // Native-open source folder (pywebview only — a browser <input type=file>
 // never exposes a real filesystem path). Used as the starting directory for
 // native extract/save dialogs, matching the old Python engine's behavior of
@@ -617,9 +620,9 @@ export const AtlasAPI = {
 
   get_region_names() {
     if (!_processor) return [];
-    return Object.entries(_processor.regions).map(([key, region]) => ({
+    return Object.entries(_processor.regions).map(([key]) => ({
       key,
-      label: region.atlasName || key,
+      label: _testLabelOverrides.get(key) ?? key,
     }));
   },
 
@@ -919,20 +922,18 @@ export const AtlasAPI = {
 };
 
 /**
- * Test-only: force a region's display label to diverge from its stable
- * internal key, so a test can verify the key/label split is wired
- * correctly end-to-end (nothing in production behavior creates this
- * divergence yet -- see the region-identity-key-refactor spec's §
- * Acceptance criterion). Deliberately a plain named export, NOT attached
- * to the `AtlasAPI` object or `window` -- reachable only via a direct ES
- * module import (`import { __testOnlySetLabel } from './atlas-api.js'`),
- * the same access pattern `tests/browser/verify-ui-flows.mjs` already
- * uses for other module internals. Not part of the public API.
+ * Test-only: register a label override consulted by get_region_names(),
+ * so a test can verify the key/label split is wired correctly end-to-end
+ * (nothing in production behavior creates this divergence yet -- see the
+ * region-identity-key-refactor spec's § Acceptance criterion). Deliberately
+ * a plain named export, NOT attached to the `AtlasAPI` object or `window`
+ * -- reachable only via a direct ES module import
+ * (`import { __testOnlySetLabel } from './atlas-api.js'`), the same access
+ * pattern `tests/browser/verify-ui-flows.mjs` already uses for other module
+ * internals. Not part of the public API.
  */
 export function __testOnlySetLabel(key, label) {
-  if (_processor && _processor.regions[key]) {
-    _processor.regions[key].atlasName = label;
-  }
+  _testLabelOverrides.set(key, label);
 }
 
 export { _loadAtlasFiles };
