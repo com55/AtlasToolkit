@@ -1,5 +1,5 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedNames } from './state.js';
+import { state, getSelectedKeys, getSelectedLabels } from './state.js';
 import { loadRegions, updateButtons } from './region-list.js';
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
@@ -67,10 +67,10 @@ async function processDroppedFiles(files) {
 
   const imgFile = files.find(isPng);
   if (imgFile && state.currentMode === 'modify') {
-    const names = getSelectedNames();
-    if (names.length === 0) { showToast('Select at least one region first.', 'error'); return; }
+    const keys = getSelectedKeys();
+    if (keys.length === 0) { showToast('Select at least one region first.', 'error'); return; }
     const repack = document.getElementById('chk-repack').checked;
-    const result = await AtlasAPI.process_mod_image(imgFile, names, repack);
+    const result = await AtlasAPI.process_mod_image(imgFile, keys, repack);
     if (result) {
       await onModPreviewReceived(result);
       showToast('Mod image loaded via drag & drop.', 'success');
@@ -195,7 +195,7 @@ export async function savePreviewImageAs() {
     const blob = await getPreviewPngBlob();
     if (!blob) { showToast('Error: No image to save.', 'error'); return; }
 
-    const filename = previewSaveDefaultName(getSelectedNames());
+    const filename = previewSaveDefaultName(getSelectedLabels());
 
     // platform.js branches browser (File System Access API) vs pywebview
     // (native save dialog + write_file_bytes) — see D1's revised split.
