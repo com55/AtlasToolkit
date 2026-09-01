@@ -1,5 +1,5 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedNames } from './state.js';
+import { state, getSelectedRegions } from './state.js';
 import { updatePreview, updateModifyPreview } from './preview.js';
 import { updateModeToggleUI } from './app-bar.js';
 
@@ -34,13 +34,19 @@ export async function loadRegions() {
   const listEl = document.getElementById('region-list');
   listEl.innerHTML = '';
   document.getElementById('count').innerText = state.regionsData.length;
-  state.regionsData.forEach((name, index) => {
+  state.regionsData.forEach(({ key, label }, index) => {
     const li = document.createElement('li');
     li.className    = 'region-item';
-    li.innerText    = name;
+    li.innerText    = label;
     li.dataset.index = index;
-    li.dataset.name  = name;
-    li.addEventListener('mousedown', (e) => onRegionMouseDown(e, index, name));
+    li.dataset.key   = key;
+    li.dataset.label = label;
+    // onRegionMouseDown's 3rd arg is unused inside that function (a
+    // pre-existing quirk, not introduced here) -- kept as-is rather than
+    // silently "fixed" into new unspecified behavior; see the region-
+    // identity-key-refactor spec's scrutinize history for why this was
+    // flagged and deliberately left alone.
+    li.addEventListener('mousedown', (e) => onRegionMouseDown(e, index, key));
     li.addEventListener('mouseenter', () => { /* handled by global mousemove */ });
     li.addEventListener('touchstart', (e) => onRegionTouchStart(e, index), { passive: false });
     listEl.appendChild(li);
@@ -60,12 +66,17 @@ export async function loadRegions() {
  * since those operations don't re-fetch the full region list.
  */
 export function refreshModifiedHighlight() {
+  // get_modified_region_names() is already key-based (Object.keys on the
+  // session's moddedSprites map, itself keyed by the pristine parser key)
+  // -- the membership check below MUST compare against .key, never
+  // .label, or a renamed region's "*" highlight silently stops working.
   const modified = new Set(AtlasAPI.get_modified_region_names ? AtlasAPI.get_modified_region_names() : []);
   document.querySelectorAll('.region-item').forEach((el) => {
-    const name = el.dataset.name;
-    const isModified = modified.has(name);
+    const key = el.dataset.key;
+    const label = el.dataset.label;
+    const isModified = modified.has(key);
     el.classList.toggle('modified', isModified);
-    el.innerText = isModified ? `${name}*` : name;
+    el.innerText = isModified ? `${label}*` : label;
   });
 }
 
@@ -87,14 +98,18 @@ export function updateButtons() {
 }
 
 export function triggerPreviewUpdate() {
-  const currentJSON = JSON.stringify(getSelectedNames());
+  // Serialize the FULL entries, not just keys -- a rename that only
+  // changes .label on an already-selected region must still be seen as
+  // a change here, or the debounce swallows it and a stale label stays
+  // on screen (see the region-identity-key-refactor spec's round-2 note).
+  const currentJSON = JSON.stringify(getSelectedRegions());
   if (currentJSON !== lastSelectedJSON) {
     lastSelectedJSON = currentJSON;
     if (previewTimeout) clearTimeout(previewTimeout);
     previewTimeout = setTimeout(() => {
-      const names = getSelectedNames();
-      if (state.currentMode === 'modify') updateModifyPreview(names);
-      else updatePreview(names);
+      const regions = getSelectedRegions();
+      if (state.currentMode === 'modify') updateModifyPreview(regions);
+      else updatePreview(regions);
     }, 50);
     updateButtons();
   }
@@ -194,8 +209,8 @@ window.addEventListener('mouseup', () => {
     state.isDragSelecting = false;
     stopAutoScroll();
     window.removeEventListener('mousemove', onWindowMouseMove);
-    if (state.currentMode === 'extract') updatePreview(getSelectedNames());
-    else updateModifyPreview(getSelectedNames());
+    if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
+    else updateModifyPreview(getSelectedRegions());
     updateButtons();
   }
   state.viewState.isDragging = false;
@@ -317,8 +332,8 @@ window.addEventListener('keydown', (e) => {
   }
   state.lastClickIndex = newIndex;
   renderSelection();
-  if (state.currentMode === 'extract') updatePreview(getSelectedNames());
-  else updateModifyPreview(getSelectedNames());
+  if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
+  else updateModifyPreview(getSelectedRegions());
   updateButtons();
   document.querySelector(`.region-item[data-index="${newIndex}"]`)?.scrollIntoView({ block: 'nearest' });
 });
