@@ -183,6 +183,24 @@ const readRegionList = (page) => page.evaluate(() => ({
   check('selection is still keyed by "alpha", not "forearm"',
     selectedKeys.length === 1 && selectedKeys[0] === 'alpha', selectedKeys.join(','));
 
+  // 5b. The real production call site (ReplaceSelected(), not just the
+  // getSelectedKeys() accessor in isolation) must ALSO pass keys, not
+  // labels, when called post-divergence -- close the gap a review found:
+  // check 5 only proved the accessor is correct, not that the real
+  // call site actually uses it.
+  const capturedArg = await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    const { ReplaceSelected } = await import('./js/modify-mode.js');
+    let captured = null;
+    const orig = AtlasAPI.select_mod_image;
+    AtlasAPI.select_mod_image = (keys, repack) => { captured = keys; return Promise.resolve(null); };
+    await ReplaceSelected();
+    AtlasAPI.select_mod_image = orig;
+    return captured;
+  });
+  check('ReplaceSelected() (the real production call site, not just the accessor) passes ["alpha"], not ["forearm"]',
+    Array.isArray(capturedArg) && capturedArg.length === 1 && capturedArg[0] === 'alpha', JSON.stringify(capturedArg));
+
   // 6. The save-image filename path (drop.js:198) is fed by labels, not keys.
   const selectedLabels = await page.evaluate(async () => {
     const { getSelectedLabels } = await import('./js/state.js');
