@@ -1,5 +1,5 @@
 import { AtlasAPI } from './js/atlas-api.js';
-import { state, getSelectedNames } from './js/state.js';
+import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
 import { initRepackInfoOverlay, initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
@@ -282,8 +282,8 @@ async function applyNativeModImageDrop(imagePath) {
     showToast('Enter Edit Mode first to drop images.', 'error');
     return false;
   }
-  const names = getSelectedNames();
-  if (names.length === 0) {
+  const keys = getSelectedKeys();
+  if (keys.length === 0) {
     showToast('Select at least one region first.', 'error');
     return false;
   }
@@ -291,7 +291,7 @@ async function applyNativeModImageDrop(imagePath) {
   // file:// URL goes straight into Image() — no fetch→File copy, no
   // toDataURL of the dropped PNG (perf fix, 2026-08-23). Preview after
   // merge is a blob: URL from canvas.toBlob(), not a data: URI.
-  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), names, repack);
+  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), keys, repack);
   if (result) {
     await onModPreviewReceived(result);
     showToast('Mod image loaded via drag & drop.', 'success');
@@ -303,9 +303,9 @@ async function applyNativeModImageDrop(imagePath) {
 
 async function extractSelected() {
   if (state.selectedIndices.size === 0) return;
-  const names = Array.from(state.selectedIndices).map(i => state.regionsData[i]);
+  const regions = getSelectedRegions();
   document.getElementById('status-text').innerText = 'Extracting...';
-  const result = await AtlasAPI.extract_files(names);
+  const result = await AtlasAPI.extract_files(regions);
   showToast(result, _extractToastType(result));
   document.getElementById('status-text').innerText = 'Ready';
 }

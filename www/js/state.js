@@ -14,15 +14,11 @@ export const state = {
   viewState: { scale: 1, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
 };
 
-export function getSelectedNames() {
-  return Array.from(state.selectedIndices).sort((a, b) => a - b).map(i => state.regionsData[i]);
-}
-
 /**
  * Currently-selected regions as full { key, label } entries, in ascending
- * region-list index order (matches getSelectedNames()'s existing order —
- * NOT click/insertion order). See the region-identity-key-refactor spec's
- * "Global Constraints" for why this order is load-bearing.
+ * region-list index order (NOT click/insertion order). See the
+ * region-identity-key-refactor spec's "Global Constraints" for why this
+ * order is load-bearing.
  */
 export function getSelectedRegions() {
   return Array.from(state.selectedIndices).sort((a, b) => a - b).map(i => state.regionsData[i]);
