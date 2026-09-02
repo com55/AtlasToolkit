@@ -654,6 +654,13 @@ export const AtlasAPI = {
   /**
    * Extract regions to files (downloads).
    * @param {{key:string,label:string}[]|null} regions  null = extract all
+   *
+   * Filenames are built from .key, not .label, deliberately -- regions
+   * sharing a literal atlas name (same .label, different internal .key,
+   * e.g. 'dagger'/'dagger#2') would collide onto the same filename if
+   * .label were used. .key exactly matches this function's pre-refactor
+   * behavior for every region, including duplicates. See commit
+   * 6569241 for the incident this fixed.
    */
   async extract_files(regions) {
     if (!_processor) return 'No atlas loaded.';
