@@ -48,3 +48,29 @@ test('checks are evaluated in the documented order — blank wins over collision
   assert.equal(r.ok, false);
   assert.match(r.reason, /blank/i);
 });
+
+test('checks are evaluated in the documented order — newline wins over colon', () => {
+  const r = validateRegionName('arm\nleg:foot', new Set());
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /line break/i);
+});
+
+test('checks are evaluated in the documented order — colon wins over trailing .png', () => {
+  const r = validateRegionName('arm:leg.png', new Set());
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /:/);
+});
+
+test('checks are evaluated in the documented order — trailing .png wins over #', () => {
+  const r = validateRegionName('arm#2.png', new Set());
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /\.png/i);
+});
+
+test('checks are evaluated in the documented order — # wins over collision', () => {
+  // 'arm#2' also collides with an existing region named 'arm#2' — the #
+  // policy must be reported, not the collision.
+  const r = validateRegionName('arm#2', new Set(['arm#2']));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /#/);
+});
