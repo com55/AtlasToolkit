@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Not a build step for the app (www/ stays a plain static site with no bundler). This file exists only so Node's ESM loader recognizes the native `import`/`export` syntax already used by www/js/*.js, so `node --test` can run the unit tests under tests/.",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "node tests/browser/verify-ops.mjs && node tests/browser/verify-ui-flows.mjs && node tests/browser/verify-region-identity.mjs"
   }
 }
