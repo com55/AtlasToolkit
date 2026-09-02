@@ -90,7 +90,9 @@ function applyModifyView(data, statusMsg) {
 /** Rebuild the region list from the effective model after a structural
  *  (add/remove/rename) change, preserving the user's selection by key.
  *  Shared by the Task 9-11 structural ops. */
-export async function refreshStructuralUi(prevSelectedKeys) {
+export async function refreshStructuralUi(prevSelectedKeys, { lockRepack = true } = {}) {
+  state.lastClickIndex = -1;
+  state.dragStartIndex = -1;
   await loadRegions(); // rebuilds state.regionsData from the effective model
   const newIndices = new Set();
   state.regionsData.forEach((entry, idx) => {
@@ -99,9 +101,11 @@ export async function refreshStructuralUi(prevSelectedKeys) {
   state.selectedIndices = newIndices;
   renderSelection();
   updateButtons();
-  const chk = document.getElementById('chk-repack');
-  chk.checked = true;
-  chk.disabled = true;
+  if (lockRepack) {
+    const chk = document.getElementById('chk-repack');
+    chk.checked = true;
+    chk.disabled = true;
+  }
 }
 
 /** Re-enable #chk-repack and restore it to the persisted pref value. Called
@@ -121,12 +125,6 @@ export async function enterEditMode() {
       applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
       await releaseRepackLock();
-      const isMultiPage = AtlasAPI.is_multi_page(); // sync getter, no await needed
-      document.getElementById('mode-edit-caret').classList.toggle('hidden', isMultiPage);
-      if (isMultiPage) {
-        document.getElementById('chk-advance-mode').checked = false;
-        document.getElementById('advance-toolbar').classList.add('hidden');
-      }
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -147,7 +145,7 @@ export async function exitEditMode() {
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
   await releaseRepackLock();
-  refreshModifiedHighlight();
+  await refreshStructuralUi([], { lockRepack: false }); // rebuilds sidebar back to pristine, clears anchors
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
   state.modifyRegionPages  = {};
@@ -178,7 +176,7 @@ export async function resetModify() {
     if (data) {
       applyModifyView(data, 'Select regions and click Modify Selected');
       await releaseRepackLock();
-      refreshModifiedHighlight();
+      await refreshStructuralUi([], { lockRepack: false }); // rebuilds sidebar back to pristine, clears anchors
       showToast('Modifications reset.', 'success');
     } else {
       showToast('Failed to reset modifications.', 'error');
