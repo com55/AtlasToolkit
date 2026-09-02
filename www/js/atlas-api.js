@@ -5,10 +5,12 @@
  */
 
 import { autoConvertAtlas } from './atlas-converter.js';
-import { AtlasProcessor, canvasToPreviewUrl } from './atlas-extracter.js';
+import { AtlasProcessor, canvasToPreviewUrl, _loadImage } from './atlas-extracter.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile } from './platform.js';
 import { createZip } from './zip.js';
-import { AtlasSession } from './atlas-session.js';
+import { AtlasSession, AddBatch, RemoveBatch, RenameBatch } from './atlas-session.js';
+import { deriveEffectiveModel } from './effective-region-model.js';
+import { validateRegionName } from './region-name-validation.js';
 import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
 import { parseSkeleton, UnsupportedVersionError } from './vendor/spine-skeleton-binary/index.js';
 import { buildMeshLookup } from './region-mesh-lookup.js';
@@ -620,6 +622,13 @@ export const AtlasAPI = {
 
   get_region_names() {
     if (!_processor) return [];
+    if (_session && _session._hasStructuralBatches()) {
+      const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+      return effective.regionNames.map((key) => ({
+        key,
+        label: effective.labels[key] ?? (_testLabelOverrides.get(key) ?? key),
+      }));
+    }
     return Object.entries(_processor.regions).map(([key]) => ({
       key,
       label: _testLabelOverrides.get(key) ?? key,
@@ -826,7 +835,11 @@ export const AtlasAPI = {
    * (like Python's `modded_sprites` dict) persists across repack toggles and
    * accumulates across every mod apply, not just the latest. */
   get_modified_region_names() {
-    return _session ? Object.keys(_session.moddedSprites) : [];
+    if (!_session) return [];
+    if (_session._hasStructuralBatches()) {
+      return [...deriveEffectiveModel(_processor.regions, _session.modBatches).modifiedKeys];
+    }
+    return Object.keys(_session.moddedSprites);
   },
 
   /**
@@ -931,6 +944,57 @@ export const AtlasAPI = {
       console.error('toggle_repack error:', e);
       return null;
     }
+  },
+
+  /**
+   * Generate an AddBatch's internal key: the candidate atlasName as the
+   * seed, disambiguated against existing pristine keys and any other
+   * AddBatch already in this session by appending _2, _3, ... to the SEED
+   * (never to atlasName — this key is never serialized, so it can never
+   * reach the reparse-collision class region-name-validation.js's '#' ban
+   * exists to prevent). Spec §2.5.
+   */
+  _generateAddInternalKey(seed) {
+    const existing = new Set(Object.keys(_processor.regions));
+    for (const batch of _session.modBatches) {
+      if (batch.type === 'add') existing.add(batch.internalKey);
+    }
+    if (!existing.has(seed)) return seed;
+    let n = 2;
+    while (existing.has(`${seed}_${n}`)) n += 1;
+    return `${seed}_${n}`;
+  },
+
+  async add_region(file, atlasName) {
+    if (!_session) throw new Error('No active modify session.');
+    const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+    const validation = validateRegionName(atlasName, Object.values({
+      ...Object.fromEntries(Object.keys(effective.regions).map((k) => [k, effective.labels[k] ?? k])),
+    }));
+    if (!validation.ok) throw new Error(validation.reason);
+    const sourceCanvas = await _loadImage(file);
+    const internalKey = this._generateAddInternalKey(validation.value);
+    return await _session.applyStructuralBatch(new AddBatch(internalKey, validation.value, sourceCanvas));
+  },
+
+  async remove_regions(keys) {
+    if (!_session) throw new Error('No active modify session.');
+    let result = null;
+    for (const key of keys) {
+      result = await _session.applyStructuralBatch(new RemoveBatch(key));
+    }
+    return result;
+  },
+
+  async rename_region(key, newAtlasName) {
+    if (!_session) throw new Error('No active modify session.');
+    const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+    const others = Object.keys(effective.regions)
+      .filter((k) => k !== key)
+      .map((k) => effective.labels[k] ?? k);
+    const validation = validateRegionName(newAtlasName, others);
+    if (!validation.ok) throw new Error(validation.reason);
+    return await _session.applyStructuralBatch(new RenameBatch(key, validation.value));
   },
 
 };

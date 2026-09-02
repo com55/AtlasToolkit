@@ -253,6 +253,63 @@ bounds: 0, 0, 10, 10
   check('round 5 regression: toggleRepack(true) cache-HIT path also preserves identity (regions keyed by "arm")', result6b.regionsHasArmCacheHit);
   check('round 5 regression: toggleRepack(false) rejects with the deliberate guard message, not an unrelated crash', result6b.rejectedFalse === 'Cannot disable Repack while Add/Remove/Rename changes are pending.');
 
+  // --- Task 7: AtlasAPI wiring is structural-aware ---
+  const result7 = await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+
+    const solid = (w, h, rgba) => {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').fillStyle = `rgba(${rgba.join(',')})`;
+      c.getContext('2d').fillRect(0, 0, w, h);
+      return c;
+    };
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+
+    const atlasText = `page.png
+size: 20, 20
+arm
+bounds: 0, 0, 10, 10
+`;
+    const atlasFile = new File([atlasText], 'test.atlas', { type: 'text/plain' });
+    const p1 = await toFile(solid(20, 20, [200, 0, 0, 255]), 'page.png');
+    const loaded = await AtlasAPI.load_atlas_from_file(atlasFile, { 'page.png': p1 });
+    await AtlasAPI.enter_modify_mode();
+
+    const before = AtlasAPI.get_region_names();
+
+    const helmetFile = await toFile(solid(8, 8, [0, 0, 200, 255]), 'helmet.png');
+    const addResult = await AtlasAPI.add_region(helmetFile, 'helmet');
+    const afterAdd = AtlasAPI.get_region_names();
+    const modifiedAfterAdd = AtlasAPI.get_modified_region_names();
+
+    let renameRejected = false;
+    try {
+      await AtlasAPI.rename_region('arm', 'helmet'); // collides with the just-added region's name
+    } catch {
+      renameRejected = true;
+    }
+
+    return {
+      loaded,
+      beforeKeys: before.map((r) => r.key).sort(),
+      afterAddKeys: afterAdd.map((r) => r.key).sort(),
+      afterAddHasHelmetLabel: afterAdd.find((r) => r.key === 'helmet')?.label === 'helmet',
+      modifiedAfterAdd: modifiedAfterAdd.sort(),
+      addResultHasImage: !!addResult.image,
+      renameRejected,
+    };
+  });
+
+  check('fixture atlas loaded', result7.loaded);
+  check('baseline: one pristine region', result7.beforeKeys.join(',') === 'arm');
+  check('get_region_names() reflects the Add immediately', result7.afterAddKeys.join(',') === 'arm,helmet');
+  check('added region label is its atlasName', result7.afterAddHasHelmetLabel);
+  check('get_modified_region_names() includes the added key', result7.modifiedAfterAdd.includes('helmet'));
+  check('add_region() returns a usable preview payload', result7.addResultHasImage);
+  check('rename_region() rejects a name colliding with another effective region', result7.renameRejected);
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
