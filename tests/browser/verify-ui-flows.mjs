@@ -150,7 +150,7 @@ bounds: 0, 0, 20, 20
     state.selectedIndices.clear();
     state.lastClickIndex = -1;
     await loadRegions();
-    return { ok: true };
+    return { ok: true, names: AtlasAPI.get_region_names() };
   });
 }
 
@@ -487,7 +487,8 @@ const browser = await chromium.launch({ headless: true });
   // (which resetModify()/exitEditMode() now both call via refreshStructuralUi) really does drop
   // the structurally-added region back out of the effective list once the session is replaced.
   const afterReload = await loadSinglePageFixtureAtlas(page);
-  check('task8: reloading drops the structurally-added region back out (effective model resets with the session)', afterReload.ok === true);
+  check('task8: reloading drops the structurally-added region back out (effective model resets with the session)',
+    afterReload.ok === true && afterReload.names.length === resetResult.beforeAdd && !afterReload.names.some((r) => r.key === 'testHelmet'));
 
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
