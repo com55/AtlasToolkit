@@ -13,6 +13,7 @@
 import { AtlasProcessor, _loadImage, canvasToPreviewUrl } from './atlas-extracter.js';
 import { AtlasModifier } from './atlas-modifier.js';
 import { AtlasDocument } from './atlas-document.js';
+import { deriveEffectiveModel } from './effective-region-model.js';
 
 /**
  * Page filenames that a multi-page rebuild may rewrite, in `pageOrder`.
@@ -307,16 +308,42 @@ export class AtlasSession {
   }
 
   async _rebuildSinglePageRepack() {
+    if (this._hasStructuralBatches()) {
+      const r = await this._rebuildSinglePageStructuralRepack();
+      return { ...r, wasStructural: true };
+    }
     // Port of session.py::_rebuild_single_page_repack: extract every region's
     // raw sprite from the PRISTINE base, overlay moddedSprites (padded), then
     // pack. Non-modded regions keep their pristine offsets; fullCanvasRegions
     // get default offsets — the offsets-preserved-on-repack asymmetry. (Merge,
     // by contrast, resets every touched region's offsets to default.)
+    // Existing pristine-only body — computation unchanged; only the return
+    // statement gains two additive fields nothing in the pixel-mod-only
+    // call chain reads (parity invariant, spec §5).
     const modifier = this._freshSinglePageModifier();
     if (!modifier) throw new Error('No single-page modifier');
     const repacked = await modifier.repackWithModdedSprites(
       this.moddedSprites, this._fullCanvasRegions());
-    return { canvas: repacked.canvas, text: repacked.atlasText };
+    return { canvas: repacked.canvas, text: repacked.atlasText,
+             regionBounds: repacked.regionBounds, wasStructural: false };
+  }
+
+  /**
+   * Repack through the effective (pristine ∪ structural-batch) model.
+   * Spec §2.6/§2.2. Only ever called when _hasStructuralBatches() is true.
+   */
+  async _rebuildSinglePageStructuralRepack() {
+    const modifier = this._freshSinglePageModifier();
+    if (!modifier) throw new Error('No single-page modifier');
+    const effectiveModel = deriveEffectiveModel(modifier.regions, this.modBatches);
+    const addedSprites = {};
+    for (const batch of this.modBatches) {
+      if (batch.type === 'add') addedSprites[batch.internalKey] = batch.sourceCanvas;
+    }
+    const packed = await modifier.repackWithEffectiveModel(
+      effectiveModel.regionNames, effectiveModel.regions,
+      addedSprites, this.moddedSprites, this._fullCanvasRegions());
+    return { canvas: packed.canvas, text: packed.atlasText, regionBounds: packed.regionBounds };
   }
 
   // ─── Multi-page rebuilds ─────────────────────────────────────────────────
