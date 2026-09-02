@@ -47,6 +47,7 @@ export function replacePageInAtlas(fullText, pageFilename, packedPageText) {
 /** One mod apply: the region names it targeted plus the (durable) mod image. */
 export class ModBatch {
   constructor(names, source) {
+    this.type = 'mod';
     this.names = names;         // array of region names this batch targeted
     this.source = source;       // original mod input (File/Blob/Image/Canvas)
     this.sharedCanvas = false;  // isFullCanvas flag from _prepareModImage (NOT
@@ -59,6 +60,33 @@ export class ModBatch {
     this.prepared = null;       // single-page prepared mod (padded canvas + dims
                                 // + sharedCanvasMod), resolved once from pristine;
                                 // null for multi-page (re-prepared per page)
+  }
+}
+
+/** A newly added region, staged for the next repack. See spec §2.5. */
+export class AddBatch {
+  constructor(internalKey, atlasName, sourceCanvas) {
+    this.type = 'add';
+    this.internalKey = internalKey;   // never serialized — session-local identity only
+    this.atlasName = atlasName;       // validated (spec §2.4), written verbatim to output
+    this.sourceCanvas = sourceCanvas; // the picked/dropped image, as a canvas
+  }
+}
+
+/** A region staged for removal on the next repack. See spec §2.5. */
+export class RemoveBatch {
+  constructor(targetKey) {
+    this.type = 'remove';
+    this.targetKey = targetKey; // pristine key or an AddBatch's internalKey
+  }
+}
+
+/** A region staged for a display-name change on the next repack. See spec §2.5. */
+export class RenameBatch {
+  constructor(targetKey, newAtlasName) {
+    this.type = 'rename';
+    this.targetKey = targetKey;       // pristine key or an AddBatch's internalKey — never changes
+    this.newAtlasName = newAtlasName; // validated (spec §2.4); only the output atlasName changes
   }
 }
 
@@ -233,6 +261,11 @@ export class AtlasSession {
       if (batch.sharedCanvas) for (const name of batch.names) regions.add(name);
     }
     return regions;
+  }
+
+  /** True iff any pending batch is structural (Add/Remove/Rename), not a pixel ModBatch. */
+  _hasStructuralBatches() {
+    return this.modBatches.some((b) => b.type !== 'mod');
   }
 
   _orderSelection(modifier, names) {
