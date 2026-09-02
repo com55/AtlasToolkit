@@ -237,15 +237,21 @@ bounds: 0, 0, 10, 10
     await session.applyStructuralBatch(new RenameBatch('arm', 'forearm'));
     session.repacked = null; // force toggleRepack's cache-miss path to actually rebuild
     const result = await session.toggleRepack(true);
-    const rejectedFalse = await session.toggleRepack(false).then(() => 'did not throw', () => 'threw');
+    const resultCacheHit = await session.toggleRepack(true); // cache HIT this time -- session.repacked is already populated
+    const rejectedFalse = await session.toggleRepack(false).then(
+      () => 'did not throw',
+      (e) => e.message,
+    );
 
     return {
       regionsHasArm: !!result.regions.arm, // must be keyed by the STABLE key, not "forearm"
+      regionsHasArmCacheHit: !!resultCacheHit.regions.arm,
       rejectedFalse,
     };
   });
   check('round 5 regression: toggleRepack(true) must preserve identity (regions keyed by "arm", not "forearm")', result6b.regionsHasArm);
-  check('round 5 regression: toggleRepack(false) must reject while a structural batch is pending', result6b.rejectedFalse === 'threw');
+  check('round 5 regression: toggleRepack(true) cache-HIT path also preserves identity (regions keyed by "arm")', result6b.regionsHasArmCacheHit);
+  check('round 5 regression: toggleRepack(false) rejects with the deliberate guard message, not an unrelated crash', result6b.rejectedFalse === 'Cannot disable Repack while Add/Remove/Rename changes are pending.');
 
   await browser.close();
   server.close();
