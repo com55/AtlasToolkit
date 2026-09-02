@@ -49,6 +49,16 @@ test('checks are evaluated in the documented order — blank wins over collision
   assert.match(r.reason, /blank/i);
 });
 
+test('checks are evaluated in the documented order — blank wins over newline', () => {
+  // A lone newline (or any input that is pure whitespace including \n/\r)
+  // trims to '' and must report blank, not the newline/CR rejection --
+  // proving the blank check runs before the newline check for any input
+  // that satisfies both.
+  const r = validateRegionName('\n', new Set());
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /blank/i);
+});
+
 test('checks are evaluated in the documented order — newline wins over colon', () => {
   const r = validateRegionName('arm\nleg:foot', new Set());
   assert.equal(r.ok, false);
