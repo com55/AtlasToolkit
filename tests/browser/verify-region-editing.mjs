@@ -171,6 +171,82 @@ bounds: 0, 0, 10, 10
   check('output atlas text uses the atlasName (display name), proving atlasName not internalKey is written', result5.structuralOutputUsesDisplayName);
   check('structural result has exactly the {canvas, text, regionBounds, wasStructural} shape', result5.structuralResultKeys === 'canvas,regionBounds,text,wasStructural');
 
+  // --- Task 6a: the mixed-session case (round 4's original data-loss bug) ---
+  const result6a = await page.evaluate(async () => {
+    const { AtlasSession, AddBatch } = await import('./js/atlas-session.js');
+    const { AtlasProcessor } = await import('./js/atlas-extracter.js');
+
+    const atlasText = `page.png
+size: 20, 20
+arm
+bounds: 0, 0, 10, 10
+`;
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = 20; pageCanvas.height = 20;
+    pageCanvas.getContext('2d').fillRect(0, 0, 10, 10);
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+
+    const processor = new AtlasProcessor(atlasText);
+    await processor.loadImages({ 'page.png': await toFile(pageCanvas, 'page.png') });
+    const session = new AtlasSession(processor, atlasText, 'test.atlas');
+
+    const helmetCanvas = document.createElement('canvas');
+    helmetCanvas.width = 8; helmetCanvas.height = 8;
+    helmetCanvas.getContext('2d').fillRect(0, 0, 8, 8);
+
+    // 1. Add "helmet".
+    await session.applyStructuralBatch(new AddBatch('helmet', 'helmet', helmetCanvas));
+    const afterAdd = session.active.text.includes('helmet');
+
+    // 2. Ordinary pixel mod on the unrelated "arm" region, via processModImage —
+    //    THIS is round 4's exact regression scenario: verify "helmet" survives.
+    //    A canvas is a valid mod source: _prepareSource() only special-cases
+    //    File/string inputs (loads them), and passes anything else through as-is.
+    const modCanvas = document.createElement('canvas');
+    modCanvas.width = 10; modCanvas.height = 10;
+    modCanvas.getContext('2d').fillRect(0, 0, 10, 10);
+    await session.processModImage(modCanvas, ['arm'], false); // caller passes repack:false on purpose
+    const afterPixelMod = session.active.text.includes('helmet');
+
+    return { afterAdd, afterPixelMod };
+  });
+  check('Add registers and appears in output', result6a.afterAdd);
+  check('round 4 regression: a pixel mod after Add must NOT drop the Add', result6a.afterPixelMod);
+
+  // --- Task 6b: toggleRepack() is the third caller — round 5's regression ---
+  const result6b = await page.evaluate(async () => {
+    const { AtlasSession, RenameBatch } = await import('./js/atlas-session.js');
+    const { AtlasProcessor } = await import('./js/atlas-extracter.js');
+
+    const atlasText = `page.png
+size: 20, 20
+arm
+bounds: 0, 0, 10, 10
+`;
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = 20; pageCanvas.height = 20;
+    pageCanvas.getContext('2d').fillRect(0, 0, 10, 10);
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+
+    const processor = new AtlasProcessor(atlasText);
+    await processor.loadImages({ 'page.png': await toFile(pageCanvas, 'page.png') });
+    const session = new AtlasSession(processor, atlasText, 'test.atlas');
+
+    await session.applyStructuralBatch(new RenameBatch('arm', 'forearm'));
+    session.repacked = null; // force toggleRepack's cache-miss path to actually rebuild
+    const result = await session.toggleRepack(true);
+    const rejectedFalse = await session.toggleRepack(false).then(() => 'did not throw', () => 'threw');
+
+    return {
+      regionsHasArm: !!result.regions.arm, // must be keyed by the STABLE key, not "forearm"
+      rejectedFalse,
+    };
+  });
+  check('round 5 regression: toggleRepack(true) must preserve identity (regions keyed by "arm", not "forearm")', result6b.regionsHasArm);
+  check('round 5 regression: toggleRepack(false) must reject while a structural batch is pending', result6b.rejectedFalse === 'threw');
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
