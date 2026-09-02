@@ -121,6 +121,50 @@ bounds: 0, 0, 10, 10
   check('regionBounds is keyed by internal key for both regions', result.regionBoundsHasBoth);
   check('each regionBounds entry is [x,y,w,h,rotate]', result.armBoundsShape === 5);
 
+  // --- Task 5: _rebuildSinglePageRepack() branches on _hasStructuralBatches() ---
+  const result5 = await page.evaluate(async () => {
+    const { AtlasSession, AddBatch } = await import('./js/atlas-session.js');
+    const { AtlasProcessor } = await import('./js/atlas-extracter.js');
+
+    const atlasText = `page.png
+size: 20, 20
+arm
+bounds: 0, 0, 10, 10
+`;
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = 20; pageCanvas.height = 20;
+    pageCanvas.getContext('2d').fillRect(0, 0, 10, 10);
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+
+    const processor = new AtlasProcessor(atlasText);
+    await processor.loadImages({ 'page.png': await toFile(pageCanvas, 'page.png') });
+    const session = new AtlasSession(processor, atlasText, 'test.atlas');
+
+    // Pristine-only path: no structural batches.
+    const pristineResult = await session._rebuildSinglePageRepack();
+
+    // Push a structural batch directly (this task tests _rebuildSinglePageRepack's
+    // branch in isolation — Task 6 wires the real registration/transaction path).
+    const helmetCanvas = document.createElement('canvas');
+    helmetCanvas.width = 8; helmetCanvas.height = 8;
+    helmetCanvas.getContext('2d').fillRect(0, 0, 8, 8);
+    session.modBatches.push(new AddBatch('helmet', 'helmet', helmetCanvas));
+    const structuralResult = await session._rebuildSinglePageRepack();
+
+    return {
+      pristineWasStructural: pristineResult.wasStructural,
+      pristineHasRegionBounds: !!pristineResult.regionBounds,
+      structuralWasStructural: structuralResult.wasStructural,
+      structuralHasHelmet: structuralResult.text.includes('helmet'),
+    };
+  });
+
+  check('no structural batches -> wasStructural: false', result5.pristineWasStructural === false);
+  check('pristine branch also returns regionBounds now (additive)', result5.pristineHasRegionBounds);
+  check('structural batch pending -> wasStructural: true', result5.structuralWasStructural === true);
+  check('structural rebuild output actually contains the added region', result5.structuralHasHelmet);
+
   await browser.close();
   server.close();
   console.log(`\n${pass} passed, ${fail} failed`);
