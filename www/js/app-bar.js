@@ -22,6 +22,23 @@ export function updateModeToggleUI() {
   modifyBtn.disabled = count === 0 && state.currentMode !== 'modify';
 }
 
+/** Show/hide the Advance Mode dropdown, positioned from the caret's own
+ *  bounding rect (a button-triggered dropdown, not a cursor-position menu
+ *  like #context-menu in drop.js — same top-level/JS-positioned technique,
+ *  different anchor). */
+function toggleAdvanceModeDropdown() {
+  const dropdown = document.getElementById('advance-mode-dropdown');
+  const caret = document.getElementById('mode-edit-caret');
+  if (!dropdown.classList.contains('hidden')) {
+    dropdown.classList.add('hidden');
+    return;
+  }
+  const rect = caret.getBoundingClientRect();
+  dropdown.style.left = `${rect.left}px`;
+  dropdown.style.top = `${rect.bottom + 4}px`;
+  dropdown.classList.remove('hidden');
+}
+
 /** Show/refresh the page switcher; visible only in edit mode on a multi-page atlas. */
 export function updatePageSwitcher() {
   const switcher = document.getElementById('modify-page-switcher');
@@ -93,6 +110,19 @@ export function initAppBar() {
   });
   document.getElementById('page-next').addEventListener('click', () => {
     goToPage(state.modifyActivePageIndex + 1);
+  });
+
+  const caretBtn = document.getElementById('mode-edit-caret');
+  const dropdown = document.getElementById('advance-mode-dropdown');
+  caretBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't let this same click immediately trigger the window listener below
+    toggleAdvanceModeDropdown();
+  });
+  window.addEventListener('click', () => dropdown.classList.add('hidden'));
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') dropdown.classList.add('hidden'); });
+
+  document.getElementById('chk-advance-mode').addEventListener('change', (e) => {
+    document.getElementById('advance-toolbar').classList.toggle('hidden', !e.target.checked);
   });
 
   updateModeToggleUI();

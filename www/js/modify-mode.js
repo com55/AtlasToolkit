@@ -10,7 +10,7 @@ import {
 import { showToast, showConfirm } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
-import { refreshModifiedHighlight } from './region-list.js';
+import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons } from './region-list.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -87,6 +87,31 @@ function applyModifyView(data, statusMsg) {
   };
 }
 
+/** Rebuild the region list from the effective model after a structural
+ *  (add/remove/rename) change, preserving the user's selection by key.
+ *  Shared by the Task 9-11 structural ops. */
+export async function refreshStructuralUi(prevSelectedKeys) {
+  await loadRegions(); // rebuilds state.regionsData from the effective model
+  const newIndices = new Set();
+  state.regionsData.forEach((entry, idx) => {
+    if (prevSelectedKeys.includes(entry.key)) newIndices.add(idx);
+  });
+  state.selectedIndices = newIndices;
+  renderSelection();
+  updateButtons();
+  const chk = document.getElementById('chk-repack');
+  chk.checked = true;
+  chk.disabled = true;
+}
+
+/** Re-enable #chk-repack and restore it to the persisted pref value. Called
+ *  whenever the user leaves a state where a structural op force-locked it. */
+async function releaseRepackLock() {
+  const chk = document.getElementById('chk-repack');
+  chk.disabled = false;
+  chk.checked = await AtlasAPI.get_pref('repack', false);
+}
+
 export async function enterEditMode() {
   try {
     const data = await AtlasAPI.enter_modify_mode();
@@ -95,6 +120,13 @@ export async function enterEditMode() {
       // ui/js/mode.js exactly (parity fix, 2026-08-23).
       applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
+      await releaseRepackLock();
+      const isMultiPage = AtlasAPI.is_multi_page(); // sync getter, no await needed
+      document.getElementById('mode-edit-caret').classList.toggle('hidden', isMultiPage);
+      if (isMultiPage) {
+        document.getElementById('chk-advance-mode').checked = false;
+        document.getElementById('advance-toolbar').classList.add('hidden');
+      }
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -114,6 +146,7 @@ export async function exitEditMode() {
     if (!ok) return;
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
+  await releaseRepackLock();
   refreshModifiedHighlight();
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
@@ -144,6 +177,7 @@ export async function resetModify() {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
       applyModifyView(data, 'Select regions and click Modify Selected');
+      await releaseRepackLock();
       refreshModifiedHighlight();
       showToast('Modifications reset.', 'success');
     } else {

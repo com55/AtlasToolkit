@@ -496,6 +496,12 @@ export const AtlasAPI = {
     platform.savePref(key, value);
   },
 
+  /** Whether the currently loaded atlas spans more than one page. Sync getter
+   *  (no await) — read straight off the active session. */
+  is_multi_page() {
+    return !!(_session && _session.isMultiPage);
+  },
+
   /** Reads the persisted 'meshCropping' pref into _meshMaskEnabled. Call
    *  once at app startup (mirrors the Repack pref's own init in script.js) —
    *  NOT per atlas load, since this toggle persists like Repack's does. */
