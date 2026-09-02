@@ -992,6 +992,61 @@ img#preview-img {
   min-width: 160px;
 }
 
+/* Advance Mode caret — small square button attached to the mode-toggle group,
+   same technique as #btn-save-menu's caret button. */
+.mode-toggle-caret {
+  flex: none;
+  width: 22px;
+  height: 28px;
+  margin-left: 4px;
+  padding: 0;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background-color: #3c3c3c;
+  color: #888;
+  cursor: pointer;
+}
+
+.mode-toggle-caret:hover {
+  background-color: #4c4c4c;
+  color: #fff;
+}
+
+.mode-toggle-caret[aria-expanded="true"] {
+  background-color: #2e7d32;
+  color: #fff;
+}
+
+.caret-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+}
+
+/* Advance Mode dropdown — same positioning technique as #context-menu. */
+#advance-mode-dropdown {
+  position: fixed;
+  background-color: #2d2d2d;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 8px 10px;
+  z-index: 4000;
+  min-width: 160px;
+}
+
+/* Advance Mode toolbar row — simple flex row above the region list. */
+#advance-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #454545;
+}
+
 .context-menu-item {
   display: flex;
   align-items: center;

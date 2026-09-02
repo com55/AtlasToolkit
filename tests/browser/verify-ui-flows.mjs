@@ -120,6 +120,40 @@ bounds: 40, 0, 30, 30
   });
 }
 
+/** Load a synthetic 1-page atlas through the app's real load path (Task 8's multi-page-guard test needs a single-page case; the file's only existing fixture is 2-page). */
+async function loadSinglePageFixtureAtlas(page) {
+  return page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    const { loadRegions } = await import('./js/region-list.js');
+    const { state } = await import('./js/state.js');
+
+    const solid = (w, h, rgba) => {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = `rgba(${rgba.join(',')})`;
+      ctx.fillRect(0, 0, w, h);
+      return c;
+    };
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+
+    const atlasText = `page1.png
+size: 50, 50
+zeta
+bounds: 0, 0, 20, 20
+`;
+    const atlasFile = new File([atlasText], 'single.atlas', { type: 'text/plain' });
+    const p1 = await toFile(solid(50, 50, [80, 40, 200, 255]), 'page1.png');
+    const ok = await AtlasAPI.load_atlas_from_file(atlasFile, { 'page1.png': p1 });
+    if (!ok) return { ok: false };
+    state.selectedIndices.clear();
+    state.lastClickIndex = -1;
+    await loadRegions();
+    return { ok: true };
+  });
+}
+
 const readUi = (page) => page.evaluate(() => ({
   count: document.getElementById('count').innerText,
   items: document.querySelectorAll('.region-item').length,
@@ -391,6 +425,43 @@ const browser = await chromium.launch({ headless: true });
   check('touch: confirm exits to view mode', ui.mode === 'extract');
 
   check('touch: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
+// ─── Task 8: Advance Mode toggle, multi-page guard, #chk-repack force/release ──
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const single = await loadSinglePageFixtureAtlas(page);
+  check('task8: single-page fixture loaded', single.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  const caretVisibleSingle = await page.isVisible('#mode-edit-caret');
+  check('Advance Mode entry point is visible for a single-page atlas', caretVisibleSingle === true);
+
+  await page.click('#mode-edit-caret');
+  // #chk-advance-mode is display:none (styled as a .toggle-switch); the real
+  // user control is the wrapping label. Clicking it toggles the checkbox and
+  // fires the change handler that reveals the toolbar.
+  await page.click('#advance-mode-row');
+  const toolbarVisible = await page.isVisible('#advance-toolbar');
+  check('Advance Mode toolbar shows once the checkbox is toggled on', toolbarVisible === true);
+
+  const multi = await loadFixtureAtlas(page);
+  check('task8: multi-page fixture (re)loaded', multi.ok);
+  await page.click('#mode-extract'); // exit back to view mode before re-entering, matching how
+                                      // a real user would switch atlases between edit sessions
+  await page.waitForTimeout(100);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  const caretVisibleMulti = await page.isVisible('#mode-edit-caret');
+  check('Advance Mode entry point is hidden entirely for a multi-page atlas', caretVisibleMulti === false);
+
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  check('task8: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
 

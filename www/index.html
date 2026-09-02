@@ -40,6 +40,9 @@
           <button type="button" id="mode-extract" class="mode-toggle-btn mode-view active">View Mode</button>
           <button type="button" id="mode-modify" class="mode-toggle-btn mode-edit" disabled>Edit Mode</button>
         </div>
+        <button type="button" id="mode-edit-caret" class="mode-toggle-caret" aria-haspopup="true" aria-expanded="false" title="Edit mode options">
+          <span class="caret-icon"></span>
+        </button>
       </div>
 
       <div class="app-bar-divider app-bar-panel-divider"></div>
@@ -103,6 +106,17 @@
 
     <div id="main-content">
       <div id="left-panel">
+        <div id="advance-toolbar" class="hidden">
+          <button type="button" id="btn-rename-region" title="Rename">
+            <svg class="btn-icon" viewBox="0 -960 960 960"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>
+          </button>
+          <button type="button" id="btn-add-region" title="Add">
+            <svg class="btn-icon" viewBox="0 -960 960 960"><path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/></svg>
+          </button>
+          <button type="button" id="btn-remove-region" title="Remove">
+            <svg class="btn-icon" viewBox="0 -960 960 960"><path d="M200-440v-80h560v80H200Z"/></svg>
+          </button>
+        </div>
         <div id="sidebar-head">Regions (<span id="count">0</span>)</div>
         <div id="region-list-container">
           <ul id="region-list"></ul>
@@ -195,6 +209,14 @@
         </svg>
         Save Image As
       </div>
+    </div>
+
+    <div id="advance-mode-dropdown" class="hidden">
+      <label class="toggle-label" id="advance-mode-row">
+        <input type="checkbox" id="chk-advance-mode" />
+        <span class="toggle-switch"></span>
+        <span>Advance Mode</span>
+      </label>
     </div>
 
     <script type="module" src="script.js"></script>
