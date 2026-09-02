@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { validateRegionName } from '../www/js/region-name-validation.js';
+
+test('trims before validating and returns the trimmed value', () => {
+  const r = validateRegionName('  arm  ', new Set(['leg']));
+  assert.equal(r.ok, true);
+  assert.equal(r.value, 'arm');
+});
+
+test('rejects blank (including all-whitespace)', () => {
+  assert.equal(validateRegionName('', new Set()).ok, false);
+  assert.equal(validateRegionName('   ', new Set()).ok, false);
+});
+
+test('rejects embedded newline or carriage return', () => {
+  assert.equal(validateRegionName('arm\nleg', new Set()).ok, false);
+  assert.equal(validateRegionName('arm\rleg', new Set()).ok, false);
+});
+
+test('rejects a colon (parser line-type marker)', () => {
+  assert.equal(validateRegionName('arm:leg', new Set()).ok, false);
+});
+
+test('rejects a trailing .png (parser page-filename marker), trimmed first', () => {
+  assert.equal(validateRegionName('foo.png', new Set()).ok, false);
+  assert.equal(validateRegionName('foo.png ', new Set()).ok, false); // trailing space, still rejected
+});
+
+test('rejects a literal # (tool policy, not a parser fact)', () => {
+  assert.equal(validateRegionName('arm#2', new Set()).ok, false);
+});
+
+test('rejects a collision with another effective display name, compared trimmed', () => {
+  const r = validateRegionName(' arm ', new Set(['arm', 'leg']));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /already in use/i);
+});
+
+test('does not reject the empty-collision case (no other names)', () => {
+  assert.equal(validateRegionName('arm', new Set()).ok, true);
+});
+
+test('checks are evaluated in the documented order — blank wins over collision', () => {
+  // whitespace-only, even against a set that already contains '' — blank
+  // must be reported as blank, not as a collision, per spec §2.4's ordering.
+  const r = validateRegionName('   ', new Set(['']));
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /blank/i);
+});
