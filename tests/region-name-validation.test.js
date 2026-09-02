@@ -49,15 +49,19 @@ test('checks are evaluated in the documented order — blank wins over collision
   assert.match(r.reason, /blank/i);
 });
 
-test('checks are evaluated in the documented order — blank wins over newline', () => {
-  // A lone newline (or any input that is pure whitespace including \n/\r)
-  // trims to '' and must report blank, not the newline/CR rejection --
-  // proving the blank check runs before the newline check for any input
-  // that satisfies both.
-  const r = validateRegionName('\n', new Set());
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /blank/i);
-});
+// No test for "blank wins over newline/colon/.png/#" exists, deliberately:
+// those four checks all test a property of the TRIMMED value itself
+// (contains \n, contains ':', ends in '.png', contains '#'), and the empty
+// string can satisfy none of them — so there is no input where swapping
+// the blank check with any of those four would change the outcome. Only
+// blank-vs-collision (above) is genuinely order-dependent, because the
+// collision check depends on the caller-supplied effectiveDisplayNames
+// set (an independent input), not on a property of `value` — e.g. '' can
+// itself be a name already "in use". Confirmed by hand (validateRegionName('\n', ...)
+// returns the blank reason either way the two checks are ordered, since
+// '' never matches /[\n\r]/), and by a Codex task-review round on this
+// exact point (2026-09-02) after an earlier attempt at this test wrongly
+// assumed it was discriminating.
 
 test('checks are evaluated in the documented order — newline wins over colon', () => {
   const r = validateRegionName('arm\nleg:foot', new Set());
