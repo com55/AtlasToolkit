@@ -436,6 +436,8 @@ const browser = await chromium.launch({ headless: true });
 
   const single = await loadSinglePageFixtureAtlas(page);
   check('task8: single-page fixture loaded', single.ok);
+  const caretVisibleAtLoadSingle = await page.isVisible('#mode-edit-caret');
+  check('Advance Mode caret is visible at load time for single-page, before entering edit mode', caretVisibleAtLoadSingle === true);
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
   const caretVisibleSingle = await page.isVisible('#mode-edit-caret');
@@ -451,6 +453,8 @@ const browser = await chromium.launch({ headless: true });
 
   const multi = await loadFixtureAtlas(page);
   check('task8: multi-page fixture (re)loaded', multi.ok);
+  const caretHiddenAtLoadMulti = await page.isVisible('#mode-edit-caret');
+  check('Advance Mode caret is hidden at load time for multi-page, before entering edit mode', caretHiddenAtLoadMulti === false);
   await page.click('#mode-extract'); // exit back to view mode before re-entering, matching how
                                       // a real user would switch atlases between edit sessions
   await page.waitForTimeout(100);
@@ -458,6 +462,32 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(150);
   const caretVisibleMulti = await page.isVisible('#mode-edit-caret');
   check('Advance Mode entry point is hidden entirely for a multi-page atlas', caretVisibleMulti === false);
+
+  // add_region() is only supported on single-page atlases, so switch back to the
+  // single-page fixture before exercising the structural add.
+  await loadSinglePageFixtureAtlas(page);
+  const resetResult = await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    const solid = (w, h, rgba) => {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').fillStyle = `rgba(${rgba.join(',')})`; c.getContext('2d').fillRect(0, 0, w, h);
+      return c;
+    };
+    const toFile = (canvas, name) => new Promise((res) =>
+      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
+    const beforeAdd = AtlasAPI.get_region_names().length;
+    const helmetFile = await toFile(solid(6, 6, [10, 200, 10, 255]), 'helmet.png');
+    await AtlasAPI.add_region(helmetFile, 'testHelmet');
+    const afterAdd = AtlasAPI.get_region_names().length;
+    return { beforeAdd, afterAdd };
+  });
+  check('task8: add_region() via direct API call added one region (setup for the reset-refresh check)', resetResult.afterAdd === resetResult.beforeAdd + 1);
+  // No UI path to trigger Reset here yet (Tasks 9-11 build the confirm handlers) -- reload the
+  // pristine single-page fixture instead of driving the Reset button, to confirm loadRegions()
+  // (which resetModify()/exitEditMode() now both call via refreshStructuralUi) really does drop
+  // the structurally-added region back out of the effective list once the session is replaced.
+  const afterReload = await loadSinglePageFixtureAtlas(page);
+  check('task8: reloading drops the structurally-added region back out (effective model resets with the session)', afterReload.ok === true);
 
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

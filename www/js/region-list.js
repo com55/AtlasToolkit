@@ -56,6 +56,18 @@ export async function loadRegions() {
   updateModeToggleUI();
   document.getElementById('btn-extract-all').disabled   = !hasRegions;
   refreshModifiedHighlight();
+  // Advance Mode's entry point must reflect multi-page status at the moment
+  // ANY atlas load completes (spec §1: checked at load time, and again if a
+  // different atlas loads while modify mode is open) -- this is the one
+  // function every load path (script.js, drop.js) already calls, so
+  // checking here covers both requirements without duplicating the check
+  // at every load call site.
+  const isMultiPage = AtlasAPI.is_multi_page();
+  document.getElementById('mode-edit-caret').classList.toggle('hidden', isMultiPage);
+  if (isMultiPage) {
+    document.getElementById('chk-advance-mode').checked = false;
+    document.getElementById('advance-toolbar').classList.add('hidden');
+  }
 }
 
 /**
