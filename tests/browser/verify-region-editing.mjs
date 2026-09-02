@@ -159,6 +159,7 @@ bounds: 0, 0, 10, 10
       structuralHasHelmet: structuralResult.text.includes('Helmet Display Name'),
       structuralRegionBoundsKeyedCorrectly: !!structuralResult.regionBounds && !!structuralResult.regionBounds.helmet_key && structuralResult.regionBounds.helmet_key.length === 5,
       structuralOutputUsesDisplayName: structuralResult.text.includes('Helmet Display Name'),
+      structuralResultKeys: Object.keys(structuralResult).sort().join(','),
     };
   });
 
@@ -168,6 +169,7 @@ bounds: 0, 0, 10, 10
   check('structural rebuild output actually contains the added region', result5.structuralHasHelmet);
   check('regionBounds is keyed by internal key (helmet_key), not by atlasName/label', result5.structuralRegionBoundsKeyedCorrectly);
   check('output atlas text uses the atlasName (display name), proving atlasName not internalKey is written', result5.structuralOutputUsesDisplayName);
+  check('structural result has exactly the {canvas, text, regionBounds, wasStructural} shape', result5.structuralResultKeys === 'canvas,regionBounds,text,wasStructural');
 
   await browser.close();
   server.close();
