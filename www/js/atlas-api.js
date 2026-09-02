@@ -655,12 +655,19 @@ export const AtlasAPI = {
    * Extract regions to files (downloads).
    * @param {{key:string,label:string}[]|null} regions  null = extract all
    *
-   * Filenames are built from .key, not .label, deliberately -- regions
-   * sharing a literal atlas name (same .label, different internal .key,
-   * e.g. 'dagger'/'dagger#2') would collide onto the same filename if
-   * .label were used. .key exactly matches this function's pre-refactor
-   * behavior for every region, including duplicates. See commit
-   * 6569241 for the incident this fixed.
+   * Filenames are built from .key, not .label, deliberately. Today
+   * label === key for every region by construction (see
+   * get_region_names()), so this makes no visible difference yet -- but
+   * it matters once a future Rename feature lets label diverge from key:
+   * two regions could then share the same displayed label on purpose
+   * while keeping distinct internal keys, and .label would collide as a
+   * filename. .key stays collision-safe by construction and matches this
+   * function's pre-refactor behavior for every region. (Historically,
+   * before this refactor settled on that default, label was derived from
+   * the parser's atlasName field instead -- under which two regions
+   * sharing a literal atlas name, e.g. 'dagger'/'dagger#2', already had
+   * the same label with different keys and collided this exact way; see
+   * commit 6569241 for that incident.)
    */
   async extract_files(regions) {
     if (!_processor) return 'No atlas loaded.';
