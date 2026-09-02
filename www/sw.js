@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v40';
+const CACHE_NAME = 'atlas-toolkit-v41';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
@@ -20,6 +20,7 @@ const CORE_ASSETS = [
   'js/core-region-ops.js',
   'js/dialogs.js',
   'js/drop.js',
+  'js/effective-region-model.js',
   'js/modify-mode.js',
   'js/panel-resizer.js',
   'js/platform.js',
