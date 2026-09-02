@@ -149,14 +149,16 @@ bounds: 0, 0, 10, 10
     const helmetCanvas = document.createElement('canvas');
     helmetCanvas.width = 8; helmetCanvas.height = 8;
     helmetCanvas.getContext('2d').fillRect(0, 0, 8, 8);
-    session.modBatches.push(new AddBatch('helmet', 'helmet', helmetCanvas));
+    session.modBatches.push(new AddBatch('helmet_key', 'Helmet Display Name', helmetCanvas));
     const structuralResult = await session._rebuildSinglePageRepack();
 
     return {
       pristineWasStructural: pristineResult.wasStructural,
       pristineHasRegionBounds: !!pristineResult.regionBounds,
       structuralWasStructural: structuralResult.wasStructural,
-      structuralHasHelmet: structuralResult.text.includes('helmet'),
+      structuralHasHelmet: structuralResult.text.includes('Helmet Display Name'),
+      structuralRegionBoundsKeyedCorrectly: !!structuralResult.regionBounds && !!structuralResult.regionBounds.helmet_key && structuralResult.regionBounds.helmet_key.length === 5,
+      structuralOutputUsesDisplayName: structuralResult.text.includes('Helmet Display Name'),
     };
   });
 
@@ -164,6 +166,8 @@ bounds: 0, 0, 10, 10
   check('pristine branch also returns regionBounds now (additive)', result5.pristineHasRegionBounds);
   check('structural batch pending -> wasStructural: true', result5.structuralWasStructural === true);
   check('structural rebuild output actually contains the added region', result5.structuralHasHelmet);
+  check('regionBounds is keyed by internal key (helmet_key), not by atlasName/label', result5.structuralRegionBoundsKeyedCorrectly);
+  check('output atlas text uses the atlasName (display name), proving atlasName not internalKey is written', result5.structuralOutputUsesDisplayName);
 
   await browser.close();
   server.close();
