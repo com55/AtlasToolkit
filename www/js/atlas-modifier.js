@@ -616,8 +616,23 @@ export class AtlasModifier {
       ];
     }
 
+    // Additive: expose the placement data already computed above (previously
+    // discarded after folding into atlasText) so a structural caller doesn't
+    // have to reparse the serialized output to recover per-region bounds —
+    // that reparse is what silently lost identity on Rename (spec §2.6,
+    // round 3 finding 1). rotate is 0/90 (never boolean), matching every
+    // other rotate field in this codebase.
+    const regionBounds = {};
+    for (const name of regionNames) {
+      if (!(name in canonicalMap)) continue;
+      const canonical = canonicalMap[name];
+      const { x, y, rotated } = placementMap[canonical];
+      const orig = sprites[name];
+      regionBounds[name] = [x, y, orig.width, orig.height, rotated ? 90 : 0];
+    }
+
     const newAtlasText = rebuildAtlasText(pageInfo, [canvasW, canvasH], regionNames, regionData);
-    return { canvas, atlasText: newAtlasText };
+    return { canvas, atlasText: newAtlasText, regionBounds };
   }
 
   /**
@@ -654,6 +669,34 @@ export class AtlasModifier {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
     }
     return this._packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions);
+  }
+
+  /**
+   * Repack from the effective (pristine ∪ structural-batch) region model.
+   * Mirrors repackWithModdedSprites's own internal sprite-extraction
+   * structure instead of requiring the caller to pre-extract — the caller
+   * never needs to know about scaling, _extractRawSprite, or baseCanvas.
+   * Spec §2.6 (round 4 finding 2's fix).
+   * @param {string[]} effectiveRegionNames
+   * @param {{[key:string]: object}} effectiveRegions  RegionMeta per surviving key
+   * @param {{[key:string]: HTMLCanvasElement}} addedSprites  AddBatch sources, keyed by internalKey
+   * @param {{[key:string]: HTMLCanvasElement}} moddedSprites  pixel ModBatch overlays (session's existing map)
+   * @param {Set<string>|null} fullCanvasRegions
+   */
+  async repackWithEffectiveModel(effectiveRegionNames, effectiveRegions, addedSprites, moddedSprites, fullCanvasRegions = null) {
+    const { pageInfo, regions: pristineRegions } = this._parseScoped(this.atlasText);
+    const sprites = {};
+    for (const [name, info] of Object.entries(pristineRegions)) {
+      if (!(name in effectiveRegions)) continue; // dropped by a RemoveBatch
+      sprites[name] = this._extractRawSprite(this.baseCanvas, info);
+    }
+    for (const [name, sprite] of Object.entries(moddedSprites || {})) {
+      if (name in sprites) sprites[name] = _toCanvas(sprite);
+    }
+    for (const [key, canvas] of Object.entries(addedSprites || {})) {
+      sprites[key] = _toCanvas(canvas); // AddBatch — new key, never in the pristine parse
+    }
+    return this._packAndEmit(sprites, pageInfo, effectiveRegionNames, effectiveRegions, fullCanvasRegions);
   }
 }
 
