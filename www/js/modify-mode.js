@@ -391,7 +391,14 @@ document.getElementById('btn-pick-skel').addEventListener('click', async () => {
 });
 
 // ─── Rename Region Modal (Task 9) ─────────────────────────────────────────────
+// Shared across every structural confirm handler (Rename now; Add/Remove in
+// Tasks 10-11) -- the risk (two concurrent applyStructuralBatch() calls
+// racing on the same session) isn't scoped to any one modal, so this can't
+// be a per-open local variable the way an earlier fix round tried.
+let structuralOpInFlight = false;
+
 function openRenameModal() {
+  if (structuralOpInFlight) return;
   const keys = getSelectedKeys();
   if (keys.length > 1) { showToast('Select a single region to rename.', 'error'); return; }
   if (keys.length === 0) return;
@@ -403,8 +410,6 @@ function openRenameModal() {
   document.getElementById('rename-confirm-btn').disabled = false;
   document.getElementById('rename-modal').classList.remove('hidden');
 
-  let submitting = false; // in-flight guard: revalidate() must never re-enable Save while true
-
   const revalidate = () => {
     const effectiveOthers = state.regionsData
       .filter((r) => r.key !== key)
@@ -414,7 +419,7 @@ function openRenameModal() {
     const confirmBtn = document.getElementById('rename-confirm-btn');
     if (result.ok) {
       errorEl.classList.add('hidden');
-      confirmBtn.disabled = submitting;
+      confirmBtn.disabled = structuralOpInFlight;
     } else {
       errorEl.textContent = result.reason;
       errorEl.classList.remove('hidden');
@@ -426,10 +431,10 @@ function openRenameModal() {
   revalidate();
 
   document.getElementById('rename-confirm-btn').onclick = async () => {
-    if (submitting) return;
+    if (structuralOpInFlight) return;
     const result = revalidate();
     if (!result.ok) return;
-    submitting = true;
+    structuralOpInFlight = true;
     const confirmBtn = document.getElementById('rename-confirm-btn');
     confirmBtn.disabled = true;
     const prevSelectedKeys = getSelectedKeys();
@@ -441,11 +446,13 @@ function openRenameModal() {
     } catch (e) {
       console.error(e);
       showToast('Failed to rename region.', 'error');
-      submitting = false;
       confirmBtn.disabled = false;
+    } finally {
+      structuralOpInFlight = false;
     }
   };
   document.getElementById('rename-cancel-btn').onclick = () => {
+    if (structuralOpInFlight) return; // can't cancel out of a submission that's still in flight
     document.getElementById('rename-modal').classList.add('hidden');
   };
 }
