@@ -886,6 +886,53 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
+// ─── Advance Mode + portrait splitter interaction (panel-resizer.js) ──────────
+{
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  });
+  // Force the splitter's stored height to whatever the (pre-Advance-Mode)
+  // floor allows, matching the exact scenario setAdvanceMode() calling
+  // refreshPanelSplit() fixes: the right panel already occupying as much
+  // height as the floor allowed *before* #advance-toolbar entered the
+  // layout and needed its own share of #left-panel's height too.
+  await ctx.addInitScript(() => {
+    localStorage.setItem('atlastoolkit.layout.portrait.previewHeight', '10000');
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('portrait splitter: single-page fixture loaded', loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  await page.click('#advance-mode-row');
+  await page.waitForTimeout(100);
+
+  const geometry = await page.evaluate(() => {
+    const leftPanel = document.getElementById('left-panel');
+    const advanceToolbar = document.getElementById('advance-toolbar');
+    const sidebarHead = document.getElementById('sidebar-head');
+    const leftRect = leftPanel.getBoundingClientRect();
+    const toolbarRect = advanceToolbar.getBoundingClientRect();
+    const headRect = sidebarHead.getBoundingClientRect();
+    return {
+      toolbarVisible: getComputedStyle(advanceToolbar).display !== 'none',
+      toolbarFitsInLeftPanel: toolbarRect.bottom <= leftRect.bottom + 1, // +1px rounding slack
+      sidebarHeadFitsInLeftPanel: headRect.bottom <= leftRect.bottom + 1,
+    };
+  });
+  check('portrait: Advance Mode toolbar is visible in stacked layout', geometry.toolbarVisible === true);
+  check('portrait: toggling Advance Mode re-clamps the splitter so the toolbar is not clipped',
+    geometry.toolbarFitsInLeftPanel === true, JSON.stringify(geometry));
+  check('portrait: sidebar-head also stays inside the left panel', geometry.sidebarHeadFitsInLeftPanel === true);
+
+  check('portrait splitter: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
