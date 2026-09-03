@@ -31,12 +31,14 @@ function toggleAdvanceModeDropdown() {
   const caret = document.getElementById('mode-edit-caret');
   if (!dropdown.classList.contains('hidden')) {
     dropdown.classList.add('hidden');
+    caret.setAttribute('aria-expanded', 'false');
     return;
   }
   const rect = caret.getBoundingClientRect();
   dropdown.style.left = `${rect.left}px`;
   dropdown.style.top = `${rect.bottom + 4}px`;
   dropdown.classList.remove('hidden');
+  caret.setAttribute('aria-expanded', 'true');
 }
 
 /** Show/refresh the page switcher; visible only in edit mode on a multi-page atlas. */
