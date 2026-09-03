@@ -3,7 +3,7 @@ import { state, getSelectedKeys, getSelectedLabels } from './state.js';
 import { loadRegions, updateButtons } from './region-list.js';
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
-import { showToast, showConfirm } from './dialogs.js';
+import { showToast, showConfirm, isAddRegionDialogOpen } from './dialogs.js';
 import { platform, isPywebviewDesktop } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
@@ -91,6 +91,7 @@ const isMissingDialogOpen = () => document.body.dataset.missingDialogOpen === 't
 window.addEventListener('dragenter', (e) => {
   e.preventDefault();
   if (isMissingDialogOpen()) return;
+  if (isAddRegionDialogOpen()) return;
   if (e.dataTransfer.types.includes('Files')) showDropOverlay();
 });
 
@@ -104,6 +105,7 @@ dropOverlay.addEventListener('dragleave', (e) => {
 dropOverlay.addEventListener('drop', async (e) => {
   e.preventDefault();
   if (isMissingDialogOpen()) return;
+  if (isAddRegionDialogOpen()) return;
   hideDropOverlay();
 
   // pywebview: a native OS file drop's browser File objects carry no
