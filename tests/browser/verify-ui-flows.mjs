@@ -547,6 +547,28 @@ const browser = await chromium.launch({ headless: true });
     return !!el && el.innerText.includes('reentrant1');
   }, undefined, { timeout: 5000 });
 
+  // Cancel must also be blocked during the in-flight window -- this is the actual
+  // loophole a prior fix round missed: without this, Cancel closes the modal,
+  // reopening it creates a fresh in-flight flag, and a second submission can
+  // start while the first is still pending on the same session.
+  await page.locator('.region-item').nth(0).click();
+  await page.click('#btn-rename-region');
+  await page.fill('#rename-name-input', 'cancelblocked1');
+  await page.click('#rename-confirm-btn');
+  // Fire Cancel synchronously in-page (no Playwright actionability/stability
+  // wait) so it lands inside the in-flight window -- page.click() would wait
+  // for the element to be 'stable', and by then the real repack has already
+  // finished and hidden the modal, so the click would find nothing.
+  await page.evaluate(() => document.getElementById('rename-cancel-btn').click()); // should be a no-op while in flight
+  const modalStillVisibleMidFlight = await page.isVisible('#rename-modal');
+  check('Cancel is blocked while a submission is in flight', modalStillVisibleMidFlight === true);
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.region-item.selected');
+    return !!el && el.innerText.includes('cancelblocked1');
+  }, undefined, { timeout: 5000 });
+  const modalHiddenAfterCompletion = await page.isHidden('#rename-modal');
+  check('Cancel becomes usable again once the in-flight submission completes (modal auto-closed on success)', modalHiddenAfterCompletion === true);
+
   // invalid name shows inline error, keeps Save disabled
   await page.locator('.region-item').nth(0).click();
   await page.click('#btn-rename-region');
