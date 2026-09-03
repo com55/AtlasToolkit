@@ -434,6 +434,8 @@ const browser = await chromium.launch({ headless: true });
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
 
   const single = await loadSinglePageFixtureAtlas(page);
@@ -492,8 +494,6 @@ const browser = await chromium.launch({ headless: true });
   check('task8: reloading drops the structurally-added region back out (effective model resets with the session)',
     afterReload.ok === true && afterReload.names.length === resetResult.beforeAdd && !afterReload.names.some((r) => r.key === 'testHelmet'));
 
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
   check('task8: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
