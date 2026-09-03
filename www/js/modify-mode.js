@@ -426,6 +426,8 @@ function openRenameModal() {
   document.getElementById('rename-confirm-btn').onclick = async () => {
     const result = revalidate();
     if (!result.ok) return;
+    const confirmBtn = document.getElementById('rename-confirm-btn');
+    confirmBtn.disabled = true; // prevent re-entrant submission while the repack is in flight
     const prevSelectedKeys = getSelectedKeys();
     try {
       const payload = await AtlasAPI.rename_region(key, result.value);
@@ -435,6 +437,7 @@ function openRenameModal() {
     } catch (e) {
       console.error(e);
       showToast('Failed to rename region.', 'error');
+      confirmBtn.disabled = false; // restore on failure so the user can retry
     }
   };
   document.getElementById('rename-cancel-btn').onclick = () => {
