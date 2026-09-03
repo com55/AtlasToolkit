@@ -832,6 +832,64 @@ img#preview-img {
   background-color: #2d2d2d;
 }
 
+/* Rename Region Modal -- mirrors #modal-overlay/#modal-box (own overlay, not
+   nested in #modal-overlay, which has no text-input slot). */
+#rename-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 4500;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(2px);
+}
+
+#rename-modal-box {
+  background-color: #252526;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  min-width: 320px;
+  max-width: 400px;
+  border: 1px solid #454545;
+  animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+#rename-modal-box h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #ddd;
+  font-size: 18px;
+}
+
+#rename-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  background-color: #1e1e1e;
+  color: #ddd;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+#rename-name-input:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+
+.field-error {
+  color: #f48771;
+  font-size: 12px;
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
 .missing-images-overlay {
   position: fixed;
   top: 0;

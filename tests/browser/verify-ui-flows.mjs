@@ -142,6 +142,8 @@ async function loadSinglePageFixtureAtlas(page) {
 size: 50, 50
 zeta
 bounds: 0, 0, 20, 20
+omega
+bounds: 25, 0, 20, 20
 `;
     const atlasFile = new File([atlasText], 'single.atlas', { type: 'text/plain' });
     const p1 = await toFile(solid(50, 50, [80, 40, 200, 255]), 'page1.png');
@@ -493,6 +495,61 @@ const browser = await chromium.launch({ headless: true });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   check('task8: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
+// ─── Task 9: Rename flow ──────────────────────────────────────────────────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('task9: single-page fixture loaded', loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+
+  await page.locator('.region-item').nth(0).click();
+  await page.click('#mode-edit-caret');
+  await page.click('#advance-mode-row');
+  await page.click('#btn-rename-region');
+  await page.fill('#rename-name-input', 'forearm');
+  const saveEnabled = await page.isEnabled('#rename-confirm-btn');
+  check('valid name enables Save', saveEnabled === true);
+  await page.click('#rename-confirm-btn');
+  // The confirm handler runs rename_region (a forced full repack) before the
+  // sidebar rebuilds — that repack takes well over 150ms, so poll for the
+  // renamed label instead of a fixed sleep (a longer fixed wait is still flaky).
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.region-item.selected');
+    return !!el && el.innerText.includes('forearm');
+  }, { timeout: 5000 });
+  const selectedLabel = await page.evaluate(() =>
+    document.querySelector('.region-item.selected')?.innerText);
+  check('sidebar shows the new label immediately', !!selectedLabel && selectedLabel.includes('forearm'), selectedLabel);
+
+  // invalid name shows inline error, keeps Save disabled
+  await page.locator('.region-item').nth(0).click();
+  await page.click('#btn-rename-region');
+  await page.fill('#rename-name-input', '');
+  const errorVisible = await page.isVisible('#rename-name-error');
+  const saveDisabled = await page.isDisabled('#rename-confirm-btn');
+  check('blank name shows inline error', errorVisible === true);
+  check('blank name keeps Save disabled', saveDisabled === true);
+  await page.click('#rename-cancel-btn');
+
+  // >1 selected shows a toast and does nothing else
+  await page.locator('.region-item').nth(0).click();
+  await page.locator('.region-item').nth(1).click({ modifiers: ['Control'] });
+  await page.click('#btn-rename-region');
+  await page.waitForTimeout(150);
+  const toastText = await page.evaluate(() =>
+    [...document.querySelectorAll('#toast-container .toast')].map((el) => el.innerText).join('\n'));
+  check('multi-select shows the exact spec toast copy', toastText.includes('Select a single region to rename.'), toastText);
+
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  check('task9: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
 
