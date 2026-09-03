@@ -181,6 +181,23 @@
       </div>
     </div>
 
+    <div id="add-region-modal" class="hidden">
+      <div id="add-region-modal-box">
+        <h3>Add region</h3>
+        <div id="add-drop-area">
+          <input type="file" id="add-file-input" accept="image/png" hidden />
+          <img id="add-image-preview" class="hidden" />
+          <span id="add-drop-hint">Drop an image, or click to browse</span>
+        </div>
+        <input type="text" id="add-name-input" placeholder="Region name" />
+        <p id="add-name-error" class="field-error hidden"></p>
+        <div class="modal-buttons">
+          <button type="button" class="btn-secondary" id="add-cancel-btn">Cancel</button>
+          <button type="button" class="btn-primary" id="add-confirm-btn" disabled>Add</button>
+        </div>
+      </div>
+    </div>
+
     <div id="repack-info-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="repack-info-title">
       <div id="repack-info-box">
         <h3 id="repack-info-title">Repack</h3>

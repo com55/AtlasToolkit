@@ -586,6 +586,18 @@ class Api:
                     )
                 return
 
+            add_open = self._window.evaluate_js(
+                "document.body.dataset.addRegionDialogOpen === 'true'"
+            )
+            if add_open:
+                if path_lower.endswith(".png"):
+                    # Fire-and-forget, same reasoning as applyMissingImageDrop
+                    # above: awaiting here can deadlock on the GUI thread.
+                    self._window.evaluate_js(
+                        f"void window.applyAddRegionImageDrop({json.dumps(path)})"
+                    )
+                return
+
             if path_lower.endswith(".atlas"):
                 # Native drops bypass script.js's openFile() entirely (that's
                 # the JS-only "Open" button's own guard), so loading a new

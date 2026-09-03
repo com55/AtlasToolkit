@@ -1,4 +1,5 @@
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
+import { validateRegionName } from './region-name-validation.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -187,6 +188,121 @@ async function applyMissingImageDrop(path, clientX, clientY) {
 if (typeof window !== 'undefined') {
   window.isMissingDialogOpen = isMissingDialogOpen;
   window.applyMissingImageDrop = applyMissingImageDrop;
+}
+
+let _addRegionDialogState = null;
+
+export function isAddRegionDialogOpen() {
+  return typeof document !== 'undefined'
+    && document.body?.dataset?.addRegionDialogOpen === 'true';
+}
+
+async function applyAddRegionImageDrop(path) {
+  if (!_addRegionDialogState || !path || !/\.png$/i.test(path)) return false;
+  try {
+    const file = await loadFileAsFile(path);
+    _addRegionDialogState.onFileSelected(file);
+    return true;
+  } catch (e) {
+    console.error('applyAddRegionImageDrop error:', e);
+    return false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.applyAddRegionImageDrop = applyAddRegionImageDrop;
+}
+
+export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
+  const modal = document.getElementById('add-region-modal');
+  const fileInput = document.getElementById('add-file-input');
+  const nameInput = document.getElementById('add-name-input');
+  const errorEl = document.getElementById('add-name-error');
+  const confirmBtn = document.getElementById('add-confirm-btn');
+  const preview = document.getElementById('add-image-preview');
+  const hint = document.getElementById('add-drop-hint');
+  const dropArea = document.getElementById('add-drop-area');
+  let selectedFile = null;
+  let nameTouchedByUser = false;
+  let submitting = false;
+
+  fileInput.value = '';
+  nameInput.value = '';
+  errorEl.classList.add('hidden');
+  preview.classList.add('hidden');
+  hint.classList.remove('hidden');
+
+  const revalidate = () => {
+    if (!selectedFile) { confirmBtn.disabled = true; return { ok: false }; }
+    const result = validateRegionName(nameInput.value, getEffectiveNames());
+    if (result.ok) {
+      errorEl.classList.add('hidden');
+      confirmBtn.disabled = submitting;
+    } else {
+      errorEl.textContent = result.reason;
+      errorEl.classList.remove('hidden');
+      confirmBtn.disabled = true;
+    }
+    return result;
+  };
+
+  const onFileSelected = (file) => {
+    selectedFile = file;
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove('hidden');
+    hint.classList.add('hidden');
+    if (!nameTouchedByUser) {
+      nameInput.value = file.name.replace(/\.png$/i, '');
+    }
+    revalidate();
+  };
+
+  nameInput.oninput = () => { nameTouchedByUser = true; revalidate(); };
+  fileInput.onchange = () => { if (fileInput.files[0]) onFileSelected(fileInput.files[0]); };
+  dropArea.onclick = () => fileInput.click();
+  dropArea.ondragover = (e) => e.preventDefault();
+  dropArea.ondrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files[0];
+    if (file) onFileSelected(file);
+  };
+
+  document.body.dataset.addRegionDialogOpen = 'true';
+  _addRegionDialogState = { onFileSelected };
+  modal.classList.remove('hidden');
+  confirmBtn.disabled = true;
+
+  const close = () => {
+    document.body.dataset.addRegionDialogOpen = 'false';
+    _addRegionDialogState = null;
+    modal.classList.add('hidden');
+    selectedFile = null;
+    nameTouchedByUser = false;
+    preview.classList.add('hidden');
+    hint.classList.remove('hidden');
+  };
+  confirmBtn.onclick = async () => {
+    if (submitting) return;
+    const result = revalidate();
+    if (!result.ok || !selectedFile) return;
+    submitting = true;
+    confirmBtn.disabled = true;
+    try {
+      await onConfirm(selectedFile, result.value);
+      close();
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to add region.', 'error');
+      confirmBtn.disabled = false;
+    } finally {
+      submitting = false;
+    }
+  };
+  document.getElementById('add-cancel-btn').onclick = () => {
+    if (submitting) return;
+    close();
+  };
 }
 
 export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
