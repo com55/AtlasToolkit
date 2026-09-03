@@ -530,6 +530,23 @@ const browser = await chromium.launch({ headless: true });
     document.querySelector('.region-item.selected')?.innerText);
   check('sidebar shows the new label immediately', !!selectedLabel && selectedLabel.includes('forearm'), selectedLabel);
 
+  // re-entrancy guard: typing a valid name again while the previous submission
+  // is still in flight must not re-enable Save. page.click() only waits for the
+  // click event + synchronous handler code to run, not the async chain inside
+  // it -- so by the time it resolves, onclick has already reached its first
+  // await and is genuinely 'in flight'.
+  await page.locator('.region-item').nth(0).click();
+  await page.click('#btn-rename-region');
+  await page.fill('#rename-name-input', 'reentrant1');
+  await page.click('#rename-confirm-btn');
+  await page.fill('#rename-name-input', 'reentrant2');
+  const stillDisabledMidFlight = await page.isDisabled('#rename-confirm-btn');
+  check('Save stays disabled if the user types again during the in-flight repack', stillDisabledMidFlight === true);
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.region-item.selected');
+    return !!el && el.innerText.includes('reentrant1');
+  }, undefined, { timeout: 5000 });
+
   // invalid name shows inline error, keeps Save disabled
   await page.locator('.region-item').nth(0).click();
   await page.click('#btn-rename-region');

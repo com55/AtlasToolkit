@@ -403,6 +403,8 @@ function openRenameModal() {
   document.getElementById('rename-confirm-btn').disabled = false;
   document.getElementById('rename-modal').classList.remove('hidden');
 
+  let submitting = false; // in-flight guard: revalidate() must never re-enable Save while true
+
   const revalidate = () => {
     const effectiveOthers = state.regionsData
       .filter((r) => r.key !== key)
@@ -412,7 +414,7 @@ function openRenameModal() {
     const confirmBtn = document.getElementById('rename-confirm-btn');
     if (result.ok) {
       errorEl.classList.add('hidden');
-      confirmBtn.disabled = false;
+      confirmBtn.disabled = submitting;
     } else {
       errorEl.textContent = result.reason;
       errorEl.classList.remove('hidden');
@@ -424,20 +426,23 @@ function openRenameModal() {
   revalidate();
 
   document.getElementById('rename-confirm-btn').onclick = async () => {
+    if (submitting) return;
     const result = revalidate();
     if (!result.ok) return;
+    submitting = true;
     const confirmBtn = document.getElementById('rename-confirm-btn');
-    confirmBtn.disabled = true; // prevent re-entrant submission while the repack is in flight
+    confirmBtn.disabled = true;
     const prevSelectedKeys = getSelectedKeys();
     try {
       const payload = await AtlasAPI.rename_region(key, result.value);
       document.getElementById('rename-modal').classList.add('hidden');
       await onModPreviewReceived(payload);
-      await refreshStructuralUi(prevSelectedKeys); // async since Task 8 -- must be awaited
+      await refreshStructuralUi(prevSelectedKeys);
     } catch (e) {
       console.error(e);
       showToast('Failed to rename region.', 'error');
-      confirmBtn.disabled = false; // restore on failure so the user can retry
+      submitting = false;
+      confirmBtn.disabled = false;
     }
   };
   document.getElementById('rename-cancel-btn').onclick = () => {
