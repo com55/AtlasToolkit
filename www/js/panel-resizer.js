@@ -20,9 +20,10 @@ export function initPanelResizer() {
   const rightPanel    = document.getElementById('right-panel');
   const mainContent   = document.getElementById('main-content');
   const sidebarHead   = document.getElementById('sidebar-head');
+  const advanceToolbar = document.getElementById('advance-toolbar');
   const repackOptions = document.getElementById('repack-options');
   const statusBar     = document.getElementById('status-bar');
-  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !repackOptions || !statusBar) return;
+  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !repackOptions || !statusBar) return;
 
   let dragging  = false;
   let startPos  = 0;
@@ -33,7 +34,10 @@ export function initPanelResizer() {
   // Stacked (portrait/mobile) mode is user-resizable, but each side's own
   // header row always stays visible: dragging up stops once the preview has
   // shrunk to nothing beneath repack-options + status-bar; dragging down
-  // stops once the region list has shrunk to nothing beneath sidebar-head.
+  // stops once the region list has shrunk to nothing beneath sidebar-head
+  // (and #advance-toolbar too, when Advance Mode has it showing -- its
+  // getBoundingClientRect().height is naturally 0 while hidden, so this
+  // reads correctly either way without a separate visibility check).
   // The budget is #main-content's own height (not window.innerHeight) minus
   // the splitter's own footprint, since #app-bar can grow taller than its
   // base 42px when it wraps -- eating into the space actually left for the
@@ -45,7 +49,8 @@ export function initPanelResizer() {
     minRightHeight(),
     mainContent.getBoundingClientRect().height
       - splitter.getBoundingClientRect().height
-      - sidebarHead.getBoundingClientRect().height,
+      - sidebarHead.getBoundingClientRect().height
+      - advanceToolbar.getBoundingClientRect().height,
   );
 
   const applyStoredSplit = () => {
