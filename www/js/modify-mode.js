@@ -460,13 +460,20 @@ function openRenameModal() {
 document.getElementById('btn-rename-region').addEventListener('click', openRenameModal);
 
 document.getElementById('btn-add-region').addEventListener('click', () => {
+  if (structuralOpInFlight) return;
   openAddRegionModal({
     getEffectiveNames: () => state.regionsData.map((r) => r.label),
     onConfirm: async (file, atlasName) => {
-      const prevSelectedKeys = getSelectedKeys();
-      const payload = await AtlasAPI.add_region(file, atlasName);
-      await onModPreviewReceived(payload);
-      await refreshStructuralUi(prevSelectedKeys);
+      if (structuralOpInFlight) return;
+      structuralOpInFlight = true;
+      try {
+        const prevSelectedKeys = getSelectedKeys();
+        const payload = await AtlasAPI.add_region(file, atlasName);
+        await onModPreviewReceived(payload);
+        await refreshStructuralUi(prevSelectedKeys);
+      } finally {
+        structuralOpInFlight = false;
+      }
     },
   });
 });
