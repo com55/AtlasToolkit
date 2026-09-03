@@ -11,7 +11,7 @@ import {
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
-import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons } from './region-list.js';
+import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState } from './region-list.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -102,6 +102,7 @@ export async function refreshStructuralUi(prevSelectedKeys, { lockRepack = true 
   state.selectedIndices = newIndices;
   renderSelection();
   updateButtons();
+  updateRemoveButtonState();
   if (lockRepack) {
     const chk = document.getElementById('chk-repack');
     chk.checked = true;
@@ -476,4 +477,23 @@ document.getElementById('btn-add-region').addEventListener('click', () => {
       }
     },
   });
+});
+
+document.getElementById('btn-remove-region').addEventListener('click', async () => {
+  const keys = getSelectedKeys();
+  if (keys.length === 0) return; // button is disabled in this case; defensive no-op
+  const ok = await showConfirm(
+    `Remove ${keys.length} region${keys.length > 1 ? 's' : ''}? This cannot be undone after Save.`,
+    'Remove region' + (keys.length > 1 ? 's' : '') + '?',
+  );
+  if (!ok) return;
+  const prevSelectedKeys = []; // removed regions can't remain selected — start from empty
+  try {
+    const payload = await AtlasAPI.remove_regions(keys);
+    await onModPreviewReceived(payload);
+    await refreshStructuralUi(prevSelectedKeys);
+  } catch (e) {
+    console.error(e);
+    showToast('Failed to remove region(s).', 'error');
+  }
 });
