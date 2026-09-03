@@ -240,12 +240,28 @@ body.resizing {
   font-size: 12px;
   font-weight: bold;
   color: #aaa;
+  /* Lines up with whichever right-panel row shares its position: 35px to
+     match #repack-options when #advance-toolbar isn't occupying the row
+     above (the default, and always true in View Mode); 30px to match
+     #status-bar once Advance Mode pushes #advance-toolbar in above it. */
+  height: 35px;
+  min-height: 35px;
+}
+
+body.mode-modify.advance-mode-on #sidebar-head {
+  height: 30px;
+  min-height: 30px;
 }
 
 #repack-options {
+  height: 35px;
+  min-height: 35px;
   padding: 0 10px;
   gap: 6px;
 }
+
+body.mode-extract #advance-mode-row,
+body.mode-extract #advance-mode-divider { display: none; }
 
 body.mode-modify #mesh-mask-toggle-row,
 body.mode-modify #btn-pick-skel { display: none; }
@@ -759,8 +775,8 @@ img#preview-img {
   padding: 24px;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  min-width: 320px;
-  max-width: 400px;
+  width: min(400px, calc(100vw - 32px)); /* keeps a gap to the screen edge on narrow/mobile viewports */
+  box-sizing: border-box;
   border: 1px solid #454545;
   animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -853,8 +869,8 @@ img#preview-img {
   padding: 24px;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  min-width: 320px;
-  max-width: 400px;
+  width: min(400px, calc(100vw - 32px)); /* keeps a gap to the screen edge on narrow/mobile viewports */
+  box-sizing: border-box;
   border: 1px solid #454545;
   animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -909,8 +925,8 @@ img#preview-img {
   padding: 24px;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  min-width: 320px;
-  max-width: 400px;
+  width: min(400px, calc(100vw - 32px)); /* keeps a gap to the screen edge on narrow/mobile viewports */
+  box-sizing: border-box;
   border: 1px solid #454545;
   animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -924,7 +940,7 @@ img#preview-img {
 
 #add-drop-area {
   display: flex;
-  min-height: 160px;
+  aspect-ratio: 4 / 3;
   margin-bottom: 12px;
   padding: 12px;
   box-sizing: border-box;
@@ -936,8 +952,8 @@ img#preview-img {
 }
 
 #add-image-preview {
-  max-width: 100%;
-  max-height: 160px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -1124,59 +1140,33 @@ img#preview-img {
   min-width: 160px;
 }
 
-/* Advance Mode caret — small square button attached to the mode-toggle group,
-   same technique as #btn-save-menu's caret button. */
-.mode-toggle-caret {
-  flex: none;
-  width: 22px;
-  height: 28px;
-  margin-left: 4px;
-  padding: 0;
-  border: 1px solid #555;
-  border-radius: 3px;
-  background-color: #3c3c3c;
-  color: #888;
-  cursor: pointer;
-}
-
-.mode-toggle-caret:hover {
-  background-color: #4c4c4c;
-  color: #fff;
-}
-
-.mode-toggle-caret[aria-expanded="true"] {
-  background-color: #2e7d32;
-  color: #fff;
-}
-
-.caret-icon {
-  display: inline-block;
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
-}
-
-/* Advance Mode dropdown — same positioning technique as #context-menu. */
-#advance-mode-dropdown {
-  position: fixed;
-  background-color: #2d2d2d;
-  border: 1px solid #454545;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  padding: 8px 10px;
-  z-index: 4000;
-  min-width: 160px;
-}
-
-/* Advance Mode toolbar row — simple flex row above the region list. */
+/* Advance Mode toolbar row — Rename/Add/Remove, shown above the region list
+   once Advance Mode is switched on from its toggle in #repack-options.
+   Only ever actually shown in Edit Mode -- the display:none below is a
+   second, CSS-level guard on top of the .hidden class the checkbox's own
+   change handler toggles, so a stale checked checkbox from a prior Edit
+   session can never leave it visible after switching back to View Mode. */
 #advance-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
+  padding: 0 10px; /* matches .app-bar-left's own horizontal padding, so
+                       button content lines up with the app-bar above it */
+  height: 35px;
+  min-height: 35px;
+  box-sizing: border-box;
   border-bottom: 1px solid #454545;
+}
+
+body.mode-extract #advance-toolbar {
+  display: none;
+}
+
+#advance-toolbar button {
+  flex: 1;
+  height: 26px;
+  padding: 3px 10px;
+  box-sizing: border-box;
 }
 
 .context-menu-item {

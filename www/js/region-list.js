@@ -1,7 +1,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
 import { updatePreview, updateModifyPreview } from './preview.js';
-import { updateModeToggleUI } from './app-bar.js';
+import { updateModeToggleUI, setAdvanceMode } from './app-bar.js';
 
 // ─── Auto-Scroll State ────────────────────────────────────────────────────────
 let autoScrollSpeed    = 0;
@@ -63,10 +63,9 @@ export async function loadRegions() {
   // checking here covers both requirements without duplicating the check
   // at every load call site.
   const isMultiPage = AtlasAPI.is_multi_page();
-  document.getElementById('mode-edit-caret').classList.toggle('hidden', isMultiPage);
+  document.getElementById('advance-mode-row').classList.toggle('hidden', isMultiPage);
   if (isMultiPage) {
-    document.getElementById('chk-advance-mode').checked = false;
-    document.getElementById('advance-toolbar').classList.add('hidden');
+    setAdvanceMode(false);
   }
 }
 
@@ -114,7 +113,15 @@ export function updateRemoveButtonState() {
   const selectedCount = state.selectedIndices.size;
   const wouldEmptyAtlas = selectedCount > 0 && selectedCount === state.regionsData.length;
   btn.disabled = selectedCount === 0 || wouldEmptyAtlas;
-  btn.title = wouldEmptyAtlas ? "Can't remove every region." : 'Remove';
+  btn.title = wouldEmptyAtlas ? "Can't remove every region." : 'Remove select regions';
+}
+
+/** Rename only ever targets a single region -- disable the button for any
+ *  other selection count instead of leaving it clickable and toasting an
+ *  error, matching how updateRemoveButtonState() already disables Remove
+ *  rather than relying on a click-time guard. */
+export function updateRenameButtonState() {
+  document.getElementById('btn-rename-region').disabled = state.selectedIndices.size !== 1;
 }
 
 export function triggerPreviewUpdate() {
@@ -133,6 +140,7 @@ export function triggerPreviewUpdate() {
     }, 50);
     updateButtons();
     updateRemoveButtonState();
+    updateRenameButtonState();
   }
 }
 
@@ -234,6 +242,7 @@ window.addEventListener('mouseup', () => {
     else updateModifyPreview(getSelectedRegions());
     updateButtons();
     updateRemoveButtonState();
+    updateRenameButtonState();
   }
   state.viewState.isDragging = false;
 });
@@ -358,5 +367,6 @@ window.addEventListener('keydown', (e) => {
   else updateModifyPreview(getSelectedRegions());
   updateButtons();
   updateRemoveButtonState();
+  updateRenameButtonState();
   document.querySelector(`.region-item[data-index="${newIndex}"]`)?.scrollIntoView({ block: 'nearest' });
 });
