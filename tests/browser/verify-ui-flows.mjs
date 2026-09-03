@@ -592,6 +592,56 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
+// ─── Task 10: Add flow (browser/PWA path) ──────────────────────────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('task10: single-page fixture loaded', loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  await page.click('#mode-edit-caret');
+  await page.click('#advance-mode-row');
+
+  await page.click('#btn-add-region');
+  const chooser = page.waitForEvent('filechooser');
+  await page.click('#add-drop-area');
+  await (await chooser).setFiles({ name: 'stem-test.png', mimeType: 'image/png', buffer: MOD_PNG });
+  await page.waitForTimeout(150);
+  const autoFilledName = await page.inputValue('#add-name-input');
+  check('name auto-fills from the file stem on first pick', autoFilledName === 'stem-test', autoFilledName);
+  const previewVisible = await page.isVisible('#add-image-preview');
+  check('image preview shows once a file is picked', previewVisible === true);
+
+  await page.fill('#add-name-input', 'helmet');
+  const addSaveEnabled = await page.isEnabled('#add-confirm-btn');
+  check('valid name + picked file enables Add', addSaveEnabled === true);
+  await page.click('#add-confirm-btn');
+  await page.waitForFunction(() =>
+    document.querySelector('.region-item[data-key="helmet"]'),
+  undefined, { timeout: 5000 });
+  const regionNames = await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    return AtlasAPI.get_region_names().map((r) => r.key);
+  });
+  check('added region appears in the effective list', regionNames.includes('helmet'), regionNames.join(','));
+
+  // global drop overlay must not intercept a drop while the Add modal is open
+  await page.click('#btn-add-region');
+  const guardActive = await page.evaluate(() => document.body.dataset.addRegionDialogOpen === 'true');
+  check('addRegionDialogOpen flag is set while the Add modal is open', guardActive === true);
+  await page.click('#add-cancel-btn');
+  const guardCleared = await page.evaluate(() => document.body.dataset.addRegionDialogOpen === 'true');
+  check('flag is cleared on Cancel, not just on Confirm', guardCleared === false);
+
+  check('task10: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -8,7 +8,7 @@ import {
   updatePreview, updateModifyPreview, updateSaveMergedButton, setPreviewSrc,
   fitScaleIfOversized,
 } from './preview.js';
-import { showToast, showConfirm } from './dialogs.js';
+import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons } from './region-list.js';
@@ -458,3 +458,15 @@ function openRenameModal() {
 }
 
 document.getElementById('btn-rename-region').addEventListener('click', openRenameModal);
+
+document.getElementById('btn-add-region').addEventListener('click', () => {
+  openAddRegionModal({
+    getEffectiveNames: () => state.regionsData.map((r) => r.label),
+    onConfirm: async (file, atlasName) => {
+      const prevSelectedKeys = getSelectedKeys();
+      const payload = await AtlasAPI.add_region(file, atlasName);
+      await onModPreviewReceived(payload);
+      await refreshStructuralUi(prevSelectedKeys);
+    },
+  });
+});
