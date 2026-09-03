@@ -1,6 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedKeys, getSelectedLabels } from './state.js';
-import { loadRegions, updateButtons } from './region-list.js';
+import { loadRegions, updateButtons, updateRemoveButtonState } from './region-list.js';
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
 import { showToast, showConfirm, isAddRegionDialogOpen } from './dialogs.js';
@@ -54,6 +54,7 @@ async function processDroppedFiles(files) {
     resetPreview();
     clearOverlay();
     updateButtons();
+    updateRemoveButtonState();
     await loadRegions();
     updateMeshCroppingUI();
     showToast('Atlas loaded via drag & drop.', 'success');
