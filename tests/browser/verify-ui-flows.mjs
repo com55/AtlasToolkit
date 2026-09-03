@@ -638,6 +638,58 @@ const browser = await chromium.launch({ headless: true });
   const guardCleared = await page.evaluate(() => document.body.dataset.addRegionDialogOpen === 'true');
   check('flag is cleared on Cancel, not just on Confirm', guardCleared === false);
 
+  // Hold Rename's structural operation in flight, then exercise the covered
+  // Add toolbar button through both direct dispatch and keyboard focus. The
+  // shared guard must reject every activation until Rename has settled.
+  await page.locator('.region-item').nth(0).click();
+  await page.click('#btn-rename-region');
+  await page.fill('#rename-name-input', 'task10Lock');
+  await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    const originalRenameRegion = AtlasAPI.rename_region;
+    let releaseRename;
+    const renameGate = new Promise((resolve) => { releaseRename = resolve; });
+    window.__task10ReleaseRename = releaseRename;
+    window.__task10RestoreRename = () => { AtlasAPI.rename_region = originalRenameRegion; };
+    AtlasAPI.rename_region = async (...args) => {
+      await renameGate;
+      return originalRenameRegion(...args);
+    };
+  });
+  await page.click('#rename-confirm-btn');
+
+  await page.evaluate(() => document.getElementById('btn-add-region').click());
+  const addHiddenAfterDirectClick = await page.isHidden('#add-region-modal');
+  check('Add stays closed after a direct click while Rename is in flight', addHiddenAfterDirectClick === true);
+  if (!addHiddenAfterDirectClick) await page.evaluate(() => document.getElementById('add-cancel-btn').click());
+
+  await page.focus('#btn-rename-region');
+  await page.keyboard.press('Tab');
+  const tabFocusedAddForEnter = await page.evaluate(() => document.activeElement?.id);
+  check('Tab can focus the covered Add button during Rename submission', tabFocusedAddForEnter === 'btn-add-region', tabFocusedAddForEnter);
+  await page.keyboard.press('Enter');
+  const addHiddenAfterEnter = await page.isHidden('#add-region-modal');
+  check('Add stays closed after Tab + Enter while Rename is in flight', addHiddenAfterEnter === true);
+  if (!addHiddenAfterEnter) await page.evaluate(() => document.getElementById('add-cancel-btn').click());
+
+  await page.focus('#btn-rename-region');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Space');
+  const addHiddenAfterSpace = await page.isHidden('#add-region-modal');
+  check('Add stays closed after Tab + Space while Rename is in flight', addHiddenAfterSpace === true);
+  if (!addHiddenAfterSpace) await page.evaluate(() => document.getElementById('add-cancel-btn').click());
+
+  await page.evaluate(() => window.__task10ReleaseRename());
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.region-item.selected');
+    return !!el && el.innerText.includes('task10Lock');
+  }, undefined, { timeout: 5000 });
+  await page.evaluate(() => {
+    window.__task10RestoreRename();
+    delete window.__task10ReleaseRename;
+    delete window.__task10RestoreRename;
+  });
+
   check('task10: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
