@@ -480,20 +480,29 @@ document.getElementById('btn-add-region').addEventListener('click', () => {
 });
 
 document.getElementById('btn-remove-region').addEventListener('click', async () => {
+  if (structuralOpInFlight) return;
   const keys = getSelectedKeys();
   if (keys.length === 0) return; // button is disabled in this case; defensive no-op
-  const ok = await showConfirm(
-    `Remove ${keys.length} region${keys.length > 1 ? 's' : ''}? This cannot be undone after Save.`,
-    'Remove region' + (keys.length > 1 ? 's' : '') + '?',
-  );
-  if (!ok) return;
-  const prevSelectedKeys = []; // removed regions can't remain selected — start from empty
+  structuralOpInFlight = true;
+  const btn = document.getElementById('btn-remove-region');
+  btn.disabled = true;
   try {
-    const payload = await AtlasAPI.remove_regions(keys);
-    await onModPreviewReceived(payload);
-    await refreshStructuralUi(prevSelectedKeys);
-  } catch (e) {
-    console.error(e);
-    showToast('Failed to remove region(s).', 'error');
+    const ok = await showConfirm(
+      `Remove ${keys.length} region${keys.length > 1 ? 's' : ''}? This cannot be undone after Save.`,
+      'Remove region' + (keys.length > 1 ? 's' : '') + '?',
+    );
+    if (!ok) return;
+    const prevSelectedKeys = []; // removed regions can't remain selected — start from empty
+    try {
+      const payload = await AtlasAPI.remove_regions(keys);
+      await onModPreviewReceived(payload);
+      await refreshStructuralUi(prevSelectedKeys);
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to remove region(s).', 'error');
+    }
+  } finally {
+    structuralOpInFlight = false;
+    updateRemoveButtonState();
   }
 });

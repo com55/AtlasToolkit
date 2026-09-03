@@ -730,6 +730,132 @@ const browser = await chromium.launch({ headless: true });
   const removeDisabled = await page.isDisabled('#btn-remove-region');
   check('Remove is disabled when it would empty the atlas', removeDisabled === true);
 
+  // --- Task 11 fix round 1: re-entrancy window on Remove ---
+  // showConfirm() hides #modal-overlay the instant Confirm is clicked, BEFORE
+  // the awaited remove_regions() starts. Until refreshStructuralUi() finishes,
+  // #btn-remove-region sat uncovered and still enabled — a second click (or a
+  // Tab+Enter keyboard activation) could re-enter the handler and fire a second
+  // remove_regions(). The structuralOpInFlight guard must close that window.
+
+  // Helper: reload the fixture to a fresh 2-region atlas and make sure the
+  // advance toolbar is visible (mode persists across reload, but be defensive).
+  async function reloadForRemoveReentry() {
+    const reloaded = await loadSinglePageFixtureAtlas(page);
+    if (!reloaded.ok) return { ok: false, names: [] };
+    const toolbarVisible = await page.evaluate(() =>
+      !document.getElementById('advance-toolbar').classList.contains('hidden'));
+    if (!toolbarVisible) {
+      await page.click('#mode-modify');
+      await page.waitForTimeout(150);
+      await page.click('#mode-edit-caret');
+      await page.click('#advance-mode-row');
+    }
+    return { ok: true, names: reloaded.names };
+  }
+
+  // Test A: double-click in the post-confirm window must not fire a 2nd remove.
+  {
+    const fresh = await reloadForRemoveReentry();
+    check('task11 fix: fixture reloaded to 2 regions for re-entrancy test', fresh.ok && fresh.names.length === 2, fresh.names.join(','));
+
+    await page.locator('.region-item').nth(0).click(); // selects "zeta"
+    await page.evaluate(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      const originalRemoveRegions = AtlasAPI.remove_regions;
+      let releaseRemove;
+      const removeGate = new Promise((resolve) => { releaseRemove = resolve; });
+      window.__task11ReleaseRemove = releaseRemove;
+      window.__task11RestoreRemove = () => { AtlasAPI.remove_regions = originalRemoveRegions; };
+      AtlasAPI.remove_regions = async (...args) => {
+        await removeGate;
+        return originalRemoveRegions(...args);
+      };
+    });
+
+    await page.click('#btn-remove-region');
+    await page.click('#btn-modal-confirm'); // starts the gated await; overlay is now hidden
+    // The fix disables #btn-remove-region during the in-flight window (point 3). A
+    // disabled button can't be re-clicked, so to exercise the structuralOpInFlight
+    // guard itself (the backstop this commit is about), re-enable it in-page to
+    // simulate the pre-fix clickable state, then dispatch a real click. The guard
+    // must reject the re-entrant handler entry — no second confirm dialog.
+    await page.evaluate(() => {
+      const b = document.getElementById('btn-remove-region');
+      b.disabled = false;
+      b.click();
+    });
+    const overlayHiddenAfterSecondClick = await page.evaluate(() =>
+      document.getElementById('modal-overlay').classList.contains('hidden'));
+    check('no second Remove confirm after a re-click in the post-confirm window', overlayHiddenAfterSecondClick === true);
+
+    await page.evaluate(() => window.__task11ReleaseRemove());
+    await page.waitForFunction(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      return AtlasAPI.get_region_names().length === 1;
+    }, undefined, { timeout: 5000 });
+    const namesAfterReentry = await page.evaluate(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      return AtlasAPI.get_region_names().map((r) => r.key);
+    });
+    check('exactly one region removed on the re-entrant double click', namesAfterReentry.length === 1, namesAfterReentry.join(','));
+    await page.evaluate(() => {
+      window.__task11RestoreRemove();
+      delete window.__task11ReleaseRemove;
+      delete window.__task11RestoreRemove;
+    });
+  }
+
+  // Test B: a Tab+Enter keyboard activation must not fire a 2nd remove either.
+  {
+    const fresh = await reloadForRemoveReentry();
+    check('task11 fix: fixture reloaded to 2 regions for keyboard re-entrancy test', fresh.ok && fresh.names.length === 2, fresh.names.join(','));
+
+    await page.locator('.region-item').nth(0).click(); // selects "zeta"
+    await page.evaluate(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      const originalRemoveRegions = AtlasAPI.remove_regions;
+      let releaseRemove;
+      const removeGate = new Promise((resolve) => { releaseRemove = resolve; });
+      window.__task11ReleaseRemove = releaseRemove;
+      window.__task11RestoreRemove = () => { AtlasAPI.remove_regions = originalRemoveRegions; };
+      AtlasAPI.remove_regions = async (...args) => {
+        await removeGate;
+        return originalRemoveRegions(...args);
+      };
+    });
+
+    await page.click('#btn-remove-region');
+    await page.click('#btn-modal-confirm'); // starts the gated await; overlay is now hidden
+    // The fix disables #btn-remove-region during the in-flight window (point 3); a
+    // disabled button can't receive Tab focus. Re-enable it in-page (pre-fix state)
+    // so Tab can land on it, then Enter — the structuralOpInFlight guard must
+    // reject the re-entrant keyboard activation, no second confirm dialog.
+    await page.evaluate(() => { document.getElementById('btn-remove-region').disabled = false; });
+    // Tab from the button just before #btn-remove-region toward it, then Enter.
+    await page.focus('#btn-add-region');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    const overlayHiddenAfterTabEnter = await page.evaluate(() =>
+      document.getElementById('modal-overlay').classList.contains('hidden'));
+    check('no second Remove confirm after Tab + Enter while Remove is in flight', overlayHiddenAfterTabEnter === true);
+
+    await page.evaluate(() => window.__task11ReleaseRemove());
+    await page.waitForFunction(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      return AtlasAPI.get_region_names().length === 1;
+    }, undefined, { timeout: 5000 });
+    const namesAfterKeyboardReentry = await page.evaluate(async () => {
+      const { AtlasAPI } = await import('./js/atlas-api.js');
+      return AtlasAPI.get_region_names().map((r) => r.key);
+    });
+    check('exactly one region removed on the keyboard re-entrant activation', namesAfterKeyboardReentry.length === 1, namesAfterKeyboardReentry.join(','));
+    await page.evaluate(() => {
+      window.__task11RestoreRemove();
+      delete window.__task11ReleaseRemove;
+      delete window.__task11RestoreRemove;
+    });
+  }
+
   check('task11: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
