@@ -1,5 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedRegions, getSelectedKeys } from './state.js';
+import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';
+import { validateRegionName } from './region-name-validation.js';
 import {
   previewImg, previewContainer,
   resetPreview, applyTransform,
@@ -388,3 +389,57 @@ document.getElementById('btn-pick-skel').addEventListener('click', async () => {
     updatePreview(getSelectedRegions());
   }
 });
+
+// ─── Rename Region Modal (Task 9) ─────────────────────────────────────────────
+function openRenameModal() {
+  const keys = getSelectedKeys();
+  if (keys.length > 1) { showToast('Select a single region to rename.', 'error'); return; }
+  if (keys.length === 0) return;
+  const [key] = keys;
+  const label = getSelectedLabels()[0];
+  const input = document.getElementById('rename-name-input');
+  input.value = label;
+  document.getElementById('rename-name-error').classList.add('hidden');
+  document.getElementById('rename-confirm-btn').disabled = false;
+  document.getElementById('rename-modal').classList.remove('hidden');
+
+  const revalidate = () => {
+    const effectiveOthers = state.regionsData
+      .filter((r) => r.key !== key)
+      .map((r) => r.label);
+    const result = validateRegionName(input.value, effectiveOthers);
+    const errorEl = document.getElementById('rename-name-error');
+    const confirmBtn = document.getElementById('rename-confirm-btn');
+    if (result.ok) {
+      errorEl.classList.add('hidden');
+      confirmBtn.disabled = false;
+    } else {
+      errorEl.textContent = result.reason;
+      errorEl.classList.remove('hidden');
+      confirmBtn.disabled = true;
+    }
+    return result;
+  };
+  input.oninput = revalidate;
+  revalidate();
+
+  document.getElementById('rename-confirm-btn').onclick = async () => {
+    const result = revalidate();
+    if (!result.ok) return;
+    const prevSelectedKeys = getSelectedKeys();
+    try {
+      const payload = await AtlasAPI.rename_region(key, result.value);
+      document.getElementById('rename-modal').classList.add('hidden');
+      await onModPreviewReceived(payload);
+      await refreshStructuralUi(prevSelectedKeys); // async since Task 8 -- must be awaited
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to rename region.', 'error');
+    }
+  };
+  document.getElementById('rename-cancel-btn').onclick = () => {
+    document.getElementById('rename-modal').classList.add('hidden');
+  };
+}
+
+document.getElementById('btn-rename-region').addEventListener('click', openRenameModal);
