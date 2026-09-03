@@ -9,6 +9,7 @@ import { AtlasAPI } from './atlas-api.js';
 import { state } from './state.js';
 import { enterEditMode, exitEditMode } from './modify-mode.js';
 import { previewImg, previewContainer, resetPreview, applyTransform, fitScaleIfOversized, setPreviewSrc } from './preview.js';
+import { refreshPanelSplit } from './panel-resizer.js';
 
 /** Reflect the current mode on the toggle, and gate Edit on regions loaded. */
 export function updateModeToggleUI() {
@@ -30,6 +31,10 @@ export function setAdvanceMode(active) {
   document.getElementById('chk-advance-mode').checked = active;
   document.getElementById('advance-toolbar').classList.toggle('hidden', !active);
   document.body.classList.toggle('advance-mode-on', active);
+  // #advance-toolbar showing/hiding shifts panel-resizer.js's stacked/portrait
+  // splitter floor the same way setMode() showing/hiding #repack-options'
+  // rows does -- without this the splitter can get stranded behind it.
+  refreshPanelSplit();
 }
 
 /** Show/refresh the page switcher; visible only in edit mode on a multi-page atlas. */
