@@ -22,23 +22,14 @@ export function updateModeToggleUI() {
   modifyBtn.disabled = count === 0 && state.currentMode !== 'modify';
 }
 
-/** Show/hide the Advance Mode dropdown, positioned from the caret's own
- *  bounding rect (a button-triggered dropdown, not a cursor-position menu
- *  like #context-menu in drop.js — same top-level/JS-positioned technique,
- *  different anchor). */
-function toggleAdvanceModeDropdown() {
-  const dropdown = document.getElementById('advance-mode-dropdown');
-  const caret = document.getElementById('mode-edit-caret');
-  if (!dropdown.classList.contains('hidden')) {
-    dropdown.classList.add('hidden');
-    caret.setAttribute('aria-expanded', 'false');
-    return;
-  }
-  const rect = caret.getBoundingClientRect();
-  dropdown.style.left = `${rect.left}px`;
-  dropdown.style.top = `${rect.bottom + 4}px`;
-  dropdown.classList.remove('hidden');
-  caret.setAttribute('aria-expanded', 'true');
+/** Single choke point for every place that flips Advance Mode on/off, so the
+ *  checkbox, the toolbar's visibility, and the body class that lets #sidebar-head
+ *  track which row it lines up with (#repack-options when the toolbar is hidden,
+ *  #status-bar when it's showing) never drift out of sync with each other. */
+export function setAdvanceMode(active) {
+  document.getElementById('chk-advance-mode').checked = active;
+  document.getElementById('advance-toolbar').classList.toggle('hidden', !active);
+  document.body.classList.toggle('advance-mode-on', active);
 }
 
 /** Show/refresh the page switcher; visible only in edit mode on a multi-page atlas. */
@@ -114,17 +105,13 @@ export function initAppBar() {
     goToPage(state.modifyActivePageIndex + 1);
   });
 
-  const caretBtn = document.getElementById('mode-edit-caret');
-  const dropdown = document.getElementById('advance-mode-dropdown');
-  caretBtn.addEventListener('click', (e) => {
-    e.stopPropagation(); // don't let this same click immediately trigger the window listener below
-    toggleAdvanceModeDropdown();
-  });
-  window.addEventListener('click', () => dropdown.classList.add('hidden'));
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') dropdown.classList.add('hidden'); });
-
   document.getElementById('chk-advance-mode').addEventListener('change', (e) => {
-    document.getElementById('advance-toolbar').classList.toggle('hidden', !e.target.checked);
+    setAdvanceMode(e.target.checked);
+    // Persist like #chk-repack does (modify-mode.js's own change listener) --
+    // restored on every Edit Mode entry in enterEditMode(), not here, since
+    // setAdvanceMode() is also called by the multi-page force-off reset
+    // (region-list.js), which must NOT overwrite the user's real preference.
+    AtlasAPI.set_pref('advanceMode', e.target.checked);
   });
 
   updateModeToggleUI();

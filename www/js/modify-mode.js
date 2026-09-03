@@ -9,9 +9,9 @@ import {
   fitScaleIfOversized,
 } from './preview.js';
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
-import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
+import { updateModeToggleUI, updatePageSwitcher, setAdvanceMode } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
-import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState } from './region-list.js';
+import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -103,6 +103,7 @@ export async function refreshStructuralUi(prevSelectedKeys, { lockRepack = true 
   renderSelection();
   updateButtons();
   updateRemoveButtonState();
+  updateRenameButtonState();
   if (lockRepack) {
     const chk = document.getElementById('chk-repack');
     chk.checked = true;
@@ -127,6 +128,15 @@ export async function enterEditMode() {
       applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
       await releaseRepackLock();
+      // Restore Advance Mode the same way #chk-repack is restored above --
+      // persisted across sessions, re-applied on every Edit Mode entry
+      // rather than left as transient DOM state. Multi-page atlases never
+      // allow it regardless of the saved preference (loadRegions() already
+      // hides #advance-mode-row for them; skip restoring here too so the
+      // toolbar can't end up shown for one).
+      if (!AtlasAPI.is_multi_page()) {
+        setAdvanceMode(await AtlasAPI.get_pref('advanceMode', false));
+      }
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -137,6 +147,10 @@ export async function enterEditMode() {
 }
 
 export async function exitEditMode() {
+  // Captured before anything below rebuilds state.regionsData, so the
+  // reconcile-by-key inside refreshStructuralUi() carries the selection
+  // across into View Mode instead of dropping it.
+  const prevSelectedKeys = getSelectedKeys();
   if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
       // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
@@ -147,7 +161,7 @@ export async function exitEditMode() {
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
   await releaseRepackLock();
-  await refreshStructuralUi([], { lockRepack: false }); // rebuilds sidebar back to pristine, clears anchors
+  await refreshStructuralUi(prevSelectedKeys, { lockRepack: false }); // rebuilds sidebar back to pristine, keeps selection
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
   state.modifyRegionPages  = {};
@@ -401,6 +415,9 @@ let structuralOpInFlight = false;
 function openRenameModal() {
   if (structuralOpInFlight) return;
   const keys = getSelectedKeys();
+  // Both branches are defensive, not the primary guard -- #btn-rename-region
+  // itself is disabled outside a 1-region selection (updateRenameButtonState()),
+  // same reasoning as #btn-remove-region's own disabled-state check.
   if (keys.length > 1) { showToast('Select a single region to rename.', 'error'); return; }
   if (keys.length === 0) return;
   const [key] = keys;
@@ -504,5 +521,6 @@ document.getElementById('btn-remove-region').addEventListener('click', async () 
   } finally {
     structuralOpInFlight = false;
     updateRemoveButtonState();
+    updateRenameButtonState();
   }
 });

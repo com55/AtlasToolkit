@@ -297,9 +297,9 @@ const browser = await chromium.launch({ headless: true });
   // hidden behind the custom switch — click its label like a user would; the
   // toggle lives in the right panel's #repack-options row, like the Python app)
   const navBefore = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-  await page.click('#repack-options .toggle-label');
+  await page.click('#repack-toggle-row');
   await page.waitForTimeout(500);
-  await page.click('#repack-options .toggle-label');
+  await page.click('#repack-toggle-row');
   await page.waitForTimeout(500);
   const navAfter = await page.evaluate(() => performance.getEntriesByType('navigation').length);
   check('desktop: repack toggle on/off, no reload', navBefore === navAfter && errors.length === 0);
@@ -440,14 +440,11 @@ const browser = await chromium.launch({ headless: true });
 
   const single = await loadSinglePageFixtureAtlas(page);
   check('task8: single-page fixture loaded', single.ok);
-  const caretVisibleAtLoadSingle = await page.isVisible('#mode-edit-caret');
-  check('Advance Mode caret is visible at load time for single-page, before entering edit mode', caretVisibleAtLoadSingle === true);
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
-  const caretVisibleSingle = await page.isVisible('#mode-edit-caret');
-  check('Advance Mode entry point is visible for a single-page atlas', caretVisibleSingle === true);
+  const rowVisibleSingle = await page.isVisible('#advance-mode-row');
+  check('Advance Mode entry point is visible for a single-page atlas', rowVisibleSingle === true);
 
-  await page.click('#mode-edit-caret');
   // #chk-advance-mode is display:none (styled as a .toggle-switch); the real
   // user control is the wrapping label. Clicking it toggles the checkbox and
   // fires the change handler that reveals the toolbar.
@@ -455,17 +452,26 @@ const browser = await chromium.launch({ headless: true });
   const toolbarVisible = await page.isVisible('#advance-toolbar');
   check('Advance Mode toolbar shows once the checkbox is toggled on', toolbarVisible === true);
 
+  // Advance Mode persists like #chk-repack does -- exiting and re-entering
+  // Edit Mode on the SAME atlas must restore it, not reset to off.
+  await page.click('#mode-extract');
+  await page.waitForTimeout(100);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  const toolbarVisibleAfterReentry = await page.isVisible('#advance-toolbar');
+  const checkedAfterReentry = await page.isChecked('#chk-advance-mode');
+  check('Advance Mode persists across an Edit Mode exit + re-entry',
+    toolbarVisibleAfterReentry === true && checkedAfterReentry === true);
+
   const multi = await loadFixtureAtlas(page);
   check('task8: multi-page fixture (re)loaded', multi.ok);
-  const caretHiddenAtLoadMulti = await page.isVisible('#mode-edit-caret');
-  check('Advance Mode caret is hidden at load time for multi-page, before entering edit mode', caretHiddenAtLoadMulti === false);
   await page.click('#mode-extract'); // exit back to view mode before re-entering, matching how
                                       // a real user would switch atlases between edit sessions
   await page.waitForTimeout(100);
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
-  const caretVisibleMulti = await page.isVisible('#mode-edit-caret');
-  check('Advance Mode entry point is hidden entirely for a multi-page atlas', caretVisibleMulti === false);
+  const rowVisibleMulti = await page.isVisible('#advance-mode-row');
+  check('Advance Mode entry point is hidden entirely for a multi-page atlas', rowVisibleMulti === false);
 
   // add_region() is only supported on single-page atlases, so switch back to the
   // single-page fixture before exercising the structural add.
@@ -498,6 +504,29 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
+// ─── Edit->View selection preservation ─────────────────────────────────────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('selection-preservation: single-page fixture loaded', loaded.ok);
+  await page.locator('.region-item').nth(0).click(); // selects "zeta"
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  await page.click('#mode-extract'); // exit back to View Mode, no pending mods to confirm
+  await page.waitForTimeout(100);
+  const selected = await page.evaluate(() =>
+    [...document.querySelectorAll('.region-item.selected')].map((el) => el.innerText));
+  check('exiting Edit Mode keeps the current selection instead of clearing it', selected.length === 1 && selected[0] === 'zeta', selected.join(','));
+
+  check('selection-preservation: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
 // ─── Task 9: Rename flow ──────────────────────────────────────────────────────
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -512,7 +541,6 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(150);
 
   await page.locator('.region-item').nth(0).click();
-  await page.click('#mode-edit-caret');
   await page.click('#advance-mode-row');
   await page.click('#btn-rename-region');
   await page.fill('#rename-name-input', 'forearm');
@@ -579,14 +607,15 @@ const browser = await chromium.launch({ headless: true });
   check('blank name keeps Save disabled', saveDisabled === true);
   await page.click('#rename-cancel-btn');
 
-  // >1 selected shows a toast and does nothing else
+  // Rename only ever targets a single region -- the button itself is
+  // disabled outside a 1-region selection, not just guarded on click.
   await page.locator('.region-item').nth(0).click();
   await page.locator('.region-item').nth(1).click({ modifiers: ['Control'] });
-  await page.click('#btn-rename-region');
-  await page.waitForTimeout(150);
-  const toastText = await page.evaluate(() =>
-    [...document.querySelectorAll('#toast-container .toast')].map((el) => el.innerText).join('\n'));
-  check('multi-select shows the exact spec toast copy', toastText.includes('Select a single region to rename.'), toastText);
+  const renameDisabledMulti = await page.isDisabled('#btn-rename-region');
+  check('Rename is disabled when more than one region is selected', renameDisabledMulti === true);
+  await page.locator('.region-item').nth(0).click({ modifiers: ['Control'] }); // deselect back to 1
+  const renameEnabledSingle = await page.isEnabled('#btn-rename-region');
+  check('Rename is enabled again once exactly one region is selected', renameEnabledSingle === true);
 
   check('task9: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
@@ -604,7 +633,6 @@ const browser = await chromium.launch({ headless: true });
   check('task10: single-page fixture loaded', loaded.ok);
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
-  await page.click('#mode-edit-caret');
   await page.click('#advance-mode-row');
 
   await page.click('#btn-add-region');
@@ -706,7 +734,6 @@ const browser = await chromium.launch({ headless: true });
   check('task11: single-page fixture loaded', loaded.ok);
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
-  await page.click('#mode-edit-caret');
   await page.click('#advance-mode-row');
 
   await page.locator('.region-item').nth(0).click(); // selects "zeta"
@@ -747,7 +774,6 @@ const browser = await chromium.launch({ headless: true });
     if (!toolbarVisible) {
       await page.click('#mode-modify');
       await page.waitForTimeout(150);
-      await page.click('#mode-edit-caret');
       await page.click('#advance-mode-row');
     }
     return { ok: true, names: reloaded.names };
