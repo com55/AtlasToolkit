@@ -198,10 +198,13 @@ export function isAddRegionDialogOpen() {
 }
 
 async function applyAddRegionImageDrop(path) {
-  if (!_addRegionDialogState || !path || !/\.png$/i.test(path)) return false;
+  const dialogState = _addRegionDialogState;
+  if (!dialogState || !path || !/\.png$/i.test(path)) return false;
+  const dropGeneration = ++dialogState.dropGeneration;
   try {
     const file = await loadFileAsFile(path);
-    _addRegionDialogState.onFileSelected(file);
+    if (_addRegionDialogState !== dialogState || dialogState.dropGeneration !== dropGeneration) return false;
+    dialogState.onFileSelected(file);
     return true;
   } catch (e) {
     console.error('applyAddRegionImageDrop error:', e);
@@ -223,6 +226,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   const hint = document.getElementById('add-drop-hint');
   const dropArea = document.getElementById('add-drop-area');
   let selectedFile = null;
+  let previewUrl = null;
   let nameTouchedByUser = false;
   let submitting = false;
 
@@ -248,7 +252,9 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
 
   const onFileSelected = (file) => {
     selectedFile = file;
-    preview.src = URL.createObjectURL(file);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(file);
+    preview.src = previewUrl;
     preview.classList.remove('hidden');
     hint.classList.add('hidden');
     if (!nameTouchedByUser) {
@@ -269,7 +275,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   };
 
   document.body.dataset.addRegionDialogOpen = 'true';
-  _addRegionDialogState = { onFileSelected };
+  _addRegionDialogState = { onFileSelected, dropGeneration: 0 };
   modal.classList.remove('hidden');
   confirmBtn.disabled = true;
 
@@ -278,6 +284,9 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
     _addRegionDialogState = null;
     modal.classList.add('hidden');
     selectedFile = null;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+    preview.removeAttribute('src');
     nameTouchedByUser = false;
     preview.classList.add('hidden');
     hint.classList.remove('hidden');
