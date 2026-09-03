@@ -694,6 +694,46 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
+// --- Task 11: Remove flow + empty-atlas guard ---
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('task11: single-page fixture loaded', loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+  await page.click('#mode-edit-caret');
+  await page.click('#advance-mode-row');
+
+  await page.locator('.region-item').nth(0).click(); // selects "zeta"
+  await page.click('#btn-remove-region');
+  const dialogVisible = await page.evaluate(() =>
+    !document.getElementById('modal-overlay').classList.contains('hidden'));
+  check('Remove always confirms before removing', dialogVisible === true);
+  await page.click('#btn-modal-confirm');
+  await page.waitForFunction(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    return AtlasAPI.get_region_names().length === 1;
+  }, undefined, { timeout: 5000 });
+  const namesAfterRemove = await page.evaluate(async () => {
+    const { AtlasAPI } = await import('./js/atlas-api.js');
+    return AtlasAPI.get_region_names().map((r) => r.key);
+  });
+  check('one fewer region after Remove confirms', namesAfterRemove.length === 1, namesAfterRemove.join(','));
+
+  // select the one remaining region -> Remove must be disabled, not just refuse on click
+  await page.locator('.region-item').nth(0).click();
+  const removeDisabled = await page.isDisabled('#btn-remove-region');
+  check('Remove is disabled when it would empty the atlas', removeDisabled === true);
+
+  check('task11: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -109,6 +109,14 @@ export function updateButtons() {
   }
 }
 
+export function updateRemoveButtonState() {
+  const btn = document.getElementById('btn-remove-region');
+  const selectedCount = state.selectedIndices.size;
+  const wouldEmptyAtlas = selectedCount > 0 && selectedCount === state.regionsData.length;
+  btn.disabled = selectedCount === 0 || wouldEmptyAtlas;
+  btn.title = wouldEmptyAtlas ? "Can't remove every region." : 'Remove';
+}
+
 export function triggerPreviewUpdate() {
   // Serialize the FULL entries, not just keys -- a rename that only
   // changes .label on an already-selected region must still be seen as
@@ -124,6 +132,7 @@ export function triggerPreviewUpdate() {
       else updatePreview(regions);
     }, 50);
     updateButtons();
+    updateRemoveButtonState();
   }
 }
 
@@ -224,6 +233,7 @@ window.addEventListener('mouseup', () => {
     if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
     else updateModifyPreview(getSelectedRegions());
     updateButtons();
+    updateRemoveButtonState();
   }
   state.viewState.isDragging = false;
 });
@@ -347,5 +357,6 @@ window.addEventListener('keydown', (e) => {
   if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
   else updateModifyPreview(getSelectedRegions());
   updateButtons();
+  updateRemoveButtonState();
   document.querySelector(`.region-item[data-index="${newIndex}"]`)?.scrollIntoView({ block: 'nearest' });
 });
