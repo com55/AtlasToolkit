@@ -502,6 +502,8 @@ const browser = await chromium.launch({ headless: true });
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
 
   const loaded = await loadSinglePageFixtureAtlas(page);
@@ -523,7 +525,7 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForFunction(() => {
     const el = document.querySelector('.region-item.selected');
     return !!el && el.innerText.includes('forearm');
-  }, { timeout: 5000 });
+  }, undefined, { timeout: 5000 });
   const selectedLabel = await page.evaluate(() =>
     document.querySelector('.region-item.selected')?.innerText);
   check('sidebar shows the new label immediately', !!selectedLabel && selectedLabel.includes('forearm'), selectedLabel);
@@ -547,8 +549,6 @@ const browser = await chromium.launch({ headless: true });
     [...document.querySelectorAll('#toast-container .toast')].map((el) => el.innerText).join('\n'));
   check('multi-select shows the exact spec toast copy', toastText.includes('Select a single region to rename.'), toastText);
 
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
   check('task9: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
