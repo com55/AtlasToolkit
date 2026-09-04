@@ -43,3 +43,28 @@ side. `_register_mod_batch` in that same historical `session.py` already went
 per-page for the exact same reason, so `build_modify_view`'s first-page-only
 scale looks like an oversight there, not an intentional contract — this
 engine intentionally does not reproduce it.
+
+## Deviation: repack packing diverges from repacker.py
+
+`_shelfPack` (`www/js/atlas-modifier.js`) no longer selects purely by
+minimum packed area, the way `repacker.py::repack_from_sprites` (and this
+engine's own earlier behavior) did. It now collects every candidate width's
+result, then picks the one closest to a 1:1 aspect ratio among those within
+15% of the minimum area -- so a set of sprites that could tile into either a
+20x120 strip or a 40x60 rectangle at the identical area now produces the
+40x60 rectangle.
+
+This is an intentional, permanent divergence from the pinned Python oracle,
+not a bug to reconcile: the project is retiring the Python reference
+implementation entirely in favor of `www/js/` as the sole engine (see the
+Repack rework spec series starting
+`docs/superpowers/specs/2026-09-04-repack-always-on-square-pack-design.md`),
+and several of that series' later changes (mesh-masked packing sources,
+silhouette-aware nesting, multi-page pooling) have no Python equivalent at
+all. `repacker.py`'s pixel-level correctness (rotation, offsets, banker's
+rounding, crop math) remains the reference for everything BUT packing
+placement -- `tests/browser/verify-ops.mjs`'s `extractCases`/`mergeCases`
+still assert exact parity against it. Only the 3 repack-op fixtures in
+`ground_truth_ops.json` are re-pinned to the JS engine's own output instead
+(via `tests/browser/regen-repack-fixtures.mjs`, re-run after any future
+change to the packing algorithm).
