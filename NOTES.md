@@ -68,3 +68,18 @@ still assert exact parity against it. Only the 3 repack-op fixtures in
 `ground_truth_ops.json` are re-pinned to the JS engine's own output instead
 (via `tests/browser/regen-repack-fixtures.mjs`, re-run after any future
 change to the packing algorithm).
+
+Two of the three re-pinned fixtures (`repackCases[1]`, the `realworldCases`
+multi-page "maki" case) exercise the standalone `repackMultiPage()` export in
+`atlas-modifier.js` — which has zero production callers. Real multi-page
+repack goes through `AtlasSession._rebuildMultiPageRepack()` instead, which
+repacks each touched page independently via `AtlasModifier.repackWithModdedSprites()`
+(the single-page packer, dedup ON per page) — deliberately rewritten away
+from `repackMultiPage()`'s old global cross-page sprite reassignment after it
+caused a real bug (moving a sprite from one page to another unexpectedly; see
+`_rebuildMultiPageRepack()`'s own comment). `repackMultiPage()` never dedups
+at all, unlike the real per-page production path — so these two fixtures
+protect the standalone helper's own behavior, not the app's actual multi-page
+repack behavior. (This also means the "multi-page repack does NOT dedup"
+rule recorded elsewhere in project memory is now describing this orphaned
+helper, not the live app — worth correcting separately.)

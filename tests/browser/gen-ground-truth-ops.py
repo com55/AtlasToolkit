@@ -349,6 +349,16 @@ print(f"Merge scenario cases: {len(merge_cases)} (B=full-canvas, C=offset-padded
 # multi-page no-dedup (same fixture, sprites spread across 2 pages).
 # ═════════════════════════════════════════════════════════════════════════
 
+# NOTE: repackCases'/realworldCases' repack-op `expectedCanvas`/`expectedPages`/
+# `expectedAtlasText` fields are NOT authoritative from this Python computation
+# once written once -- Python parity for repack *packing shape* was deliberately
+# dropped (see NOTES.md "Deviation: repack packing diverges from repacker.py").
+# This script still computes them fresh below (so the case dicts have a value on
+# a first-ever run), but immediately before writing the file, any existing
+# on-disk values for these specific fields are restored in preference to what
+# was just computed here -- see the "preserve JS-repinned fixture fields" block
+# near the bottom of this script. To intentionally update those fields, run
+# tests/browser/regen-repack-fixtures.mjs (not this script) afterward.
 repack_cases = []
 
 # --- Scenario E: single-page repack, confirm dedup (dupeA/dupeB collapse) --
@@ -533,8 +543,50 @@ out = {
     "repackCases": repack_cases,
     "realworldCases": realworld_cases,
 }
-with open(os.path.join(HERE, "ground_truth_ops.json"), "w") as f:
-    json.dump(out, f)
+
+# Preserve JS-repinned fixture fields (see the NOTE above repack_cases = []):
+# repackCases'/realworldCases' repack-op expected-output fields are golden
+# snapshots of the JS engine's own current behavior, not this script's Python
+# computation -- restore them from whatever is already on disk instead of
+# clobbering with the freshly Python-computed values just built above.
+REPACK_OUTPUT_FIELDS = {
+    "repackSinglePage": ("expectedCanvas", "expectedAtlasText"),
+    "repackMultiPage": ("expectedPages", "expectedAtlasText"),
+}
+existing_path = os.path.join(HERE, "ground_truth_ops.json")
+preserved = 0
+if os.path.exists(existing_path):
+    with open(existing_path) as f:
+        existing = json.load(f)
+    existing_by_name = {}
+    for group in ("repackCases", "realworldCases"):
+        for case in existing.get(group, []):
+            existing_by_name[case["name"]] = case
+    for group in ("repackCases", "realworldCases"):
+        for case in out[group]:
+            fields = REPACK_OUTPUT_FIELDS.get(case.get("op"))
+            if not fields:
+                continue
+            old_case = existing_by_name.get(case["name"])
+            if old_case is None:
+                continue
+            for field in fields:
+                if field in old_case:
+                    case[field] = old_case[field]
+                    preserved += 1
+if preserved:
+    print(f"Preserved {preserved} JS-repinned expected-output field(s) from the "
+          f"existing ground_truth_ops.json (repack ops) -- see the NOTE above "
+          f"repack_cases = little further up in this file.")
+else:
+    print("No existing ground_truth_ops.json found (or no matching repack-op "
+          "cases in it) -- repackCases/realworldCases' expected-output fields "
+          "are the fresh Python computation. Run "
+          "tests/browser/regen-repack-fixtures.mjs afterward to re-pin them to "
+          "the JS engine's actual output.")
+
+with open(existing_path, "w") as f:
+    json.dump(out, f, indent=2)
 
 total = len(cases) + len(merge_cases) + len(repack_cases) + len(realworld_cases)
 print(f"Wrote ground_truth_ops.json: {total} total cases "
