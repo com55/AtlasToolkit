@@ -180,3 +180,22 @@ test('_shelfPack: unaffected when the minimum-area candidate is already square-i
   assert.equal(result.canvasW, 60);
   assert.equal(result.canvasH, 32); // 30 rounded up to the nearest multiple of 4
 });
+
+test('_shelfPack: pays up to 15% extra area for a genuinely squarer layout, but not more', () => {
+  // Seven identical 20x20 squares. The pure-minimum-area layout is a single
+  // 140x20 (or equivalently 20x140) row/column -- area 2800, aspect 7.0,
+  // exactly what the OLD algorithm picked (first-found on ties, and this
+  // area is achieved at both extremes of the candidate-width search). A
+  // 40x80 grid (4 rows of ~2) costs 3200 -- 14.29% more than the minimum,
+  // just inside the 15% budget -- but has a far better aspect (2.0). A
+  // 60x60 grid (3 rows of ~3, the mathematically perfect square, aspect
+  // 1.0) costs 3600 -- 28.57% more than the minimum -- which is OUTSIDE
+  // the 15% budget, so it must NOT be picked despite being the squarest
+  // theoretically achievable layout. This test pins both halves: the
+  // algorithm spends the budget it's allowed, and refuses to spend past it.
+  const items = Array.from({ length: 7 }, (_, i) => ({ name: `s${i}`, w: 20, h: 20 }));
+  const result = _shelfPack(items);
+  assert.equal(result.canvasW, 40);
+  assert.equal(result.canvasH, 80);
+  assert.equal(result.canvasW * result.canvasH, 3200);
+});
