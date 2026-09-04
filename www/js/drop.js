@@ -71,8 +71,7 @@ async function processDroppedFiles(files) {
   if (imgFile && state.currentMode === 'modify') {
     const keys = getSelectedKeys();
     if (keys.length === 0) { showToast('Select at least one region first.', 'error'); return; }
-    const repack = document.getElementById('chk-repack').checked;
-    const result = await AtlasAPI.process_mod_image(imgFile, keys, repack);
+    const result = await AtlasAPI.process_mod_image(imgFile, keys);
     if (result) {
       await onModPreviewReceived(result);
       showToast('Mod image loaded via drag & drop.', 'success');
