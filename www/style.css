@@ -260,8 +260,7 @@ body.mode-modify.advance-mode-on #sidebar-head {
   gap: 6px;
 }
 
-body.mode-extract #advance-mode-row,
-body.mode-extract #advance-mode-divider { display: none; }
+body.mode-extract #advance-mode-row { display: none; }
 
 body.mode-modify #mesh-mask-toggle-row,
 body.mode-modify #btn-pick-skel { display: none; }
