@@ -8,6 +8,7 @@ import {
   pickAnchorOffsets,
   findBestPlacement,
   repackOffsetsForRegion,
+  _shelfPack,
 } from '../www/js/atlas-modifier.js';
 
 // These cover the PURE canvas-resolution / placement / repack-offset decisions
@@ -145,4 +146,37 @@ test('repackOffsetsForRegion: null/empty fullCanvasRegions preserves offsets (le
   assert.deepEqual(repackOffsetsForRegion('sword', new Set(), [1, 2, 9, 9], 40, 40), [1, 2, 9, 9]);
   // A non-full region with no pristine offsets stays null.
   assert.equal(repackOffsetsForRegion('sword', new Set(['hero']), null, 40, 40), null);
+});
+
+// ─── _shelfPack — square-ish tie-break among equal-area candidates ────────────
+
+test('_shelfPack: prefers a squarer layout over an elongated one at the same area', () => {
+  // Six identical 20x20 squares tile perfectly (zero waste) in several
+  // shapes -- 1x6, 2x3, 3x2, 6x1 -- all at the exact same minimum area
+  // (2400). The OLD algorithm (pure minimum area, first-found-wins on ties,
+  // width candidates tried ascending) picked the first width tried (20),
+  // landing on a 20x120 layout (aspect 6.0) -- this is the exact class of
+  // "expands out long and thin unnecessarily" behavior reported by the
+  // user. The new algorithm must pick the squarest among the tied-minimum
+  // candidates instead: 40x60 (aspect 1.5), at the identical area.
+  const items = Array.from({ length: 6 }, (_, i) => ({ name: `s${i}`, w: 20, h: 20 }));
+  const result = _shelfPack(items);
+  assert.equal(result.canvasW, 40);
+  assert.equal(result.canvasH, 60);
+  assert.equal(result.canvasW * result.canvasH, 2400); // no worse than the minimum possible area
+});
+
+test('_shelfPack: unaffected when the minimum-area candidate is already square-ish', () => {
+  // Three 60x10 strips: the minimum-area candidate (60 wide, 3 rows stacked
+  // -> 60x30, aspect 2.0) is already the squarest among every tied-minimum
+  // candidate, so squareness selection changes nothing here -- basic
+  // no-regression check alongside the tie-break test above.
+  const items = [
+    { name: 'a', w: 60, h: 10 },
+    { name: 'b', w: 60, h: 10 },
+    { name: 'c', w: 60, h: 10 },
+  ];
+  const result = _shelfPack(items);
+  assert.equal(result.canvasW, 60);
+  assert.equal(result.canvasH, 32); // 30 rounded up to the nearest multiple of 4
 });
