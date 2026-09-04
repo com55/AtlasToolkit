@@ -107,11 +107,10 @@ export class AtlasSession {
   clearModifyState() {
     this.modBatches = [];        // ordered, oldest first
     this.moddedSprites = {};     // name -> mod canvas/image (latest wins) — repack path
-    this.preRepack = null;       // { canvas|null, pages|null, text }  merge result cache
     this.repacked = null;        // { canvas|null, pages|null, text }  repack result cache
     this.active = null;          // currently-displayed merged output
     this.modificationsSaved = false;
-    this.modGeneration = 0;      // bumped on every processModImage / toggleRepack
+    this.modGeneration = 0;      // bumped on every processModImage
   }
 
   get isMultiPage() {
@@ -177,10 +176,6 @@ export class AtlasSession {
     }
     return null;
   }
-
-  // ─── Cache invalidation ─────────────────────────────────────────────────
-  _invalidateMergeCache() { this.preRepack = null; }
-  _invalidateRepackCache() { this.repacked = null; }
 
   // ─── Mod image preparation (overridable seam for tests) ─────────────────
   async _prepareSource(source) {
@@ -287,26 +282,6 @@ export class AtlasSession {
   }
 
   // ─── Single-page rebuilds ────────────────────────────────────────────────
-  _rebuildSinglePageMerge() {
-    let modifier = this._freshSinglePageModifier();
-    if (!modifier) throw new Error('No single-page modifier');
-    const pageName = this._firstPageName();
-    let canvas = modifier.baseCanvas;
-    let text = modifier.atlasText;
-    for (const batch of this.modBatches) {
-      const ordered = this._orderSelection(modifier, batch.names);
-      // Single-page replay reuses the batch's pristine-resolved prepared mod, so
-      // padding never re-resolves against the (already-merged) evolving canvas.
-      const res = modifier.mergeModImage(batch.loaded, ordered, batch.prepared);
-      canvas = res.mergedCanvas;
-      text = res.atlasText;
-      // Adopt this batch's result so the NEXT batch merges onto it (sequential
-      // mods) — but the whole chain still started from pristine above.
-      modifier = new AtlasModifier(text, this.filename, canvas, pageName);
-    }
-    return { canvas, text };
-  }
-
   async _rebuildSinglePageRepack() {
     if (this._hasStructuralBatches()) {
       const r = await this._rebuildSinglePageStructuralRepack();
@@ -363,45 +338,14 @@ export class AtlasSession {
     });
   }
 
-  _rebuildMultiPageMerge() {
-    // Append-only: for each page touched by a batch, replay only that batch's
-    // regions belonging to the page, in order. Untouched pages stay pristine.
-    const pageOrder = this.processor.pages.map(p => p.filename);
-    const pageImages = this._originalPageCanvases();
-    let text = this.atlasText;
-
-    for (const batch of this.modBatches) {
-      for (const pageName of pageOrder) {
-        if (!pageImages[pageName]) continue;
-        const pageNames = this._regionsOnPage(batch.names, pageName);
-        if (pageNames.length === 0) continue;
-        const modifier = new AtlasModifier(text, this.filename, pageImages[pageName], pageName);
-        const ordered = this._orderSelection(modifier, pageNames);
-        // Multi-page merge re-prepares per page from the loaded mod (batch.prepared
-        // is null for multi-page); mirrors session.py's per-page merge_mod_image.
-        const res = modifier.mergeModImage(batch.loaded, ordered);
-        // mergeModImage with a targetPage only rewrites that page's size line
-        // and its regions' bounds in the full text; other pages are untouched.
-        text = res.atlasText;
-        pageImages[pageName] = res.mergedCanvas;
-      }
-    }
-
-    // Keep index alignment with processor.pages / modifyPages — dropping a
-    // hole here made getActivePageCanvas map page 2 onto page 1's canvas
-    // (or miss it and show the pristine page-1 preview).
-    const pages = pageOrder.map(p => pageImages[p] || null);
-    return { pages, text };
-  }
-
   async _rebuildMultiPageRepack() {
     // Per-page pack: only rewrite pages that own a modified region.
     // The previous global first-fit across every sprite (repackMultiPage)
     // moved page-1's CH0355C onto page 2 and rebuilt both sheets — the
     // Test2Pages / checklist item the user hit with Repack on.
-    // Untouched pages keep their pristine canvas + atlas text (same rule
-    // as _rebuildMultiPageMerge). Each touched page uses the single-page
-    // packer (dedup + offset asymmetry) via AtlasModifier.
+    // Untouched pages keep their pristine canvas + atlas text. Each touched
+    // page uses the single-page packer (dedup + offset asymmetry) via
+    // AtlasModifier.
     const pageOrder = this.processor.pages.map(p => p.filename);
     const regionPages = {};
     for (const [name, r] of Object.entries(this.processor.regions)) {
@@ -498,47 +442,33 @@ export class AtlasSession {
   // Shared by both processModImage() and applyStructuralBatch(). Reads the
   // wasStructural flag _rebuildSinglePageRepack() now returns (§2.2) rather
   // than re-deriving _hasStructuralBatches() itself (round 5 finding 6).
-  async _rebuildAndBuildResult(repack) {
+  // Always takes the repack path -- the merge-only alternative was removed
+  // once the Repack UI toggle was deleted (repack is now unconditional).
+  async _rebuildAndBuildResult() {
     if (this.isMultiPage) {
       // Structural batches can never reach here — applyStructuralBatch()
       // rejects registration outright when isMultiPage (see below) — so this
       // branch is exactly as unmodified as it is today.
-      if (repack) {
-        this._invalidateMergeCache();
-        const r = await this._rebuildMultiPageRepack();
-        this.repacked = { canvas: null, pages: r.pages, text: r.text };
-        this._setActiveMulti(r.pages, r.text);
-      } else {
-        this._invalidateRepackCache();
-        const r = this._rebuildMultiPageMerge();
-        this.preRepack = { canvas: null, pages: r.pages, text: r.text };
-        this._setActiveMulti(r.pages, r.text);
-      }
+      const r = await this._rebuildMultiPageRepack();
+      this.repacked = { canvas: null, pages: r.pages, text: r.text };
+      this._setActiveMulti(r.pages, r.text);
       return await this._buildResult();
     }
-    if (repack) {
-      this._invalidateMergeCache();
-      const r = await this._rebuildSinglePageRepack();   // { canvas, text, regionBounds, wasStructural }
-      this.repacked = { canvas: r.canvas, pages: null, text: r.text,
-                         regionBounds: r.regionBounds, wasStructural: r.wasStructural };
-      this._setActiveSingle(r.canvas, r.text);
-      return r.wasStructural
-        ? await this._buildStructuralResult(r.regionBounds)
-        : await this._buildResult();
-    }
-    this._invalidateRepackCache();
-    const r = this._rebuildSinglePageMerge();
-    this.preRepack = { canvas: r.canvas, pages: null, text: r.text };
+    const r = await this._rebuildSinglePageRepack();   // { canvas, text, regionBounds, wasStructural }
+    this.repacked = { canvas: r.canvas, pages: null, text: r.text,
+                       regionBounds: r.regionBounds, wasStructural: r.wasStructural };
     this._setActiveSingle(r.canvas, r.text);
-    return await this._buildResult();
+    return r.wasStructural
+      ? await this._buildStructuralResult(r.regionBounds)
+      : await this._buildResult();
   }
 
-  async processModImage(source, selectedNames, repack = false) {
+  async processModImage(source, selectedNames) {
     const snap = this._snapshotForTransaction();
     try {
       if ((await this._registerModBatch(source, selectedNames)) === null) return null;
       this.modGeneration++;
-      return await this._rebuildAndBuildResult(repack || this._hasStructuralBatches());
+      return await this._rebuildAndBuildResult();
     } catch (e) {
       this._restoreSnapshot(snap);
       throw e;
@@ -554,64 +484,11 @@ export class AtlasSession {
       this.modBatches.push(batch);
       this.modificationsSaved = false;
       this.modGeneration++;
-      return await this._rebuildAndBuildResult(true);  // structural batches always force repack
+      return await this._rebuildAndBuildResult();
     } catch (e) {
       this._restoreSnapshot(snap);
       throw e;
     }
-  }
-
-  // Round 5 finding 1: toggleRepack() is a THIRD caller of
-  // _rebuildSinglePageRepack(), independent of _rebuildAndBuildResult() above
-  // — it was the one call site revision 5's refactor never touched. It now
-  // (a) actually rejects repack:false while a structural batch is pending,
-  // instead of only promising to in prose, and (b) reads the same
-  // wasStructural flag to pick the right result builder, using the cached
-  // this.repacked.wasStructural on a cache hit rather than re-rebuilding.
-  async toggleRepack(repack) {
-    if (this.modBatches.length === 0) return null;
-    if (!repack && this._hasStructuralBatches()) {
-      throw new Error('Cannot disable Repack while Add/Remove/Rename changes are pending.');
-    }
-    this.modGeneration++;
-    let structuralResult = false;
-
-    if (this.isMultiPage) {
-      // Unchanged — a multi-page session can never contain a structural
-      // batch (same reasoning as _rebuildAndBuildResult's multi-page branch).
-      if (repack) {
-        if (!this.repacked) {
-          const r = await this._rebuildMultiPageRepack();
-          this.repacked = { canvas: null, pages: r.pages, text: r.text };
-        }
-        this._setActiveMulti(this.repacked.pages, this.repacked.text);
-      } else {
-        if (!this.preRepack) {
-          const r = this._rebuildMultiPageMerge();
-          this.preRepack = { canvas: null, pages: r.pages, text: r.text };
-        }
-        this._setActiveMulti(this.preRepack.pages, this.preRepack.text);
-      }
-    } else if (repack) {
-      if (!this.repacked) {
-        const r = await this._rebuildSinglePageRepack();
-        this.repacked = { canvas: r.canvas, pages: null, text: r.text,
-                           regionBounds: r.regionBounds, wasStructural: r.wasStructural };
-      }
-      this._setActiveSingle(this.repacked.canvas, this.repacked.text);
-      structuralResult = this.repacked.wasStructural;
-    } else {
-      // Unreachable while a structural batch is pending — rejected above.
-      if (!this.preRepack) {
-        const r = this._rebuildSinglePageMerge();
-        this.preRepack = { canvas: r.canvas, pages: null, text: r.text };
-      }
-      this._setActiveSingle(this.preRepack.canvas, this.preRepack.text);
-    }
-
-    return structuralResult
-      ? await this._buildStructuralResult(this.repacked.regionBounds)
-      : await this._buildResult();
   }
 
   _snapshotForTransaction() {
@@ -620,7 +497,6 @@ export class AtlasSession {
       moddedSprites: { ...this.moddedSprites },
       modificationsSaved: this.modificationsSaved,
       modGeneration: this.modGeneration,
-      preRepack: this.preRepack,
       repacked: this.repacked,
       active: this.active,
     };
@@ -631,7 +507,6 @@ export class AtlasSession {
     this.moddedSprites = snap.moddedSprites;
     this.modificationsSaved = snap.modificationsSaved;
     this.modGeneration = snap.modGeneration;
-    this.preRepack = snap.preRepack;
     this.repacked = snap.repacked;
     this.active = snap.active;
   }
