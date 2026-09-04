@@ -271,7 +271,7 @@ export function repackOffsetsForRegion(name, fullCanvasRegions, pristineOffsets,
 
 // ─── Shelf packing ───────────────────────────────────────────────────────────
 
-function _shelfPack(items) {
+export function _shelfPack(items) {
   // items: [{ name, w, h }]
   if (items.length === 0) return { canvasW: 0, canvasH: 0, placements: [] };
 
@@ -313,14 +313,38 @@ function _shelfPack(items) {
     ...Array.from({ length: 5 }, (_, i) => maxSingle * (i + 1)),
   ]);
 
-  let best = null, bestArea = Infinity;
+  // Collect every candidate (raw, pre-rounding dimensions) instead of only
+  // tracking a running minimum-area winner -- squareness selection below
+  // needs to compare across the whole set, not just the area-optimal one.
+  const candidates = [];
   for (const stripW of [...candidateWidths].sort((a, b) => a - b)) {
     for (const allowRot of [false, true]) {
       const { usedW, canvasH, placements } = packWithWidth(items, stripW, allowRot);
       const area = usedW * canvasH;
-      if (area < bestArea) { bestArea = area; best = { canvasW: usedW, canvasH, placements }; }
+      const aspect = Math.max(usedW, canvasH) / Math.min(usedW, canvasH);
+      candidates.push({ canvasW: usedW, canvasH, placements, area, aspect });
     }
   }
+
+  // 1. Pure minimum area, exactly as before.
+  const bestArea = Math.min(...candidates.map((c) => c.area));
+
+  // 2. Deliberate deviation from repacker.py (see NOTES.md "Deviation:
+  //    repack packing diverges from repacker.py"): willing to spend up to
+  //    15% more area than optimal in exchange for a squarer canvas. All
+  //    scoring here uses RAW (pre-rounding) dimensions -- roundUpToMultiple
+  //    is applied once, below, only to the final winner, so a small-canvas
+  //    rounding delta can never flip which candidate looks closest-to-square
+  //    or which candidates survive this filter.
+  const SQUARENESS_AREA_TOLERANCE = 1.15;
+  const withinBudget = candidates.filter((c) => c.area <= bestArea * SQUARENESS_AREA_TOLERANCE);
+
+  // 3. Closest-to-square among the survivors; tie-break by smaller area,
+  //    then by smaller width, for a fully deterministic result.
+  withinBudget.sort((a, b) =>
+    (a.aspect - b.aspect) || (a.area - b.area) || (a.canvasW - b.canvasW));
+  const best = withinBudget[0];
+
   return { ...best, canvasW: roundUpToMultiple(best.canvasW), canvasH: roundUpToMultiple(best.canvasH) };
 }
 
