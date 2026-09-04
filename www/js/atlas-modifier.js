@@ -345,7 +345,11 @@ export function _shelfPack(items) {
     (a.aspect - b.aspect) || (a.area - b.area) || (a.canvasW - b.canvasW));
   const best = withinBudget[0];
 
-  return { ...best, canvasW: roundUpToMultiple(best.canvasW), canvasH: roundUpToMultiple(best.canvasH) };
+  return {
+    canvasW: roundUpToMultiple(best.canvasW),
+    canvasH: roundUpToMultiple(best.canvasH),
+    placements: best.placements,
+  };
 }
 
 // ─── Pixel hashing ───────────────────────────────────────────────────────────
