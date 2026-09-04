@@ -172,6 +172,10 @@ bounds: 0, 0, 10, 10
   check('structural result has exactly the {canvas, text, regionBounds, wasStructural} shape', result5.structuralResultKeys === 'canvas,regionBounds,text,wasStructural');
 
   // --- Task 6a: the mixed-session case (round 4's original data-loss bug) ---
+  // Originally regression-tested this specifically under repack:false; now
+  // that repack is unconditional there is no repack:false path left to test
+  // separately, but the underlying claim still matters: a pixel mod must
+  // never drop a pending Add.
   const result6a = await page.evaluate(async () => {
     const { AtlasSession, AddBatch } = await import('./js/atlas-session.js');
     const { AtlasProcessor } = await import('./js/atlas-extracter.js');
@@ -206,52 +210,13 @@ bounds: 0, 0, 10, 10
     const modCanvas = document.createElement('canvas');
     modCanvas.width = 10; modCanvas.height = 10;
     modCanvas.getContext('2d').fillRect(0, 0, 10, 10);
-    await session.processModImage(modCanvas, ['arm'], false); // caller passes repack:false on purpose
+    await session.processModImage(modCanvas, ['arm']); // repack is now unconditional
     const afterPixelMod = session.active.text.includes('helmet');
 
     return { afterAdd, afterPixelMod };
   });
   check('Add registers and appears in output', result6a.afterAdd);
   check('round 4 regression: a pixel mod after Add must NOT drop the Add', result6a.afterPixelMod);
-
-  // --- Task 6b: toggleRepack() is the third caller — round 5's regression ---
-  const result6b = await page.evaluate(async () => {
-    const { AtlasSession, RenameBatch } = await import('./js/atlas-session.js');
-    const { AtlasProcessor } = await import('./js/atlas-extracter.js');
-
-    const atlasText = `page.png
-size: 20, 20
-arm
-bounds: 0, 0, 10, 10
-`;
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width = 20; pageCanvas.height = 20;
-    pageCanvas.getContext('2d').fillRect(0, 0, 10, 10);
-    const toFile = (canvas, name) => new Promise((res) =>
-      canvas.toBlob((b) => res(new File([b], name, { type: 'image/png' })), 'image/png'));
-
-    const processor = new AtlasProcessor(atlasText);
-    await processor.loadImages({ 'page.png': await toFile(pageCanvas, 'page.png') });
-    const session = new AtlasSession(processor, atlasText, 'test.atlas');
-
-    await session.applyStructuralBatch(new RenameBatch('arm', 'forearm'));
-    session.repacked = null; // force toggleRepack's cache-miss path to actually rebuild
-    const result = await session.toggleRepack(true);
-    const resultCacheHit = await session.toggleRepack(true); // cache HIT this time -- session.repacked is already populated
-    const rejectedFalse = await session.toggleRepack(false).then(
-      () => 'did not throw',
-      (e) => e.message,
-    );
-
-    return {
-      regionsHasArm: !!result.regions.arm, // must be keyed by the STABLE key, not "forearm"
-      regionsHasArmCacheHit: !!resultCacheHit.regions.arm,
-      rejectedFalse,
-    };
-  });
-  check('round 5 regression: toggleRepack(true) must preserve identity (regions keyed by "arm", not "forearm")', result6b.regionsHasArm);
-  check('round 5 regression: toggleRepack(true) cache-HIT path also preserves identity (regions keyed by "arm")', result6b.regionsHasArmCacheHit);
-  check('round 5 regression: toggleRepack(false) rejects with the deliberate guard message, not an unrelated crash', result6b.rejectedFalse === 'Cannot disable Repack while Add/Remove/Rename changes are pending.');
 
   // --- Task 7: AtlasAPI wiring is structural-aware ---
   const result7 = await page.evaluate(async () => {
