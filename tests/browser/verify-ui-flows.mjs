@@ -293,16 +293,9 @@ const browser = await chromium.launch({ headless: true });
   check('desktop: sequential mod apply #2 accepted, pending mods true', twoBatches);
   check('desktop: no page errors after sequential mods', errors.length === 0, errors.join('; '));
 
-  // 7. Repack toggle on/off without a reload (the checkbox input is visually
-  // hidden behind the custom switch — click its label like a user would; the
-  // toggle lives in the right panel's #repack-options row, like the Python app)
-  const navBefore = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-  await page.click('#repack-toggle-row');
-  await page.waitForTimeout(500);
-  await page.click('#repack-toggle-row');
-  await page.waitForTimeout(500);
-  const navAfter = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-  check('desktop: repack toggle on/off, no reload', navBefore === navAfter && errors.length === 0);
+  // (Repack-toggle on/off test removed: the #repack-toggle-row switch was
+  // deleted when repack became unconditional -- there is no toggle left to
+  // flip, so the old "no reload on toggle" assertion is obsolete.)
 
   // 8. Unsaved-changes guard: cancel keeps edit mode, confirm exits
   await page.click('#mode-extract');
@@ -430,7 +423,7 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
-// ─── Task 8: Advance Mode toggle, multi-page guard, #chk-repack force/release ──
+// ─── Task 8: Advance Mode toggle, multi-page guard ─────────────────────────────
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
@@ -452,7 +445,8 @@ const browser = await chromium.launch({ headless: true });
   const toolbarVisible = await page.isVisible('#advance-toolbar');
   check('Advance Mode toolbar shows once the checkbox is toggled on', toolbarVisible === true);
 
-  // Advance Mode persists like #chk-repack does -- exiting and re-entering
+  // Advance Mode persists across sessions the same way other startup-restored
+  // prefs do (copySkel, meshCropping) -- exiting and re-entering
   // Edit Mode on the SAME atlas must restore it, not reset to off.
   await page.click('#mode-extract');
   await page.waitForTimeout(100);

@@ -1,14 +1,14 @@
 /**
  * App-level (AtlasAPI) end-to-end smoke test: drives the exact code path the
- * UI calls (load_atlas_from_file -> enter_modify_mode -> process_mod_image ->
- * toggle_repack) with synthetic File objects, for both a single-page and a
- * multi-page atlas. This checks the WIRING (file loading, session
- * construction, repack-toggle round trip through the public API) that
+ * UI calls (load_atlas_from_file -> enter_modify_mode -> process_mod_image)
+ * with synthetic File objects, for both a single-page and a multi-page atlas.
+ * This checks the WIRING (file loading, session construction, the
+ * unconditional repack round trip through the public API) that
  * verify-repack-asymmetry.mjs's direct-AtlasSession script doesn't exercise.
  * The offsets-reset-vs-preserved asymmetry itself is proven precisely there;
  * this script just confirms nothing throws and shapes look sane end-to-end
- * through the public AtlasAPI surface, and that multi-page repack toggling
- * still works now that "repack all pages" is gone.
+ * through the public AtlasAPI surface, and that multi-page repack still
+ * works now that "repack all pages" is gone.
  *
  * Not part of `node --test` (needs a browser + playwright-core). Run via:
  *   node test/browser/verify-app-e2e.mjs
@@ -84,20 +84,16 @@ offsets: 0, 0, 20, 20
   const entered = await AtlasAPI.enter_modify_mode();
 
   const modSword = await canvasToFile(solidCanvas(20, 20, [255, 0, 0, 255]), 'mod1.png');
-  const r1 = await AtlasAPI.process_mod_image(modSword, ['sword'], false);
+  const r1 = await AtlasAPI.process_mod_image(modSword, ['sword']);
 
   const modShield = await canvasToFile(solidCanvas(20, 20, [0, 255, 0, 255]), 'mod2.png');
-  const r2 = await AtlasAPI.process_mod_image(modShield, ['shieldA', 'shieldB'], false);
-
-  const repacked = await AtlasAPI.toggle_repack(true);
-  const unrepacked = await AtlasAPI.toggle_repack(false);
+  const r2 = await AtlasAPI.process_mod_image(modShield, ['shieldA', 'shieldB']);
 
   return {
     loaded, entered: !!entered,
     r1regions: r1 && Object.keys(r1.regions),
     r2regions: r2 && Object.keys(r2.regions),
-    repackedRegions: repacked && Object.keys(repacked.regions),
-    unrepackedRegions: unrepacked && Object.keys(unrepacked.regions),
+    repackedRegions: r2 && Object.keys(r2.regions), // repack is now unconditional -- r2 IS the repacked result
   };
 };
 
@@ -119,15 +115,12 @@ bounds: 0, 0, 10, 10
   const entered = await AtlasAPI.enter_modify_mode();
 
   const mod = await canvasToFile(solidCanvas(10, 10, [9, 9, 9, 255]), 'mod.png');
-  const merged = await AtlasAPI.process_mod_image(mod, ['armR'], false);
-  const repacked = await AtlasAPI.toggle_repack(true);
-  const unrepacked = await AtlasAPI.toggle_repack(false);
+  const merged = await AtlasAPI.process_mod_image(mod, ['armR']);
 
   return {
     loaded, entered: !!entered,
     mergedPageCount: merged && merged.pageCount,
-    repackedPageCount: repacked && repacked.pageCount,
-    unrepackedPageCount: unrepacked && unrepacked.pageCount,
+    repackedPageCount: merged && merged.pageCount, // repack is now unconditional -- merged IS the repacked result
   };
 };
 
@@ -181,15 +174,13 @@ check('single-page: atlas loaded', single.loaded === true, single);
 check('single-page: entered modify mode', single.entered === true, single);
 check('single-page: merge batch 1 (sword) returned regions', Array.isArray(single.r1regions) && single.r1regions.includes('sword'), single);
 check('single-page: merge batch 2 (shieldA/B) returned regions', Array.isArray(single.r2regions) && single.r2regions.includes('shieldA') && single.r2regions.includes('shieldB'), single);
-check('single-page: repack toggle ON returned all 3 regions', Array.isArray(single.repackedRegions) && single.repackedRegions.length === 3, single);
-check('single-page: repack toggle OFF (back to merge) returned all 3 regions', Array.isArray(single.unrepackedRegions) && single.unrepackedRegions.length === 3, single);
+check('single-page: repack (unconditional) returned all 3 regions', Array.isArray(single.repackedRegions) && single.repackedRegions.length === 3, single);
 
 const multi = await page.evaluate(() => window.runMultiPage());
 check('multi-page: atlas loaded', multi.loaded === true, multi);
 check('multi-page: entered modify mode', multi.entered === true, multi);
 check('multi-page: merge produced 2 pages', multi.mergedPageCount === 2, multi);
-check('multi-page: repack toggle ON still produces 2 pages (per-page repack, no "all" mode)', multi.repackedPageCount === 2, multi);
-check('multi-page: repack toggle OFF produces 2 pages', multi.unrepackedPageCount === 2, multi);
+check('multi-page: repack (unconditional) still produces 2 pages (per-page repack, no "all" mode)', multi.repackedPageCount === 2, multi);
 
 const scaleMismatch = await page.evaluate(() => window.runScaleMismatch());
 check('scale-mismatch: atlas loaded', scaleMismatch.loaded === true, scaleMismatch);
