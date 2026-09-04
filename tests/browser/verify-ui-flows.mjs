@@ -925,9 +925,15 @@ const browser = await chromium.launch({ headless: true });
     };
   });
   check('portrait: Advance Mode toolbar is visible in stacked layout', geometry.toolbarVisible === true);
-  check('portrait: toggling Advance Mode re-clamps the splitter so the toolbar is not clipped',
+  // #advance-toolbar is #left-panel's FIRST child -- it never overflows on its
+  // own regardless of this bug, so this is a basic sanity check, not proof of
+  // the fix. #sidebar-head (the SECOND child) is what actually gets pushed
+  // past #left-panel's bottom edge without the fix -- that's the one
+  // mutation-tested to fail on the pre-fix code; see the commit message.
+  check('portrait: toolbar sanity check -- not itself clipped (first child, not the regression case)',
     geometry.toolbarFitsInLeftPanel === true, JSON.stringify(geometry));
-  check('portrait: sidebar-head also stays inside the left panel', geometry.sidebarHeadFitsInLeftPanel === true);
+  check('portrait: REGRESSION CHECK -- sidebar-head (2nd child) stays inside the left panel once Advance Mode reserves its own space',
+    geometry.sidebarHeadFitsInLeftPanel === true);
 
   check('portrait splitter: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
