@@ -99,6 +99,7 @@ offsets: 5, 5, 30, 30
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
 import { AtlasProcessor } from '/www/js/atlas-extracter.js';
 import { AtlasSession } from '/www/js/atlas-session.js';
+import { AtlasModifier } from '/www/js/atlas-modifier.js';
 
 function solidCanvas(w, h, rgba) {
   const c = document.createElement('canvas');
@@ -110,22 +111,35 @@ function solidCanvas(w, h, rgba) {
 }
 
 window.runScenario = async (atlasText) => {
-  const processor = new AtlasProcessor(atlasText);
   const baseCanvas = solidCanvas(100, 100, [10, 20, 30, 255]);
-  processor._loadedImages[processor.pages[0].filename] = baseCanvas;
-
-  const session = new AtlasSession(processor, atlasText, 'test.atlas');
-
   const modSword = solidCanvas(20, 20, [255, 0, 0, 255]);
   const modShield = solidCanvas(20, 20, [0, 255, 0, 255]);
   const modHair = solidCanvas(90, 160, [0, 0, 255, 255]);
+  const pageName = 'page1.png';
 
-  const mergeOnly1 = await session.processModImage(modSword, ['sword'], false);
-  const mergeOnly2 = await session.processModImage(modShield, ['shieldA', 'shieldB'], false);
-  const mergeOnly3 = await session.processModImage(modHair, ['hair'], false);
-  const mergeText = mergeOnly3.regions ? session.active.text : null;
+  // Merge half: repack is unconditional now, so there is no session-level
+  // merge-only path left to exercise -- drive AtlasModifier.mergeModImage()
+  // directly instead, replaying batches sequentially the same way the
+  // deleted AtlasSession._rebuildSinglePageMerge() used to.
+  let modifier = new AtlasModifier(atlasText, 'test.atlas', baseCanvas, pageName);
+  for (const [mod, names] of [[modSword, ['sword']], [modShield, ['shieldA', 'shieldB']], [modHair, ['hair']]]) {
+    const res = modifier.mergeModImage(mod, names);
+    modifier = new AtlasModifier(res.atlasText, 'test.atlas', res.mergedCanvas, pageName);
+  }
+  const mergeText = modifier.atlasText;
 
-  const repacked = await session.toggleRepack(true);
+  // Repack half: this is exactly what a real user does now (there is no
+  // separate "toggle to repack" step) -- run the same three batches through
+  // the real AtlasSession, which always repacks. This still exercises
+  // _registerModBatch's sharedCanvas field selection and
+  // _fullCanvasRegions()'s cross-batch union, the session-level logic this
+  // half of the test protects.
+  const processor = new AtlasProcessor(atlasText);
+  processor._loadedImages[processor.pages[0].filename] = baseCanvas;
+  const session = new AtlasSession(processor, atlasText, 'test.atlas');
+  await session.processModImage(modSword, ['sword']);
+  await session.processModImage(modShield, ['shieldA', 'shieldB']);
+  await session.processModImage(modHair, ['hair']);
   const repackText = session.active.text;
 
   return { mergeText, repackText };
