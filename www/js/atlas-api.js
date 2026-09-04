@@ -503,8 +503,9 @@ export const AtlasAPI = {
   },
 
   /** Reads the persisted 'meshCropping' pref into _meshMaskEnabled. Call
-   *  once at app startup (mirrors the Repack pref's own init in script.js) —
-   *  NOT per atlas load, since this toggle persists like Repack's does. */
+   *  once at app startup, NOT per atlas load -- this toggle persists across
+   *  sessions the same way other startup-restored prefs do (advanceMode,
+   *  copySkel). */
   async init_mesh_mask_from_pref() {
     _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
   },
@@ -854,7 +855,7 @@ export const AtlasAPI = {
    * old Python engine — a plain `<input type=file>` can't be pointed at a
    * starting directory (found via parity audit, 2026-08-23).
    */
-  async select_mod_image(selectedNames, repack = false) {
+  async select_mod_image(selectedNames) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
     let file;
     if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
@@ -869,14 +870,14 @@ export const AtlasAPI = {
       if (files.length === 0) return null;
       file = files[0];
     }
-    return AtlasAPI.process_mod_image(file, selectedNames, repack);
+    return AtlasAPI.process_mod_image(file, selectedNames);
   },
 
   /** Process a mod image (File or canvas/img) for the selected regions. */
-  async process_mod_image(source, selectedNames, repack = false) {
+  async process_mod_image(source, selectedNames) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
     try {
-      return await _session.processModImage(source, selectedNames, repack);
+      return await _session.processModImage(source, selectedNames);
     } catch (e) {
       console.error('process_mod_image error:', e);
       if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
@@ -938,17 +939,6 @@ export const AtlasAPI = {
     } catch (e) {
       if (e && e.name === 'AbortError') return 'Cancelled';
       return `Error: ${e.message}`;
-    }
-  },
-
-  /** Toggle repack on/off; the session lazily rebuilds whichever result is stale. */
-  async toggle_repack(repack) {
-    if (!_session || _session.modBatches.length === 0) return null;
-    try {
-      return await _session.toggleRepack(repack);
-    } catch (e) {
-      console.error('toggle_repack error:', e);
-      return null;
     }
   },
 
