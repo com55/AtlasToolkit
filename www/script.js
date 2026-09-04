@@ -2,7 +2,7 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initRepackInfoOverlay, initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
@@ -47,13 +47,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   await _waitForPywebviewReady();
   initPanelResizer();
   initAppBar();
-  // Stamp the initial body.mode-extract class setMode()'s CSS-gated controls
-  // (Task 6: #repack-toggle-row vs #mesh-mask-toggle-row) depend on --
-  // setMode() is otherwise only called reactively (entering/exiting modify
-  // mode, or on a fresh atlas load while already in modify mode), so
-  // without this call both option rows would show simultaneously on first
-  // page load until the user toggles modes at least once (found via
-  // adversarial DOM smoke test, 2026-08-31).
+  // Stamp the initial body.mode-extract class setMode()'s CSS-gated
+  // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called
+  // reactively (entering/exiting modify mode, or on a fresh atlas load
+  // while already in modify mode), so without this call that row would
+  // show on first page load until the user toggles modes at least once
+  // (found via adversarial DOM smoke test, 2026-08-31).
   setMode('extract');
   if (window.pywebview) {
     await _clearStaleServiceWorkerUnderDesktop();
@@ -61,14 +60,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     registerServiceWorker();
   }
 
-  const repackPref = await AtlasAPI.get_pref('repack', false);
-  document.getElementById('chk-repack').checked = repackPref;
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
   await AtlasAPI.init_mesh_mask_from_pref();
   updateMeshCroppingUI();
 
-  initRepackInfoOverlay();
   initSaveSplitMenu();
 
   // PWA open-with (File Handling API): the browser hands us the launched
@@ -287,11 +283,10 @@ async function applyNativeModImageDrop(imagePath) {
     showToast('Select at least one region first.', 'error');
     return false;
   }
-  const repack = document.getElementById('chk-repack').checked;
   // file:// URL goes straight into Image() — no fetch→File copy, no
   // toDataURL of the dropped PNG (perf fix, 2026-08-23). Preview after
   // merge is a blob: URL from canvas.toBlob(), not a data: URI.
-  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), keys, repack);
+  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), keys);
   if (result) {
     await onModPreviewReceived(result);
     showToast('Mod image loaded via drag & drop.', 'success');

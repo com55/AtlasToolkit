@@ -91,7 +91,7 @@ function applyModifyView(data, statusMsg) {
 /** Rebuild the region list from the effective model after a structural
  *  (add/remove/rename) change, preserving the user's selection by key.
  *  Shared by the Task 9-11 structural ops. */
-export async function refreshStructuralUi(prevSelectedKeys, { lockRepack = true } = {}) {
+export async function refreshStructuralUi(prevSelectedKeys) {
   state.lastClickIndex = -1;
   state.dragStartIndex = -1;
   await loadRegions(); // rebuilds state.regionsData from the effective model
@@ -104,19 +104,6 @@ export async function refreshStructuralUi(prevSelectedKeys, { lockRepack = true 
   updateButtons();
   updateRemoveButtonState();
   updateRenameButtonState();
-  if (lockRepack) {
-    const chk = document.getElementById('chk-repack');
-    chk.checked = true;
-    chk.disabled = true;
-  }
-}
-
-/** Re-enable #chk-repack and restore it to the persisted pref value. Called
- *  whenever the user leaves a state where a structural op force-locked it. */
-async function releaseRepackLock() {
-  const chk = document.getElementById('chk-repack');
-  chk.disabled = false;
-  chk.checked = await AtlasAPI.get_pref('repack', false);
 }
 
 export async function enterEditMode() {
@@ -127,13 +114,12 @@ export async function enterEditMode() {
       // ui/js/mode.js exactly (parity fix, 2026-08-23).
       applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
-      await releaseRepackLock();
-      // Restore Advance Mode the same way #chk-repack is restored above --
-      // persisted across sessions, re-applied on every Edit Mode entry
-      // rather than left as transient DOM state. Multi-page atlases never
-      // allow it regardless of the saved preference (loadRegions() already
-      // hides #advance-mode-row for them; skip restoring here too so the
-      // toolbar can't end up shown for one).
+      // Restore Advance Mode -- persisted across sessions, re-applied on
+      // every Edit Mode entry rather than left as transient DOM state.
+      // Multi-page atlases never allow it regardless of the saved
+      // preference (loadRegions() already hides #advance-mode-row for
+      // them; skip restoring here too so the toolbar can't end up shown
+      // for one).
       if (!AtlasAPI.is_multi_page()) {
         setAdvanceMode(await AtlasAPI.get_pref('advanceMode', false));
       }
@@ -160,8 +146,7 @@ export async function exitEditMode() {
     if (!ok) return;
   }
   try { AtlasAPI.exit_modify_mode(); } catch (e) { console.error(e); }
-  await releaseRepackLock();
-  await refreshStructuralUi(prevSelectedKeys, { lockRepack: false }); // rebuilds sidebar back to pristine, keeps selection
+  await refreshStructuralUi(prevSelectedKeys); // rebuilds sidebar back to pristine, keeps selection
   state.modifyRegionBounds = {};
   state.modifyPages        = [];
   state.modifyRegionPages  = {};
@@ -191,8 +176,7 @@ export async function resetModify() {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
       applyModifyView(data, 'Select regions and click Modify Selected');
-      await releaseRepackLock();
-      await refreshStructuralUi([], { lockRepack: false }); // rebuilds sidebar back to pristine, clears anchors
+      await refreshStructuralUi([]); // rebuilds sidebar back to pristine, clears anchors
       showToast('Modifications reset.', 'success');
     } else {
       showToast('Failed to reset modifications.', 'error');
@@ -208,8 +192,7 @@ export async function ReplaceSelected() {
   if (keys.length === 0) { showToast('Select at least one region to modify.', 'error'); return; } // matches old ui/js/modify.js
   try {
     setStatus('Selecting mod image...');
-    const repack = document.getElementById('chk-repack').checked;
-    const result = await AtlasAPI.select_mod_image(keys, repack);
+    const result = await AtlasAPI.select_mod_image(keys);
     if (result) {
       await onModPreviewReceived(result);
     } else {
@@ -316,39 +299,6 @@ export function initSaveSplitMenu() {
     AtlasAPI.set_pref('copySkel', chk.checked);
   });
 }
-
-export function initRepackInfoOverlay() {
-  const btn      = document.getElementById('btn-repack-info');
-  const overlay  = document.getElementById('repack-info-overlay');
-  const closeBtn = document.getElementById('btn-repack-info-close');
-  if (!btn || !overlay || !closeBtn) return;
-
-  const close = () => overlay.classList.add('hidden');
-  const open  = () => overlay.classList.remove('hidden');
-
-  btn.addEventListener('click', open);
-  closeBtn.addEventListener('click', close);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-}
-
-// ─── Repack Event Listeners ───────────────────────────────────────────────────
-document.getElementById('chk-repack').addEventListener('change', async (e) => {
-  AtlasAPI.set_pref('repack', e.target.checked);
-  if (!state.hasModImage) return;
-  setStatus(e.target.checked ? 'Applying repack...' : 'Reverting repack...');
-  try {
-    const result = await AtlasAPI.toggle_repack(e.target.checked);
-    if (result) {
-      await onModPreviewReceived(result);
-    } else {
-      showToast('No merged data to repack.', 'error');
-    }
-  } catch (err) {
-    console.error(err);
-    showToast('Repack toggle failed.', 'error');
-  }
-});
 
 // --- Mesh Cropping Event Listeners ---
 

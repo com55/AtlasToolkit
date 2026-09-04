@@ -112,10 +112,10 @@ export function initAppBar() {
 
   document.getElementById('chk-advance-mode').addEventListener('change', (e) => {
     setAdvanceMode(e.target.checked);
-    // Persist like #chk-repack does (modify-mode.js's own change listener) --
-    // restored on every Edit Mode entry in enterEditMode(), not here, since
-    // setAdvanceMode() is also called by the multi-page force-off reset
-    // (region-list.js), which must NOT overwrite the user's real preference.
+    // Persisted separately from the change listener -- restored on every
+    // Edit Mode entry in enterEditMode(), not here, since setAdvanceMode()
+    // is also called by the multi-page force-off reset (region-list.js),
+    // which must NOT overwrite the user's real preference.
     AtlasAPI.set_pref('advanceMode', e.target.checked);
   });
 
