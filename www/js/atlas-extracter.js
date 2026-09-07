@@ -141,24 +141,32 @@ export class AtlasProcessor {
     this._repackMaskEnabled = !!repackEnabled;
   }
 
-  /** Existing extraction gate: mesh state + PMA, independent of repack.
-   *  Used by extractRegion() (View mode preview/export) -- never gated by
-   *  the repack-only toggle below. */
-  getMeshGeometry(name) {
+  /** Mesh availability for a region: lookup entry exists, page is not PMA.
+   *  Shared by both toggle-specific gates below -- neither toggle on/off
+   *  state, just whether there is usable mesh data at all. */
+  _meshAvailableFor(name) {
     const region = this.regions[name];
     if (!region) return null;
     const page = this._pageMap[region.pageFilename];
-    if (!(this._maskEnabled && this._meshLookup && !page?.pma)) return null;
+    if (!(this._meshLookup && !page?.pma)) return null;
     return this._meshLookup.get(name) ?? null;
   }
 
-  /** Repack-specific gate: everything getMeshGeometry requires, PLUS the
-   *  Mesh-Aware Repack toggle. Returns null whenever either toggle is off,
-   *  independent of what getMeshGeometry() would return for the same name.
-   *  Used by AtlasSession's repack call sites -- never by extraction. */
+  /** Extraction gate: mesh availability + the Mesh Cropping toggle. Used by
+   *  extractRegion() (View mode preview/export) -- independent of the
+   *  repack-only toggle below (confirmed with user: the two toggles are
+   *  not coupled, they only share the underlying .skel data). */
+  getMeshGeometry(name) {
+    if (!this._maskEnabled) return null;
+    return this._meshAvailableFor(name);
+  }
+
+  /** Repack-specific gate: mesh availability + the Mesh-Aware Repack
+   *  toggle. Used by AtlasSession repack call sites -- independent of
+   *  whether View mode extraction is masked. */
   getRepackMeshGeometry(name) {
     if (!this._repackMaskEnabled) return null;
-    return this.getMeshGeometry(name);
+    return this._meshAvailableFor(name);
   }
 
   /** Extract a single region as a canvas (includes offset padding). */

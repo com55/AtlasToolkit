@@ -321,13 +321,20 @@ export function updateMeshCroppingUI() {
 
   const repackChk = document.getElementById('chk-mesh-aware-repack');
   repackChk.checked = repackEnabled;
-  repackChk.disabled = !enabled || !available;
+  repackChk.disabled = !available;
   document.getElementById('mesh-aware-repack-toggle-row').title = repackChk.disabled
-    ? 'Requires Mesh Cropping to be on with a usable .skel file.'
-    : "When Mesh Cropping is active, also mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
+    ? 'Requires a usable .skel file.'
+    : 'Mask each region pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.';
 
+  // Shared .skel picker button -- relevant toggle depends on which mode is
+  // currently active: View mode shows Mesh Cropping row, Edit mode shows
+  // Mesh-Aware Repack row (CSS hides whichever one is not current), so the
+  // button follows whichever toggle is actually visible right now, not
+  // "either toggle is on" -- the two toggles are otherwise fully
+  // independent of each other.
   const btn = document.getElementById('btn-pick-skel');
-  if (!enabled) {
+  const relevantToggleOn = state.currentMode === 'modify' ? repackEnabled : enabled;
+  if (!relevantToggleOn) {
     btn.classList.add('hidden');
     return;
   }
@@ -336,15 +343,15 @@ export function updateMeshCroppingUI() {
   if (!skelFileName) {
     btn.textContent = '⚠️ Choose .skel file';
     btn.classList.add('skel-missing');
-    btn.title = 'Pick a .skel file to enable mesh-based cropping.';
+    btn.title = 'Pick a .skel file to enable mesh-based masking.';
   } else if (!available) {
     btn.textContent = '⚠️ ' + skelFileName;
     btn.classList.add('skel-invalid');
-    btn.title = MESH_UNAVAILABLE_MESSAGES[unavailableReason] || 'This .skel file cannot be used for mesh cropping.';
+    btn.title = MESH_UNAVAILABLE_MESSAGES[unavailableReason] || 'This .skel file cannot be used for mesh masking.';
   } else {
     btn.textContent = skelFileName;
     btn.classList.add('skel-ok');
-    btn.title = `Mesh Cropping active using ${skelFileName}. Click to choose a different file.`;
+    btn.title = `Mesh masking active using ${skelFileName}. Click to choose a different file.`;
   }
 }
 
