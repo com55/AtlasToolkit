@@ -56,6 +56,7 @@ if (!chromium) {
 
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
 import { AtlasProcessor } from '/www/js/atlas-extracter.js';
+import { AtlasModifier } from '/www/js/atlas-modifier.js';
 
 const ATLAS_TEXT = \`page1.png
 size: 10,10
@@ -174,6 +175,32 @@ window.runCase = async (name) => {
     proc.setMeshMaskData(lookup, true); // 2-arg call, third omitted
     const repackGeom = proc.getRepackMeshGeometry('myregion');
     check('omitted 3rd arg -> getRepackMeshGeometry returns null (fails safe)', repackGeom === null, 'repackGeom=' + repackGeom);
+  } else if (name === 'repack-masks-pristine-offsets-sprite-crop-back') {
+    // Exercises AtlasModifier pristine-sprite masking (maskRawSprite offsets
+    // branch / maskCropRectForOffsets) at the pixel level, through the
+    // actual production canvas-mutating path -- the existing unit tests
+    // only covered the pure crop-rect arithmetic, never the destination-in
+    // composite itself. Region has offsets, so its raw 20x20 crop is a
+    // SUB-RECT of the 40x40 mesh space the mesh geometry is normalized
+    // against -- this specifically exercises the crop-back math, not just
+    // the simpler no-offsets case.
+    const ATLAS_TEXT = 'page1.png\\nsize: 40,40\\nleaf\\nbounds: 20, 0, 20, 20\\noffsets: 10, 10, 40, 40\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(40, 40, '#f00') });
+    const lookup = new Map([[ 'leaf', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] } ]]); // top-left-half triangle over the FULL 40x40 mesh space
+    proc.setMeshMaskData(lookup, true, true);
+    const meshLookupFn = (n) => proc.getRepackMeshGeometry(n);
+
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', proc.getPageImage('page1.png'));
+    const repacked = await modifier.repackWithModdedSprites({}, null, meshLookupFn);
+
+    // The raw 20x20 crop sits at (offX=10, pasteY=origH-offY-h=40-10-20=10)
+    // within the 40x40 mesh space, spanning (10,10)-(30,30). The packed
+    // canvas keeps that same 20x20 raw sprite as region leaf own bounds.
+    const insideNearOrigin = alpha(repacked.canvas, 2, 2);   // local (2,2) -> full-space (12,12), sum=24 <= 40 -- inside the triangle
+    const outsideFarCorner = alpha(repacked.canvas, 18, 18); // local (18,18) -> full-space (28,28), sum=56 > 40 -- outside the triangle
+    check('inside the mesh triangle stays opaque (crop-back math correct at near-origin point)', insideNearOrigin > 200, 'insideNearOrigin=' + insideNearOrigin);
+    check('outside the mesh triangle is masked to transparent (crop-back math correct at far corner)', outsideFarCorner === 0, 'outsideFarCorner=' + outsideFarCorner);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -198,7 +225,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw', 'get-mesh-geometry-unaffected-by-repack-toggle', 'set-mesh-mask-data-missing-third-arg-defaults-repack-off'];
+const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw', 'get-mesh-geometry-unaffected-by-repack-toggle', 'set-mesh-mask-data-missing-third-arg-defaults-repack-off', 'repack-masks-pristine-offsets-sprite-crop-back'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
