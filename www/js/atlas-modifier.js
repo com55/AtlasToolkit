@@ -5,7 +5,8 @@
 
 import { AtlasProcessor } from './atlas-extracter.js';
 import { AtlasDocument } from './atlas-document.js';
-import { cropAndRotate, roundHalfEven, roundUpToMultiple } from './core-region-ops.js';
+import { cropAndRotate, roundHalfEven, roundUpToMultiple, maskInPlace } from './core-region-ops.js';
+import { rasterizeMeshMask } from './region-mesh-mask.js';
 
 // ─── Parse atlas text using AtlasProcessor ──────────────────────────────────
 
@@ -384,6 +385,39 @@ async function _canvasHash(canvas) {
   }
 }
 
+// ─── Mesh masking (spec: mesh-masked-repack-source) ────────────────────────
+
+/** Pure: the sub-rect within a full-size (origW×origH) mesh mask that a raw
+ *  trimmed (spriteW×spriteH) crop corresponds to, given the region's
+ *  offsets [offX, offY, origW, origH]. Exact inverse of extraction's paste
+ *  position (pasteY = origH - offY - h, core-region-ops.js) -- instead of
+ *  pasting the sprite into the full-size mask space, this crops the
+ *  relevant sub-rect back out. No DOM/Canvas -- pure arithmetic. */
+export function maskCropRectForOffsets([offX, offY, , origH], spriteW, spriteH) {
+  return { x: offX, y: origH - offY - spriteH, w: spriteW, h: spriteH };
+}
+
+/** Masks a freshly-extracted pristine sprite in place to its mesh
+ *  silhouette. Mesh UVs are normalized to the region's raw crop size when
+ *  it has no offsets (mirrors extractRegionFromPage's no-offsets branch),
+ *  or to the FULL original (origW, origH) when it does (mirrors that
+ *  function's offsets branch) -- the crop-back rect above recovers just
+ *  the sub-rect this raw crop occupies within that full-size space. */
+function maskRawSprite(sprite, meshGeometry, region) {
+  if (!region.offsets) {
+    maskInPlace(sprite, meshGeometry, sprite.width, sprite.height);
+    return;
+  }
+  const [, , origW, origH] = region.offsets;
+  const rect = maskCropRectForOffsets(region.offsets, sprite.width, sprite.height);
+  const fullMask = rasterizeMeshMask(meshGeometry.uvs, meshGeometry.triangles, origW, origH);
+  const ctx = sprite.getContext('2d');
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(fullMask, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+  ctx.restore();
+}
+
 // ─── AtlasModifier class ─────────────────────────────────────────────────────
 
 export class AtlasModifier {
@@ -687,11 +721,15 @@ export class AtlasModifier {
    * expressible — impossible when repacking an already-merged canvas.
    * Returns { canvas, atlasText }.
    */
-  async repackWithModdedSprites(moddedSprites, fullCanvasRegions = null) {
+  async repackWithModdedSprites(moddedSprites, fullCanvasRegions = null, meshLookupFn = null) {
     const { pageInfo, regionNames, regions } = this._parseScoped(this.atlasText);
     const sprites = {};
     for (const [name, info] of Object.entries(regions)) {
       sprites[name] = this._extractRawSprite(this.baseCanvas, info);
+      if (meshLookupFn && !(name in (moddedSprites || {}))) {
+        const geom = meshLookupFn(name);
+        if (geom) maskRawSprite(sprites[name], geom, info);
+      }
     }
     for (const [name, sprite] of Object.entries(moddedSprites || {})) {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
@@ -711,12 +749,16 @@ export class AtlasModifier {
    * @param {{[key:string]: HTMLCanvasElement}} moddedSprites  pixel ModBatch overlays (session's existing map)
    * @param {Set<string>|null} fullCanvasRegions
    */
-  async repackWithEffectiveModel(effectiveRegionNames, effectiveRegions, addedSprites, moddedSprites, fullCanvasRegions = null) {
+  async repackWithEffectiveModel(effectiveRegionNames, effectiveRegions, addedSprites, moddedSprites, fullCanvasRegions = null, meshLookupFn = null) {
     const { pageInfo, regions: pristineRegions } = this._parseScoped(this.atlasText);
     const sprites = {};
     for (const [name, info] of Object.entries(pristineRegions)) {
       if (!(name in effectiveRegions)) continue; // dropped by a RemoveBatch
       sprites[name] = this._extractRawSprite(this.baseCanvas, info);
+      if (meshLookupFn && !(name in (moddedSprites || {})) && !(addedSprites && name in addedSprites)) {
+        const geom = meshLookupFn(name);
+        if (geom) maskRawSprite(sprites[name], geom, info);
+      }
     }
     for (const [name, sprite] of Object.entries(moddedSprites || {})) {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
