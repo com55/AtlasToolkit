@@ -145,6 +145,35 @@ window.runCase = async (name) => {
       const outsideWhereATriangleWouldHaveMasked = alpha(out, 8, 8);
       check('null lookup -> meshGeometry null -> unmasked full rectangle (alpha === 255)', outsideWhereATriangleWouldHaveMasked === 255, 'outside=' + outsideWhereATriangleWouldHaveMasked);
     }
+  } else if (name === 'get-mesh-geometry-unaffected-by-repack-toggle') {
+    // The whole point of the two-gate design: getMeshGeometry (extraction)
+    // must be completely unaffected by _repackMaskEnabled.
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(10, 10, '#f00') });
+    const lookup = new Map([['myregion', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }]]);
+
+    proc.setMeshMaskData(lookup, true, false); // extraction ON, repack OFF
+    const geomWithRepackOff = proc.getMeshGeometry('myregion');
+    const repackGeomWithRepackOff = proc.getRepackMeshGeometry('myregion');
+
+    proc.setMeshMaskData(lookup, true, true); // extraction ON, repack ON
+    const geomWithRepackOn = proc.getMeshGeometry('myregion');
+    const repackGeomWithRepackOn = proc.getRepackMeshGeometry('myregion');
+
+    check('getMeshGeometry returns geometry regardless of repack toggle (repack off)', geomWithRepackOff !== null, 'geomWithRepackOff=' + geomWithRepackOff);
+    check('getRepackMeshGeometry returns null when repack toggle is off', repackGeomWithRepackOff === null, 'repackGeomWithRepackOff=' + repackGeomWithRepackOff);
+    check('getMeshGeometry returns geometry regardless of repack toggle (repack on)', geomWithRepackOn !== null, 'geomWithRepackOn=' + geomWithRepackOn);
+    check('getRepackMeshGeometry returns geometry when both toggles are on', repackGeomWithRepackOn !== null, 'repackGeomWithRepackOn=' + repackGeomWithRepackOn);
+  } else if (name === 'set-mesh-mask-data-missing-third-arg-defaults-repack-off') {
+    // No default on the third param: a call site that forgets it (a future
+    // regression, not any call site in this repo after this plan lands)
+    // must fail SAFE -- masking-during-repack off, not silently on.
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(10, 10, '#f00') });
+    const lookup = new Map([['myregion', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }]]);
+    proc.setMeshMaskData(lookup, true); // 2-arg call, third omitted
+    const repackGeom = proc.getRepackMeshGeometry('myregion');
+    check('omitted 3rd arg -> getRepackMeshGeometry returns null (fails safe)', repackGeom === null, 'repackGeom=' + repackGeom);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -169,7 +198,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw'];
+const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw', 'get-mesh-geometry-unaffected-by-repack-toggle', 'set-mesh-mask-data-missing-third-arg-defaults-repack-off'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);

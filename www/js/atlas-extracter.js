@@ -129,11 +129,36 @@ export class AtlasProcessor {
   }
 
   /** Wired from atlas-api.js whenever the sibling .skel is (re)parsed or
-   *  the mesh-mask toggle flips. `lookup` may be null (no .skel / parse
-   *  failed / unsupported version). */
-  setMeshMaskData(lookup, enabled) {
+   *  either mesh toggle flips. `lookup` may be null (no .skel / parse
+   *  failed / unsupported version). `repackEnabled` gates ONLY
+   *  getRepackMeshGeometry() (the "Mesh-Aware Repack" toggle) -- it has no
+   *  default, so a caller that forgets it gets masking-during-repack
+   *  silently OFF, never a silent revert to "on" that would override an
+   *  explicit user preference. */
+  setMeshMaskData(lookup, enabled, repackEnabled) {
     this._meshLookup = lookup;
     this._maskEnabled = enabled;
+    this._repackMaskEnabled = !!repackEnabled;
+  }
+
+  /** Existing extraction gate: mesh state + PMA, independent of repack.
+   *  Used by extractRegion() (View mode preview/export) -- never gated by
+   *  the repack-only toggle below. */
+  getMeshGeometry(name) {
+    const region = this.regions[name];
+    if (!region) return null;
+    const page = this._pageMap[region.pageFilename];
+    if (!(this._maskEnabled && this._meshLookup && !page?.pma)) return null;
+    return this._meshLookup.get(name) ?? null;
+  }
+
+  /** Repack-specific gate: everything getMeshGeometry requires, PLUS the
+   *  Mesh-Aware Repack toggle. Returns null whenever either toggle is off,
+   *  independent of what getMeshGeometry() would return for the same name.
+   *  Used by AtlasSession's repack call sites -- never by extraction. */
+  getRepackMeshGeometry(name) {
+    if (!this._repackMaskEnabled) return null;
+    return this.getMeshGeometry(name);
   }
 
   /** Extract a single region as a canvas (includes offset padding). */
@@ -143,10 +168,7 @@ export class AtlasProcessor {
     const baseImg = this._loadedImages[region.pageFilename];
     if (!baseImg) return null;
     const page = this._pageMap[region.pageFilename];
-    const meshGeometry = (this._maskEnabled && this._meshLookup && !page?.pma)
-      ? (this._meshLookup.get(name) ?? null)
-      : null;
-    return extractRegionFromPage(baseImg, region, page, meshGeometry);
+    return extractRegionFromPage(baseImg, region, page, this.getMeshGeometry(name));
   }
 
   /** Extract a single region as a blob: URL (no base64). */
