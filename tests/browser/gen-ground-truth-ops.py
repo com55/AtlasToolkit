@@ -577,7 +577,7 @@ if os.path.exists(existing_path):
 if preserved:
     print(f"Preserved {preserved} JS-repinned expected-output field(s) from the "
           f"existing ground_truth_ops.json (repack ops) -- see the NOTE above "
-          f"repack_cases = little further up in this file.")
+          f"the `repack_cases = []` declaration further up in this file.")
 else:
     print("No existing ground_truth_ops.json found (or no matching repack-op "
           "cases in it) -- repackCases/realworldCases' expected-output fields "

@@ -93,7 +93,6 @@ offsets: 0, 0, 20, 20
     loaded, entered: !!entered,
     r1regions: r1 && Object.keys(r1.regions),
     r2regions: r2 && Object.keys(r2.regions),
-    repackedRegions: r2 && Object.keys(r2.regions), // repack is now unconditional -- r2 IS the repacked result
   };
 };
 
@@ -120,7 +119,6 @@ bounds: 0, 0, 10, 10
   return {
     loaded, entered: !!entered,
     mergedPageCount: merged && merged.pageCount,
-    repackedPageCount: merged && merged.pageCount, // repack is now unconditional -- merged IS the repacked result
   };
 };
 
@@ -174,13 +172,13 @@ check('single-page: atlas loaded', single.loaded === true, single);
 check('single-page: entered modify mode', single.entered === true, single);
 check('single-page: merge batch 1 (sword) returned regions', Array.isArray(single.r1regions) && single.r1regions.includes('sword'), single);
 check('single-page: merge batch 2 (shieldA/B) returned regions', Array.isArray(single.r2regions) && single.r2regions.includes('shieldA') && single.r2regions.includes('shieldB'), single);
-check('single-page: repack (unconditional) returned all 3 regions', Array.isArray(single.repackedRegions) && single.repackedRegions.length === 3, single);
+check('single-page: process_mod_image (always repacks) returned all 3 regions', Array.isArray(single.r2regions) && single.r2regions.length === 3, single);
 
 const multi = await page.evaluate(() => window.runMultiPage());
 check('multi-page: atlas loaded', multi.loaded === true, multi);
 check('multi-page: entered modify mode', multi.entered === true, multi);
 check('multi-page: merge produced 2 pages', multi.mergedPageCount === 2, multi);
-check('multi-page: repack (unconditional) still produces 2 pages (per-page repack, no "all" mode)', multi.repackedPageCount === 2, multi);
+check('multi-page: process_mod_image (always repacks) still produces 2 pages (per-page repack, no "all" mode)', multi.mergedPageCount === 2, multi);
 
 const scaleMismatch = await page.evaluate(() => window.runScaleMismatch());
 check('scale-mismatch: atlas loaded', scaleMismatch.loaded === true, scaleMismatch);

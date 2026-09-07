@@ -6,14 +6,22 @@
  * parity against ground_truth_ops.json, generated from the REAL main-branch
  * Python (document.py / region_ops.py / repacker.py / modifier.py) by
  * gen-ground-truth-ops.py -- see that script's header for the pinned oracle
- * commit and methodology.
+ * commit and methodology. EXCEPTION: repackCases/realworldCases' repack-op
+ * fixtures (expectedCanvas/expectedPages/expectedAtlasText) are NOT
+ * Python-derived -- packing *shape* parity with repacker.py was deliberately
+ * dropped (see NOTES.md "Deviation: repack packing diverges from
+ * repacker.py"), and those specific fields are re-pinned from the JS
+ * engine's own output via tests/browser/regen-repack-fixtures.mjs instead.
+ * If a repack case here fails, re-run that script, NOT gen-ground-truth-ops.py.
  *
  * Covers (see ground_truth_ops.json's 4 case groups):
  *   - extractCases:  the two Deliverable-1 fixtures (opaque/transparent-only,
  *     .5-rounding-tie) round-tripped through the real AtlasDocument.parse ->
  *     extractRegionFromPage path, plus a default-offsets (no-padding) case.
  *   - mergeCases:    full-canvas / offset-padded / rotated-placement merge.
- *   - repackCases:   single-page repack dedup, multi-page repack no-dedup.
+ *   - repackCases:   single-page repack dedup, multi-page repack no-dedup
+ *     (expected output re-pinned to JS engine output, not Python -- see the
+ *     EXCEPTION note above).
  *   - realworldCases: extract + multi-page-repack spot-checks against real
  *     Blue Archive sprite atlases in .workspaces/ (tolerance-compared, not
  *     exact -- see gen-ground-truth-ops.py's premultiply-alpha rationale).
@@ -87,7 +95,7 @@ if (!fs.existsSync(groundTruthPath)) {
   process.exit(0);
 }
 const gt = JSON.parse(fs.readFileSync(groundTruthPath, 'utf8'));
-console.log(`Loaded ground_truth_ops.json (pinned oracle: main@${gt.pinnedSha})`);
+console.log(`Loaded ground_truth_ops.json (pinned oracle: main@${gt.pinnedSha}; repack-op fixtures are JS-native, not from this oracle -- see verify-ops.mjs header)`);
 
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
 import { AtlasModifier, repackMultiPage } from '/www/js/atlas-modifier.js';
