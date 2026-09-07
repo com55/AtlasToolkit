@@ -610,12 +610,30 @@ class Api:
                 if not self._confirm_discard_modifications():
                     return
                 self._open_atlas_path_native(path, via_drop=True)
+            elif path_lower.endswith(".skel"):
+                self._handle_skel_drop(path)
             elif any(path_lower.endswith(ext) for ext in IMAGE_EXTENSIONS):
                 self._handle_image_drop(path)
             else:
                 self._window.evaluate_js("showToast('Unsupported file type.', 'error')")
         except Exception as ex:
             log.error("Drop error: %s", ex)
+
+    def _handle_skel_drop(self, path: str) -> None:
+        """Apply a natively-dropped .skel via the JS engine (Mesh Cropping).
+
+        Hands over the plain PATH; JS reads bytes via fetch(file://...).
+        """
+        if not self._window:
+            return
+        try:
+            self._evaluate_js_promise(
+                f"window.applyNativeSkelDrop({json.dumps(path)})"
+            )
+        except Exception as e:
+            log.error("Native skel drop error: %s", e)
+            msg = json.dumps(f"Error: {e}")
+            self._window.evaluate_js(f"showToast({msg}, 'error')")
 
     def _handle_image_drop(self, path: str) -> None:
         """Apply a natively-dropped PNG as a mod image via the JS engine's

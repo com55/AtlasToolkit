@@ -125,6 +125,10 @@ export function pickSiblingSkelFile(atlasFilename, files) {
   return null;
 }
 
+export function isSkelFilename(name) {
+  return /\.skel$/i.test(String(name || ''));
+}
+
 export function pathToFileUrl(path) {
   let p = String(path).replace(/\\/g, '/');
   if (!p.startsWith('/')) p = '/' + p; // Windows: "C:/foo" -> "/C:/foo"

@@ -6,7 +6,7 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor, canvasToPreviewUrl, _loadImage } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
 import { AtlasSession, AddBatch, RemoveBatch, RenameBatch } from './atlas-session.js';
 import { deriveEffectiveModel } from './effective-region-model.js';
@@ -215,7 +215,7 @@ async function _confirmDialog(message, title = 'Confirm') {
 }
 
 async function _findAtlasTextFile(files) {
-  const nonImageFiles = files.filter(file => !_isImageFile(file) && !/\.skel$/i.test(file.name || ''));
+  const nonImageFiles = files.filter(file => !_isImageFile(file) && !isSkelFilename(file.name));
   const prioritized = nonImageFiles.sort((a, b) => {
     const aAtlas = /\.atlas$/i.test(a.name || '');
     const bAtlas = /\.atlas$/i.test(b.name || '');
@@ -561,14 +561,21 @@ export const AtlasAPI = {
     return await _maybeRerunRepack();
   },
 
+  /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
+   *  captured sibling. Returns false if `file` is missing or not a .skel. */
+  async apply_skel_file(file) {
+    if (!file || !isSkelFilename(file.name)) return false;
+    _currentSkel = { name: file.name, blob: file };
+    await _reparseSkelAndPushToProcessor();
+    return true;
+  },
+
   /** Manual .skel picker — covers sibling auto-resolve misses and the
    *  browser/PWA target where .skel isn't in the picked/dropped file set. */
   async pick_skel_file() {
     const files = await _pickFiles({ accept: '.skel', multiple: false });
     if (files.length === 0) return false;
-    _currentSkel = { name: files[0].name, blob: files[0] };
-    await _reparseSkelAndPushToProcessor();
-    return true;
+    return AtlasAPI.apply_skel_file(files[0]);
   },
 
   /**

@@ -25,14 +25,14 @@ export function updateModeToggleUI() {
 
 /** Single choke point for every place that flips Advance Mode on/off, so the
  *  checkbox, the toolbar's visibility, and the body class that lets #sidebar-head
- *  track which row it lines up with (#repack-options when the toolbar is hidden,
+ *  track which row it lines up with (#options-row when the toolbar is hidden,
  *  #status-bar when it's showing) never drift out of sync with each other. */
 export function setAdvanceMode(active) {
   document.getElementById('chk-advance-mode').checked = active;
   document.getElementById('advance-toolbar').classList.toggle('hidden', !active);
   document.body.classList.toggle('advance-mode-on', active);
   // #advance-toolbar showing/hiding shifts panel-resizer.js's stacked/portrait
-  // splitter floor the same way setMode() showing/hiding #repack-options'
+  // splitter floor the same way setMode() showing/hiding #options-row
   // rows does -- without this the splitter can get stranded behind it.
   refreshPanelSplit();
 }
