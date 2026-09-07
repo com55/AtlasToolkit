@@ -138,6 +138,11 @@
             <span class="toggle-switch"></span>
             <span>Mesh Cropping</span>
           </label>
+          <label class="toggle-label" id="mesh-aware-repack-toggle-row" title="When Mesh Cropping is active, also mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.">
+            <input type="checkbox" id="chk-mesh-aware-repack" />
+            <span class="toggle-switch"></span>
+            <span>Mesh-Aware Repack</span>
+          </label>
           <button id="btn-pick-skel" class="skel-picker-btn" type="button"></button>
         </div>
         <div id="status-bar">
