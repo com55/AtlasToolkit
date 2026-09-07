@@ -418,6 +418,80 @@ function maskRawSprite(sprite, meshGeometry, region) {
   ctx.restore();
 }
 
+/** Union the mesh geometry of every name in `names` into one combined
+ *  {uvs, triangles} (triangle indices rebased to address the concatenated
+ *  uvs array), or null if none of them have mesh data. Pure geometry --
+ *  no size/canvas involved, unlike the region-level mask helpers above. */
+export function _combineMeshGeometry(names, meshLookupFn) {
+  const uvs = [], triangles = [];
+  let any = false;
+  for (const name of names) {
+    const geom = meshLookupFn(name);
+    if (!geom) continue;
+    any = true;
+    const base = uvs.length / 2;
+    uvs.push(...geom.uvs);
+    triangles.push(...geom.triangles.map(i => i + base));
+  }
+  return any ? { uvs, triangles } : null;
+}
+
+function _cloneCanvas(src) {
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  c.getContext('2d').drawImage(src, 0, 0);
+  return c;
+}
+
+/** Pure: groups names by which ones point at the identical canvas object in
+ *  `moddedSprites` (a shared-canvas mod batch stores the literal same
+ *  canvas under every one of its target names — confirmed by the exact
+ *  same object-identity assumption _canvasHash's own comment above
+ *  documents, for the real "CH0355"/"CH0355C" case). Returns an array of
+ *  name-groups; a name with no counterpart is its own group of one.
+ *  INVARIANT: two logically-independent ModBatch registrations must never
+ *  produce object-identical moddedSprites values, or their regions get
+ *  incorrectly unioned into one mask group -- holds today because
+ *  _prepareSource (atlas-session.js) always routes a File/string source
+ *  through _loadImage, which always constructs a fresh new Image(); check
+ *  against this note before adding any source-caching to
+ *  _registerModBatch/_prepareSource. No DOM/Canvas -- pure identity
+ *  grouping, so a Node unit test can exercise it with plain object
+ *  stand-ins instead of real canvases. */
+export function _groupNamesBySpriteIdentity(sprites, moddedSprites) {
+  const groups = new Map(); // canvas object -> names[]
+  for (const [name, canvas] of Object.entries(moddedSprites || {})) {
+    if (!(name in sprites)) continue;
+    if (!groups.has(canvas)) groups.set(canvas, []);
+    groups.get(canvas).push(name);
+  }
+  return [...groups.values()];
+}
+
+/** Masks the overlay entries of `sprites` (mutating the map, never the
+ *  original `moddedSprites` values or their canvases) to their mesh
+ *  silhouette. Each group from _groupNamesBySpriteIdentity gets ONE
+ *  combined mask applied to ONE fresh copy, reassigned to every name in
+ *  the group -- preserving the "identical object across the group"
+ *  property dedup relies on, while never touching the caller's own
+ *  canvas. Masks at the group's own (masked.width, masked.height) always
+ *  -- never a trimmed-crop case, since _prepareModImage always produces
+ *  either the raw full-canvas mod image or one already padded to
+ *  origCanvasW × origCanvasH. Deliberately does NOT check whether that
+ *  size matches the mesh's authored aspect ratio -- see the spec's
+ *  "Accepted edge case" for a mismatched-aspect mod image (confirmed
+ *  behavior, not a bug). */
+function _maskModdedSprites(sprites, moddedSprites, meshLookupFn) {
+  if (!meshLookupFn) return;
+  for (const names of _groupNamesBySpriteIdentity(sprites, moddedSprites)) {
+    const combined = _combineMeshGeometry(names, meshLookupFn);
+    if (!combined) continue; // no mesh data for anyone in this group -- leave as-is
+    const masked = _cloneCanvas(sprites[names[0]]);
+    maskInPlace(masked, combined, masked.width, masked.height);
+    for (const name of names) sprites[name] = masked;
+  }
+}
+
 // ─── AtlasModifier class ─────────────────────────────────────────────────────
 
 export class AtlasModifier {
@@ -734,6 +808,7 @@ export class AtlasModifier {
     for (const [name, sprite] of Object.entries(moddedSprites || {})) {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
     }
+    _maskModdedSprites(sprites, moddedSprites, meshLookupFn);
     return this._packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions);
   }
 
@@ -763,6 +838,7 @@ export class AtlasModifier {
     for (const [name, sprite] of Object.entries(moddedSprites || {})) {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
     }
+    _maskModdedSprites(sprites, moddedSprites, meshLookupFn);
     for (const [key, canvas] of Object.entries(addedSprites || {})) {
       sprites[key] = _toCanvas(canvas); // AddBatch — new key, never in the pristine parse
     }
