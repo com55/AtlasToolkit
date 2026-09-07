@@ -61,6 +61,7 @@ if (!chromium) {
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
 import { AtlasProcessor } from '/www/js/atlas-extracter.js';
 import { AtlasModifier } from '/www/js/atlas-modifier.js';
+import { AtlasSession } from '/www/js/atlas-session.js';
 
 function solidDataUrl(w, h, color) {
   const c = document.createElement('canvas');
@@ -196,6 +197,28 @@ window.runCase = async (name) => {
     check('ON: outside-triangle pixel masked away', onOutside === 0, 'onOutside=' + onOutside);
     check('OFF (after ON): masked-away pixel is back (not baked in)', offOutside === 255, 'offOutside=' + offOutside);
     check('ON again: newly masks the still-unmasked source', onAgainOutside === 0, 'onAgainOutside=' + onAgainOutside);
+  } else if (name === 'session-rerunRepack-reflects-toggle-live') {
+    // Every other case here drives AtlasModifier repack methods
+    // directly and never touches AtlasSession -- this is the one case
+    // that exercises AtlasSession.rerunRepack() itself (Task 4 new
+    // public method), the actual entry point a real toggle flip uses.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\nleaf\\nbounds: 0, 0, 20, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(20, 20, '#f00') });
+    const lookup = new Map([[ 'leaf', HALF_TRIANGLE ]]);
+    proc.setMeshMaskData(lookup, true, true); // both toggles ON before the first mod apply
+
+    const session = new AtlasSession(proc, ATLAS_TEXT, 'a.atlas');
+    const modDataUrl = solidDataUrl(20, 20, '#00f');
+    await session.processModImage(modDataUrl, ['leaf']);
+    const onOutside = alpha(session.active.canvas, 18, 18);
+
+    proc.setMeshMaskData(lookup, true, false); // flip Mesh-Aware Repack OFF on the same processor instance the session holds
+    await session.rerunRepack();
+    const offOutside = alpha(session.active.canvas, 18, 18);
+
+    check('processModImage: outside-triangle pixel masked away (repack ON)', onOutside === 0, 'onOutside=' + onOutside);
+    check('rerunRepack: masked-away pixel is back after toggling repack OFF', offOutside === 255, 'offOutside=' + offOutside);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -220,7 +243,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live'];
+const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live', 'session-rerunRepack-reflects-toggle-live'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
