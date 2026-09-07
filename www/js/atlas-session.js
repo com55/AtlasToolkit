@@ -500,8 +500,14 @@ export class AtlasSession {
    *  processModImage() uses; bumps modGeneration too so any
    *  generation-keyed preview cache doesn't serve a stale result. */
   async rerunRepack() {
-    this.modGeneration++;
-    return await this._rebuildAndBuildResult();
+    const snap = this._snapshotForTransaction();
+    try {
+      this.modGeneration++;
+      return await this._rebuildAndBuildResult();
+    } catch (e) {
+      this._restoreSnapshot(snap);
+      throw e;
+    }
   }
 
   _snapshotForTransaction() {
