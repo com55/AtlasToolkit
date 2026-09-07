@@ -281,6 +281,8 @@ window.runCase = async (name) => {
 
     const insideDespiteOppositeWinding = alpha(repacked.canvas, 2, 2);
     check('union of same shape with opposite winding stays opaque (no cancellation hole)', insideDespiteOppositeWinding > 200, 'insideDespiteOppositeWinding=' + insideDespiteOppositeWinding);
+    const outsideUnion = alpha(repacked.canvas, 18, 18);
+    check('outside the union still masked (mask really applied, not skipped)', outsideUnion === 0, 'outsideUnion=' + outsideUnion);
   } else if (name === 'mesh-less-region-in-shared-group-bails-masking-entirely') {
     // Confirmed with user: a shared-canvas group where ANY region lacks
     // mesh data must not mask at all, rather than silently clipping the
