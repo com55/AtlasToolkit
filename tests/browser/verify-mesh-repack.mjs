@@ -219,6 +219,35 @@ window.runCase = async (name) => {
 
     check('processModImage: outside-triangle pixel masked away (repack ON)', onOutside === 0, 'onOutside=' + onOutside);
     check('rerunRepack: masked-away pixel is back after toggling repack OFF', offOutside === 255, 'offOutside=' + offOutside);
+  } else if (name === 'repack-masks-pristine-offsets-region-crop-back') {
+    // The only case in this file exercising maskRawSprite offsets branch
+    // (the crop-back math) on a PRISTINE (unmodded) region -- every other
+    // case here either uses a no-offsets region or routes through
+    // moddedSprites, which never reaches this branch. Region raw crop is
+    // 10x10, offsets declare a 20x20 original canvas -- the mesh (a
+    // top-left-half triangle) is authored against that full 20x20 space,
+    // and the raw crop occupies a SUB-RECT of it (not the whole thing),
+    // so this genuinely exercises the crop-back arithmetic, not just the
+    // simpler no-offsets case.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\nleaf\\nbounds: 5, 5, 10, 10\\noffsets: 5, 5, 20, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(20, 20, '#f00') });
+    const lookup = new Map([[ 'leaf', HALF_TRIANGLE ]]);
+    proc.setMeshMaskData(lookup, true, true);
+    const meshLookupFn = (n) => proc.getRepackMeshGeometry(n);
+
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', proc.getPageImage('page1.png'));
+    const repacked = await modifier.repackWithModdedSprites({}, null, meshLookupFn);
+
+    // pasteY = origH - offY - h = 20 - 5 - 10 = 5, so the raw crop occupies
+    // full-mesh-space (offX=5, pasteY=5) to (15,15). Local sprite point
+    // (2,2) -> full-space (7,7), sum=14 <= 20 -- inside HALF_TRIANGLE.
+    // Local sprite point (8,8) -> full-space (13,13), sum=26 > 20 --
+    // outside HALF_TRIANGLE.
+    const insideNearOrigin = alpha(repacked.canvas, 2, 2);
+    const outsideFarCorner = alpha(repacked.canvas, 8, 8);
+    check('pristine offsets region: inside the mesh triangle stays opaque (crop-back correct)', insideNearOrigin > 200, 'insideNearOrigin=' + insideNearOrigin);
+    check('pristine offsets region: outside the mesh triangle masked to transparent (crop-back correct)', outsideFarCorner === 0, 'outsideFarCorner=' + outsideFarCorner);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -243,7 +272,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live', 'session-rerunRepack-reflects-toggle-live'];
+const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live', 'session-rerunRepack-reflects-toggle-live', 'repack-masks-pristine-offsets-region-crop-back'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
