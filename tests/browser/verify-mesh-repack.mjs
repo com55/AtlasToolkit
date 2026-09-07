@@ -12,6 +12,14 @@
  *   - a mismatched-aspect mod image still gets masked (accepted edge case)
  *   - toggling the repack mask off then on re-derives fresh each call (never
  *     baked into the shared source canvas)
+ *   - AtlasSession.rerunRepack() itself reflects a live toggle flip (not
+ *     just AtlasModifier repack methods directly)
+ *   - a pristine (unmodded) region with offsets exercises the crop-back
+ *     coordinate math, not just the simpler no-offsets case
+ *   - a shared-canvas union normalizes opposite triangle winding so it
+ *     does not cancel to a transparent hole
+ *   - a mesh-less region in a shared-canvas group bails masking for the
+ *     whole group, rather than clipping to a neighbor silhouette
  *
  * This is intentionally NOT part of `node --test` (it needs a browser +
  * playwright-core, which are not repo dependencies). Run it directly:
@@ -248,6 +256,53 @@ window.runCase = async (name) => {
     const outsideFarCorner = alpha(repacked.canvas, 8, 8);
     check('pristine offsets region: inside the mesh triangle stays opaque (crop-back correct)', insideNearOrigin > 200, 'insideNearOrigin=' + insideNearOrigin);
     check('pristine offsets region: outside the mesh triangle masked to transparent (crop-back correct)', outsideFarCorner === 0, 'outsideFarCorner=' + outsideFarCorner);
+  } else if (name === 'union-mask-normalizes-opposite-triangle-winding') {
+    // Regression test for the final whole-branch review winding-cancellation
+    // finding: two meshes describing the identical triangle shape with
+    // opposite vertex winding must still union to a fully opaque region,
+    // not cancel out to a transparent hole.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\na\\nbounds: 0, 0, 20, 20\\nb\\nbounds: 0, 0, 20, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(20, 20, '#f00') });
+    const SAME_TRIANGLE_CW = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] };
+    const SAME_TRIANGLE_CCW = { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 2, 1] };
+    const lookup = new Map([['a', SAME_TRIANGLE_CW], ['b', SAME_TRIANGLE_CCW]]);
+    proc.setMeshMaskData(lookup, true, true);
+    const meshLookupFn = (n) => proc.getRepackMeshGeometry(n);
+
+    const modImg = await new Promise((res) => { const img = new Image(); img.onload = () => res(img); img.src = solidDataUrl(20, 20, '#00f'); });
+    const modCanvas = document.createElement('canvas');
+    modCanvas.width = 20; modCanvas.height = 20;
+    modCanvas.getContext('2d').drawImage(modImg, 0, 0);
+    const moddedSprites = { a: modCanvas, b: modCanvas };
+
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', proc.getPageImage('page1.png'));
+    const repacked = await modifier.repackWithModdedSprites(moddedSprites, new Set(['a', 'b']), meshLookupFn);
+
+    const insideDespiteOppositeWinding = alpha(repacked.canvas, 2, 2);
+    check('union of same shape with opposite winding stays opaque (no cancellation hole)', insideDespiteOppositeWinding > 200, 'insideDespiteOppositeWinding=' + insideDespiteOppositeWinding);
+  } else if (name === 'mesh-less-region-in-shared-group-bails-masking-entirely') {
+    // Confirmed with user: a shared-canvas group where ANY region lacks
+    // mesh data must not mask at all, rather than silently clipping the
+    // mesh-less region to its mesh-bearing neighbor silhouette.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\na\\nbounds: 0, 0, 20, 20\\nb\\nbounds: 0, 0, 20, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(20, 20, '#f00') });
+    const lookup = new Map([['a', HALF_TRIANGLE]]); // b deliberately has no entry
+    proc.setMeshMaskData(lookup, true, true);
+    const meshLookupFn = (n) => proc.getRepackMeshGeometry(n);
+
+    const modImg = await new Promise((res) => { const img = new Image(); img.onload = () => res(img); img.src = solidDataUrl(20, 20, '#00f'); });
+    const modCanvas = document.createElement('canvas');
+    modCanvas.width = 20; modCanvas.height = 20;
+    modCanvas.getContext('2d').drawImage(modImg, 0, 0);
+    const moddedSprites = { a: modCanvas, b: modCanvas };
+
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', proc.getPageImage('page1.png'));
+    const repacked = await modifier.repackWithModdedSprites(moddedSprites, new Set(['a', 'b']), meshLookupFn);
+
+    const outsideAButKeptNow = alpha(repacked.canvas, 18, 18);
+    check('mesh-less region in the group -> entire group stays unmasked', outsideAButKeptNow === 255, 'outsideAButKeptNow=' + outsideAButKeptNow);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -272,7 +327,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live', 'session-rerunRepack-reflects-toggle-live', 'repack-masks-pristine-offsets-region-crop-back'];
+const cases = ['repack-masks-pristine-sprite-dimensions-unchanged', 'shared-canvas-mod-unions-both-regions-meshes', 'mismatched-aspect-mod-image-still-masks-per-accepted-design', 'toggle-off-then-on-restores-then-reapplies-live', 'session-rerunRepack-reflects-toggle-live', 'repack-masks-pristine-offsets-region-crop-back', 'union-mask-normalizes-opposite-triangle-winding', 'mesh-less-region-in-shared-group-bails-masking-entirely'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);

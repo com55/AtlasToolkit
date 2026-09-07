@@ -349,7 +349,11 @@ export function updateMeshCroppingUI() {
 }
 
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
-  if (structuralOpInFlight) { e.target.checked = !e.target.checked; return; }
+  if (structuralOpInFlight) {
+    e.target.checked = !e.target.checked;
+    showToast('Please wait for the current operation to finish.', 'error');
+    return;
+  }
   structuralOpInFlight = true;
   try {
     const result = await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
@@ -365,7 +369,11 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
 });
 
 document.getElementById('chk-mesh-aware-repack').addEventListener('change', async (e) => {
-  if (structuralOpInFlight) { e.target.checked = !e.target.checked; return; }
+  if (structuralOpInFlight) {
+    e.target.checked = !e.target.checked;
+    showToast('Please wait for the current operation to finish.', 'error');
+    return;
+  }
   structuralOpInFlight = true;
   try {
     const result = await AtlasAPI.set_mesh_aware_repack_enabled(e.target.checked);

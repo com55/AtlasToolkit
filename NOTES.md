@@ -69,13 +69,6 @@ still assert exact parity against it. Only the 3 repack-op fixtures in
 (via `tests/browser/regen-repack-fixtures.mjs`, re-run after any future
 change to the packing algorithm).
 
-Masking (mesh-masked-repack-source spec) happens before `_canvasHash` runs, so dedup groups
-now reflect *visible* pixels rather than raw rectangle pixels — two regions with identical
-raw crops but different meshes no longer dedup together; two regions with different raw
-crops that happen to look identical after their respective masks now do. This is strictly
-more correct (dedup is meant to mean "these end up looking the same") and is a documented,
-intentional side effect, not a bug.
-
 Two of the three re-pinned fixtures (`repackCases[1]`, the `realworldCases`
 multi-page "maki" case) exercise the standalone `repackMultiPage()` export in
 `atlas-modifier.js` — which has zero production callers. Real multi-page
@@ -90,3 +83,10 @@ protect the standalone helper's own behavior, not the app's actual multi-page
 repack behavior. (This also means the "multi-page repack does NOT dedup"
 rule recorded elsewhere in project memory is now describing this orphaned
 helper, not the live app — worth correcting separately.)
+
+Masking (mesh-masked-repack-source spec) happens before `_canvasHash` runs, so dedup groups
+now reflect *visible* pixels rather than raw rectangle pixels — two regions with identical
+raw crops but different meshes no longer dedup together; two regions with different raw
+crops that happen to look identical after their respective masks now do. This is strictly
+more correct (dedup is meant to mean "these end up looking the same") and is a documented,
+intentional side effect, not a bug.
