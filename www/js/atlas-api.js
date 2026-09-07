@@ -43,6 +43,11 @@ let _meshLookup = null;       // Map<name, {uvs,triangles}> | null
 // (set_mesh_mask_enabled). Independent of whether the CURRENT atlas's
 // .skel is actually usable -- see _meshUnavailableReason for that.
 let _meshMaskEnabled = true;
+// Separate from _meshMaskEnabled -- gates ONLY whether repack masks its
+// sprites (the "Mesh-Aware Repack" toggle), independent of whether View
+// mode extraction is masked. Same persisted-pref pattern as
+// _meshMaskEnabled. Initialized via init_mesh_aware_repack_from_pref().
+let _meshAwareRepackEnabled = true;
 // null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
 // why the current .skel (if any) can't be used, for the picker button's
 // tooltip. null when there's no .skel captured yet, or when it parsed with
@@ -62,6 +67,21 @@ function _forgetPreviewMemoUrl(url) {
   if (url && _previewMemo.value === url) {
     _previewMemo = { key: null, value: null };
   }
+}
+
+/** Only worth re-running repack if at least one batch has actually been
+ *  registered this session -- pixel ModBatch OR a structural Add/Remove/
+ *  Rename (both kinds already route their own apply through
+ *  onModPreviewReceived, modify-mode.js, so a toggle-triggered rerun
+ *  needs the same condition -- do NOT narrow this to
+ *  ModBatch/type==='mod' only, that would silently stop toggling from
+ *  refreshing a structural-only session). With zero batches, the
+ *  modify-mode preview pane is still showing the extraction-composite
+ *  view (unaffected by either mesh toggle), not a packed-atlas view --
+ *  nothing to refresh yet. */
+async function _maybeRerunRepack() {
+  if (_session && _session.modBatches.length > 0) return await _session.rerunRepack();
+  return null;
 }
 
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
@@ -455,7 +475,7 @@ async function _reparseSkelAndPushToProcessor() {
       }
     }
   }
-  if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
+  if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
   _clearPreviewMemo();
 }
 
@@ -510,10 +530,17 @@ export const AtlasAPI = {
     _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
   },
 
+  /** Reads the persisted 'meshAwareRepack' pref into _meshAwareRepackEnabled.
+   *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. */
+  async init_mesh_aware_repack_from_pref() {
+    _meshAwareRepackEnabled = await AtlasAPI.get_pref('meshAwareRepack', true);
+  },
+
   get_mesh_mask_state() {
     return {
       available: !!_meshLookup && _meshLookup.size > 0,
       enabled: _meshMaskEnabled,
+      repackEnabled: _meshAwareRepackEnabled,
       skelFileName: _currentSkel ? _currentSkel.name : null,
       unavailableReason: _meshUnavailableReason,
     };
@@ -522,8 +549,16 @@ export const AtlasAPI = {
   async set_mesh_mask_enabled(enabled) {
     _meshMaskEnabled = !!enabled;
     AtlasAPI.set_pref('meshCropping', _meshMaskEnabled);
-    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled);
+    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
     _clearPreviewMemo();
+    return await _maybeRerunRepack();
+  },
+
+  async set_mesh_aware_repack_enabled(enabled) {
+    _meshAwareRepackEnabled = !!enabled;
+    AtlasAPI.set_pref('meshAwareRepack', _meshAwareRepackEnabled);
+    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    return await _maybeRerunRepack();
   },
 
   /** Manual .skel picker — covers sibling auto-resolve misses and the
