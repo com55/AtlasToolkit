@@ -296,8 +296,9 @@ export class AtlasSession {
     // call chain reads (parity invariant, spec §5).
     const modifier = this._freshSinglePageModifier();
     if (!modifier) throw new Error('No single-page modifier');
+    const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
     const repacked = await modifier.repackWithModdedSprites(
-      this.moddedSprites, this._fullCanvasRegions());
+      this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
     return { canvas: repacked.canvas, text: repacked.atlasText,
              regionBounds: repacked.regionBounds, wasStructural: false };
   }
@@ -314,9 +315,10 @@ export class AtlasSession {
     for (const batch of this.modBatches) {
       if (batch.type === 'add') addedSprites[batch.internalKey] = batch.sourceCanvas;
     }
+    const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
     const packed = await modifier.repackWithEffectiveModel(
       effectiveModel.regionNames, effectiveModel.regions,
-      addedSprites, this.moddedSprites, this._fullCanvasRegions());
+      addedSprites, this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
     return { canvas: packed.canvas, text: packed.atlasText, regionBounds: packed.regionBounds };
   }
 
@@ -359,11 +361,12 @@ export class AtlasSession {
     const pageImages = this._originalPageCanvases();
     let text = this.atlasText;
 
+    const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
     for (const pageName of pageOrder) {
       if (!touched.has(pageName) || !pageImages[pageName]) continue;
       const modifier = new AtlasModifier(text, this.filename, pageImages[pageName], pageName);
       const packed = await modifier.repackWithModdedSprites(
-        this.moddedSprites, this._fullCanvasRegions());
+        this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
       text = replacePageInAtlas(text, pageName, packed.atlasText);
       pageImages[pageName] = packed.canvas;
     }
@@ -488,6 +491,17 @@ export class AtlasSession {
       this._restoreSnapshot(snap);
       throw e;
     }
+  }
+
+  /** Re-run the full rebuild without registering a new mod batch — used
+   *  when a preference that affects repack output (mesh masking,
+   *  mesh-aware toggle) changes mid-session and the currently-displayed
+   *  result needs to reflect it immediately. Same engine
+   *  processModImage() uses; bumps modGeneration too so any
+   *  generation-keyed preview cache doesn't serve a stale result. */
+  async rerunRepack() {
+    this.modGeneration++;
+    return await this._rebuildAndBuildResult();
   }
 
   _snapshotForTransaction() {
