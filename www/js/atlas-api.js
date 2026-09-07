@@ -551,7 +551,7 @@ export const AtlasAPI = {
     AtlasAPI.set_pref('meshCropping', _meshMaskEnabled);
     if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
     _clearPreviewMemo();
-    return await _maybeRerunRepack();
+    return null; // Mesh Cropping no longer affects repack output at all now that the two toggles are decoupled -- no rerun needed.
   },
 
   async set_mesh_aware_repack_enabled(enabled) {

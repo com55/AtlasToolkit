@@ -262,8 +262,8 @@ body.mode-modify.advance-mode-on #sidebar-head {
 
 body.mode-extract #advance-mode-row { display: none; }
 
-body.mode-modify #mesh-mask-toggle-row,
-body.mode-modify #btn-pick-skel { display: none; }
+body.mode-modify #mesh-mask-toggle-row { display: none; }
+body.mode-extract #mesh-aware-repack-toggle-row { display: none; }
 
 #status-bar {
   padding: 0 12px;
