@@ -356,6 +356,9 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
     updateMeshCroppingUI();
     updatePreview(getSelectedRegions()); // unrelated to repack -- always refresh, as today
     if (result) await onModPreviewReceived(result);
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Mesh Cropping.', 'error');
   } finally {
     structuralOpInFlight = false;
   }
@@ -370,6 +373,9 @@ document.getElementById('chk-mesh-aware-repack').addEventListener('change', asyn
     if (result) await onModPreviewReceived(result);
     // else: nothing modified yet, no packed-atlas preview to refresh -- leave the
     // extraction-composite preview (which this toggle never affects) as-is
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Mesh-Aware Repack.', 'error');
   } finally {
     structuralOpInFlight = false;
   }
