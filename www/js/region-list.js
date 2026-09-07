@@ -73,7 +73,7 @@ export async function loadRegions() {
  * Bold-green "name*" highlight for regions touched by a pending mod, mirroring
  * the old Python UI's `ui/js/regions.js` (`.modified` class + `${name}*`
  * display name) — missing entirely from the initial JS port. Called after
- * every mod apply/reset/repack-toggle rather than folded into `loadRegions()`,
+ * every mod apply/reset rather than folded into `loadRegions()`,
  * since those operations don't re-fetch the full region list.
  */
 export function refreshModifiedHighlight() {

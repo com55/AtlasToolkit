@@ -56,8 +56,7 @@ export class ModBatch {
                                 // and would wrongly exclude single-region
                                 // full-canvas mods); feeds fullCanvasRegions
     this.loaded = null;         // loaded HTMLImageElement/Canvas, reusable for
-                                // replay (dropped Files aren't re-readable) — the
-                                // multi-page merge path re-prepares from this
+                                // replay (dropped Files aren't re-readable)
     this.prepared = null;       // single-page prepared mod (padded canvas + dims
                                 // + sharedCanvasMod), resolved once from pristine;
                                 // null for multi-page (re-prepared per page)
@@ -191,7 +190,7 @@ export class AtlasSession {
    * (via _prepareModImage) so `moddedSprites[name]` holds the padded mod image
    * (the same pixels merge would paste) — this is what the repack overlay packs.
    * Mirrors session.py::_register_mod_batch, including the single- vs multi-page
-   * split: single-page caches the prepared mod on the batch (merge reuses it,
+   * split: single-page caches the prepared mod on the batch (repack reuses it,
    * never re-resolving on the evolved canvas); multi-page re-prepares per page.
    */
   async _registerModBatch(source, selectedNames) {

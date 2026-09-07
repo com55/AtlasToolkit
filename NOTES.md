@@ -56,9 +56,9 @@ result, then picks the one closest to a 1:1 aspect ratio among those within
 
 This is an intentional, permanent divergence from the pinned Python oracle,
 not a bug to reconcile: the project is retiring the Python reference
-implementation entirely in favor of `www/js/` as the sole engine (see the
-Repack rework spec series starting
-`docs/superpowers/specs/2026-09-04-repack-always-on-square-pack-design.md`),
+implementation entirely in favor of `www/js/` as the sole engine (part of a
+multi-spec Repack rework series -- specs for this series are kept
+local per this project's convention, not committed),
 and several of that series' later changes (mesh-masked packing sources,
 silhouette-aware nesting, multi-page pooling) have no Python equivalent at
 all. `repacker.py`'s pixel-level correctness (rotation, offsets, banker's

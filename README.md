@@ -48,8 +48,8 @@ cd www
 
 - **Atlas Preview** — View the full atlas image with region overlays
 - **Region Extraction** — Extract individual sprites or all regions at once
-- **Sprite Modification** — Replace sprites with mod images, auto-expanding the canvas as needed
-- **Smart Repack** — Repack all regions into an optimally-sized atlas after modification
+- **Sprite Modification** — Replace sprites with mod images; the atlas is automatically repacked into a compact, square-ish layout after every modification
+- **Smart Repack** — Regions are deduplicated and tightly packed, favoring a near-square canvas over the smallest possible one (up to 15% larger, if it makes the sheet noticeably squarer)
 - **Drag & Drop** — Load `.atlas` files by dragging them into the app; in Modify Mode, drop a `.png` image directly to apply it as a mod
 - **Copy to Clipboard** — Right-click the preview image to copy it to clipboard (Extract Mode)
 - **Auto Format Conversion** — Automatically converts LibGDX atlas format (`xy`/`orig`/`offset`) to the Spine format on load
