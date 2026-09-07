@@ -121,7 +121,10 @@ export function updateRemoveButtonState() {
  *  error, matching how updateRemoveButtonState() already disables Remove
  *  rather than relying on a click-time guard. */
 export function updateRenameButtonState() {
-  document.getElementById('btn-rename-region').disabled = state.selectedIndices.size !== 1;
+  const btn = document.getElementById('btn-rename-region');
+  const single = state.selectedIndices.size === 1;
+  btn.disabled = !single;
+  btn.title = single ? 'Rename selected region' : 'Select a single region to rename';
 }
 
 export function triggerPreviewUpdate() {

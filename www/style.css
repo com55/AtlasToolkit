@@ -1113,6 +1113,11 @@ body.mode-extract #advance-toolbar {
   box-sizing: border-box;
 }
 
+#advance-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .context-menu-item {
   display: flex;
   align-items: center;
