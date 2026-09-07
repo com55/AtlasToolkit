@@ -316,8 +316,15 @@ const MESH_UNAVAILABLE_MESSAGES = {
  *  current atlas's .skel availability -- the picker button communicates
  *  availability instead, and is hidden entirely while the toggle is off. */
 export function updateMeshCroppingUI() {
-  const { available, enabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
+  const { available, enabled, repackEnabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
   document.getElementById('chk-mesh-mask').checked = enabled;
+
+  const repackChk = document.getElementById('chk-mesh-aware-repack');
+  repackChk.checked = repackEnabled;
+  repackChk.disabled = !enabled || !available;
+  document.getElementById('mesh-aware-repack-toggle-row').title = repackChk.disabled
+    ? 'Requires Mesh Cropping to be on with a usable .skel file.'
+    : "When Mesh Cropping is active, also mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
 
   const btn = document.getElementById('btn-pick-skel');
   if (!enabled) {
@@ -342,9 +349,30 @@ export function updateMeshCroppingUI() {
 }
 
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
-  await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
-  updateMeshCroppingUI();
-  updatePreview(getSelectedRegions());
+  if (structuralOpInFlight) { e.target.checked = !e.target.checked; return; }
+  structuralOpInFlight = true;
+  try {
+    const result = await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
+    updateMeshCroppingUI();
+    updatePreview(getSelectedRegions()); // unrelated to repack -- always refresh, as today
+    if (result) await onModPreviewReceived(result);
+  } finally {
+    structuralOpInFlight = false;
+  }
+});
+
+document.getElementById('chk-mesh-aware-repack').addEventListener('change', async (e) => {
+  if (structuralOpInFlight) { e.target.checked = !e.target.checked; return; }
+  structuralOpInFlight = true;
+  try {
+    const result = await AtlasAPI.set_mesh_aware_repack_enabled(e.target.checked);
+    updateMeshCroppingUI();
+    if (result) await onModPreviewReceived(result);
+    // else: nothing modified yet, no packed-atlas preview to refresh -- leave the
+    // extraction-composite preview (which this toggle never affects) as-is
+  } finally {
+    structuralOpInFlight = false;
+  }
 });
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {
