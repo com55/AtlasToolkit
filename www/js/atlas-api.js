@@ -37,7 +37,7 @@ let _lastSaveHandle = null;
 let _currentSkel = null; // { name, blob } | null
 let _parsedSkeleton = null;   // {version, attachments} | null
 let _meshLookup = null;       // Map<name, {uvs,triangles}> | null
-// User preference, persisted like the Repack toggle -- does NOT reset per
+// User preference, persisted across sessions the same way other startup-restored prefs are -- does NOT reset per
 // atlas load. Initialized once from the 'meshCropping' pref at startup via
 // init_mesh_mask_from_pref(); changed only by an explicit user toggle
 // (set_mesh_mask_enabled). Independent of whether the CURRENT atlas's
@@ -429,7 +429,7 @@ async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
  *  the effective output for already-cached selections has changed. Safe
  *  to call with _currentSkel === null (clears mask state instead).
  *  Does NOT touch _meshMaskEnabled -- that's a persisted user preference
- *  (like Repack's), not something that resets per atlas load. Sets
+ *  (same pattern as other persisted prefs), not something that resets per atlas load. Sets
  *  _meshUnavailableReason to explain why the current .skel (if any) can't
  *  be used, for the picker button's tooltip. */
 async function _reparseSkelAndPushToProcessor() {
@@ -839,7 +839,7 @@ export const AtlasAPI = {
   /** Names of regions touched by any pending mod batch — old Python engine's
    * `AtlasSession.modified_regions` property, used by region-list.js to render
    * the bold-green "name*" highlight it had. Mirrors `moddedSprites`, which
-   * (like Python's `modded_sprites` dict) persists across repack toggles and
+   * (like Python's `modded_sprites` dict) persists across every session-lifetime mod apply and
    * accumulates across every mod apply, not just the latest. */
   get_modified_region_names() {
     if (!_session) return [];
