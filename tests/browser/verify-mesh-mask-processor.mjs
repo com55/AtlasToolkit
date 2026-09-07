@@ -231,6 +231,14 @@ window.runCase = async (name) => {
     check('top-left kept (inside triangle a)', topLeft > 200, 'topLeft=' + topLeft);
     check('bottom-right corner kept (inside triangle b)', bottomRightCorner > 200, 'bottomRightCorner=' + bottomRightCorner);
     check('gap between the two triangles masked away (union, not full canvas)', midGap === 0, 'midGap=' + midGap);
+    // The one property that matters most here: modCanvas is the SAME
+    // object as moddedSprites.a and moddedSprites.b (a real shared-canvas
+    // mod), so _maskModdedSprites must mask a CLONE, never modCanvas
+    // itself -- this is exactly the bug an earlier spec-review round
+    // forced a full redesign over. If it ever masked modCanvas in place,
+    // this same gap point on the ORIGINAL canvas would read alpha=0 too.
+    const sourceStillOpaqueAtGap = alpha(modCanvas, 18, 10);
+    check('original shared source canvas is untouched, not masked in place', sourceStillOpaqueAtGap > 200, 'sourceStillOpaqueAtGap=' + sourceStillOpaqueAtGap);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
