@@ -80,6 +80,7 @@ async function loadFixtureAtlas(page) {
     const { AtlasAPI } = await import('./js/atlas-api.js');
     const { loadRegions } = await import('./js/region-list.js');
     const { state } = await import('./js/state.js');
+    const { updateMeshCroppingUI } = await import('./js/modify-mode.js');
 
     const solid = (w, h, rgba) => {
       const c = document.createElement('canvas');
@@ -116,6 +117,7 @@ bounds: 40, 0, 30, 30
     state.selectedIndices.clear();
     state.lastClickIndex = -1;
     await loadRegions();
+    updateMeshCroppingUI();
     return { ok: true, names: AtlasAPI.get_region_names() };
   });
 }
@@ -171,12 +173,14 @@ const readUi = (page) => page.evaluate(() => ({
   saveEnabled: !document.getElementById('btn-save-mod').disabled,
   saveVisible: !document.getElementById('save-split').classList.contains('hidden'),
   saveMenuOpen: document.getElementById('save-menu').classList.contains('open'),
-  repackRowVisible: !document.getElementById('repack-options').classList.contains('hidden'),
+  repackRowVisible: !document.getElementById('options-row').classList.contains('hidden'),
   resetEnabled: !document.getElementById('btn-reset-mod').disabled,
   saveMergedEnabled: !document.getElementById('btn-save-merged').disabled,
   modalVisible: !document.getElementById('modal-overlay').classList.contains('hidden'),
   previewSrcLen: (document.getElementById('preview-img').src || '').length,
   missingDialog: !!document.querySelector('.missing-images-overlay'),
+  pickSkelVisible: !document.getElementById('btn-pick-skel').classList.contains('hidden')
+    && getComputedStyle(document.getElementById('btn-pick-skel')).display !== 'none',
 }));
 
 // ─── Desktop pass ─────────────────────────────────────────────────────────────
@@ -193,12 +197,26 @@ const browser = await chromium.launch({ headless: true });
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
 
+  let ui = await readUi(page);
+  check('desktop: .skel picker hidden before atlas load', !ui.pickSkelVisible);
+
   // 1. Load
   const loaded = await loadFixtureAtlas(page);
   check('desktop: atlas loads through real load path', loaded.ok && loaded.names.length === 5, `names=${loaded.names?.length}`);
-  let ui = await readUi(page);
+  ui = await readUi(page);
   check('desktop: region list rendered + count badge', ui.items === 5 && ui.count === '5', `items=${ui.items} count=${ui.count}`);
   check('desktop: Edit toggle + Extract All enabled after load', ui.editEnabled && ui.extractAllEnabled);
+  check('desktop: .skel picker visible after atlas load in view mode', ui.pickSkelVisible);
+  const pickerSize = await page.evaluate(() => {
+    const row = document.getElementById('options-row').getBoundingClientRect();
+    const btn = document.getElementById('btn-pick-skel').getBoundingClientRect();
+    return { rowH: row.height, btnH: btn.height };
+  });
+  check(
+    'desktop: .skel picker is shorter than the options row',
+    pickerSize.btnH > 0 && pickerSize.btnH < pickerSize.rowH,
+    `btn=${pickerSize.btnH} row=${pickerSize.rowH}`,
+  );
 
   // 2. Multi-select: click, shift-click, ctrl-click
   const items = page.locator('.region-item');

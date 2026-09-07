@@ -7,7 +7,7 @@ let _applyStoredSplit = null;
 /**
  * Re-clamp the panel split after something outside this module changes the
  * chrome it accounts for -- e.g. setMode() (modify-mode.js) shows/hides
- * repack-options, which shifts minRightHeight() in stacked/portrait layout.
+ * children of #options-row, which can shift minRightHeight() in stacked layout.
  * No-op before initPanelResizer() has run.
  */
 export function refreshPanelSplit() {
@@ -21,9 +21,9 @@ export function initPanelResizer() {
   const mainContent   = document.getElementById('main-content');
   const sidebarHead   = document.getElementById('sidebar-head');
   const advanceToolbar = document.getElementById('advance-toolbar');
-  const repackOptions = document.getElementById('repack-options');
+  const optionsRow    = document.getElementById('options-row');
   const statusBar     = document.getElementById('status-bar');
-  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !repackOptions || !statusBar) return;
+  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !optionsRow || !statusBar) return;
 
   let dragging  = false;
   let startPos  = 0;
@@ -33,7 +33,7 @@ export function initPanelResizer() {
 
   // Stacked (portrait/mobile) mode is user-resizable, but each side's own
   // header row always stays visible: dragging up stops once the preview has
-  // shrunk to nothing beneath repack-options + status-bar; dragging down
+  // shrunk to nothing beneath #options-row + status-bar; dragging down
   // stops once the region list has shrunk to nothing beneath sidebar-head
   // (and #advance-toolbar too, when Advance Mode has it showing -- its
   // getBoundingClientRect().height is naturally 0 while hidden, so this
@@ -44,7 +44,7 @@ export function initPanelResizer() {
   // panels. The wide left/right layout is locked to a fixed width, matching
   // the Python app -- it is not user-resizable.
   const minRightHeight = () =>
-    repackOptions.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
+    optionsRow.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
   const maxRightHeight = () => Math.max(
     minRightHeight(),
     mainContent.getBoundingClientRect().height

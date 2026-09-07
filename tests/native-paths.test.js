@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile } from '../www/js/platform.js';
+import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from '../www/js/platform.js';
 
 test('joinNativePath keeps Windows or POSIX separators', () => {
   assert.equal(joinNativePath('C:\\atlas', 'page.png'), 'C:\\atlas\\page.png');
@@ -36,4 +36,12 @@ test('pickSiblingSkelFile finds the matching .skel in a dropped file list', () =
   assert.equal(pickSiblingSkelFile('hero.atlas', [{ name: 'other.skel' }]), null);
   const upper = { name: 'HERO.SKEL' };
   assert.equal(pickSiblingSkelFile('Hero.atlas', [upper]), upper);
+});
+
+test('isSkelFilename matches .skel case-insensitively', () => {
+  assert.equal(isSkelFilename('hero.skel'), true);
+  assert.equal(isSkelFilename('HERO.SKEL'), true);
+  assert.equal(isSkelFilename('hero.atlas'), false);
+  assert.equal(isSkelFilename('hero.png'), false);
+  assert.equal(isSkelFilename(''), false);
 });

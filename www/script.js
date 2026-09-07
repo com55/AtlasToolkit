@@ -6,7 +6,7 @@ import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetM
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
-import { copyPreviewImage, savePreviewImageAs } from './js/drop.js';
+import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
@@ -343,3 +343,4 @@ window.showToast           = showToast;
 window.AtlasAPI                  = AtlasAPI;
 window.loadAtlasFromNative       = loadAtlasFromNative;
 window.applyNativeModImageDrop   = applyNativeModImageDrop;
+window.applyNativeSkelDrop       = applyNativeSkelDrop;

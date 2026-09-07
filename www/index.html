@@ -126,12 +126,14 @@
       <div id="panel-splitter" role="separator" aria-orientation="vertical" aria-label="Resize panels"></div>
 
       <div id="right-panel">
-        <div id="repack-options">
+        <div id="options-row">
           <label class="toggle-label" id="advance-mode-row" title="Advance Mode adds Rename / Add / Remove controls for editing regions directly (single-page atlases only).">
             <input type="checkbox" id="chk-advance-mode" />
             <span class="toggle-switch"></span>
             <span>Advance Mode</span>
           </label>
+
+          <div class="app-bar-divider options-row-divider"></div>
 
           <label class="toggle-label" id="mesh-mask-toggle-row" title="Mesh Cropping will crop each region using its real mesh silhouette from the .skel file instead of a plain rectangle, preventing bleed from other regions packed nearby.">
             <input type="checkbox" id="chk-mesh-mask" />
@@ -143,7 +145,7 @@
             <span class="toggle-switch"></span>
             <span>Mesh-Aware Repack</span>
           </label>
-          <button id="btn-pick-skel" class="skel-picker-btn" type="button"></button>
+          <button id="btn-pick-skel" class="skel-picker-btn hidden" type="button"></button>
         </div>
         <div id="status-bar">
           <span id="status-text">Ready</span>
