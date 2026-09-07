@@ -520,6 +520,11 @@ button {
   background-color: white;
 }
 
+.toggle-label input:disabled + .toggle-switch {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* .skel picker button (Mesh Cropping row) -- text button, not the round
    icon buttons above, since its content is a dynamic filename/message. */
 .skel-picker-btn {
