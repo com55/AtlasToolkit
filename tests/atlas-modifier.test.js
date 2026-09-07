@@ -10,6 +10,8 @@ import {
   repackOffsetsForRegion,
   _shelfPack,
   maskCropRectForOffsets,
+  _combineMeshGeometry,
+  _groupNamesBySpriteIdentity,
 } from '../www/js/atlas-modifier.js';
 
 // These cover the PURE canvas-resolution / placement / repack-offset decisions
@@ -220,4 +222,48 @@ test('maskCropRectForOffsets: sprite occupying the full offsets canvas crops fro
   // at pasteY = origH - 0 - h = 0 would look like.
   const rect = maskCropRectForOffsets([5, 0, 80, 60], 80, 60);
   assert.deepEqual(rect, { x: 5, y: 0, w: 80, h: 60 });
+});
+
+test('_combineMeshGeometry: unions two regions, rebasing the second region\'s triangle indices', () => {
+  const lookup = new Map([
+    ['a', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }],       // 3 uv pairs (indices 0-2)
+    ['b', { uvs: [1, 1, 0, 1, 1, 0], triangles: [0, 1, 2] }],       // its own 3 uv pairs, indices 0-2 LOCALLY
+  ]);
+  const meshLookupFn = (name) => lookup.get(name) ?? null;
+  const combined = _combineMeshGeometry(['a', 'b'], meshLookupFn);
+  assert.deepEqual(combined.uvs, [0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0]); // concatenated uv pairs
+  assert.deepEqual(combined.triangles, [0, 1, 2, 3, 4, 5]); // b's [0,1,2] rebased by +3 (a had 3 uv pairs)
+});
+
+test('_combineMeshGeometry: returns null when nobody in the group has mesh data', () => {
+  const meshLookupFn = () => null;
+  assert.equal(_combineMeshGeometry(['a', 'b'], meshLookupFn), null);
+});
+
+test('_combineMeshGeometry: skips a name with no geometry but still includes the rest', () => {
+  const lookup = new Map([['a', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }]]);
+  const meshLookupFn = (name) => lookup.get(name) ?? null;
+  const combined = _combineMeshGeometry(['a', 'missing'], meshLookupFn);
+  assert.deepEqual(combined, { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] });
+});
+
+test('_groupNamesBySpriteIdentity: names sharing one canvas object group together', () => {
+  const sharedCanvas = { marker: 'shared' }; // plain object stand-in -- identity grouping doesn't care what it is
+  const sprites = { a: sharedCanvas, b: sharedCanvas, c: { marker: 'other' } };
+  const moddedSprites = { a: sharedCanvas, b: sharedCanvas, c: { marker: 'other' } };
+  const groups = _groupNamesBySpriteIdentity(sprites, moddedSprites);
+  assert.equal(groups.length, 2);
+  const shared = groups.find(g => g.includes('a'));
+  assert.deepEqual([...shared].sort(), ['a', 'b']);
+  const solo = groups.find(g => g.includes('c'));
+  assert.deepEqual(solo, ['c']);
+});
+
+test('_groupNamesBySpriteIdentity: a name absent from sprites is excluded', () => {
+  const canvasA = {};
+  const sprites = { a: canvasA }; // 'b' deliberately missing from sprites
+  const moddedSprites = { a: canvasA, b: {} };
+  const groups = _groupNamesBySpriteIdentity(sprites, moddedSprites);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0], ['a']);
 });
