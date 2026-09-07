@@ -9,6 +9,7 @@ import {
   findBestPlacement,
   repackOffsetsForRegion,
   _shelfPack,
+  maskCropRectForOffsets,
 } from '../www/js/atlas-modifier.js';
 
 // These cover the PURE canvas-resolution / placement / repack-offset decisions
@@ -198,4 +199,25 @@ test('_shelfPack: pays up to 15% extra area for a genuinely squarer layout, but 
   assert.equal(result.canvasW, 40);
   assert.equal(result.canvasH, 80);
   assert.equal(result.canvasW * result.canvasH, 3200);
+});
+
+test('maskCropRectForOffsets: no offset (offX=offY=0) crops from the mesh space origin', () => {
+  // origW=100, origH=100, sprite is a 40x30 raw crop with zero offsets.
+  const rect = maskCropRectForOffsets([0, 0, 100, 100], 40, 30);
+  assert.deepEqual(rect, { x: 0, y: 100 - 0 - 30, w: 40, h: 30 }); // { x: 0, y: 70, w: 40, h: 30 }
+});
+
+test('maskCropRectForOffsets: nonzero offX/offY use the bottom-origin paste formula', () => {
+  // origW=200, origH=150, offX=20, offY=10, raw crop is 50x40.
+  // pasteY = origH - offY - h = 150 - 10 - 40 = 100.
+  const rect = maskCropRectForOffsets([20, 10, 200, 150], 50, 40);
+  assert.deepEqual(rect, { x: 20, y: 100, w: 50, h: 40 });
+});
+
+test('maskCropRectForOffsets: sprite occupying the full offsets canvas crops from (offX, offY)', () => {
+  // A raw crop exactly as tall as origH with offY=0 crops from y=0 -- the
+  // top of the mesh space, matching what pasting the same sprite back
+  // at pasteY = origH - 0 - h = 0 would look like.
+  const rect = maskCropRectForOffsets([5, 0, 80, 60], 80, 60);
+  assert.deepEqual(rect, { x: 5, y: 0, w: 80, h: 60 });
 });

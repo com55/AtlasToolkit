@@ -204,7 +204,7 @@ export function extractRegionFromPage(pageImage, region, page = null, meshGeomet
  *  correct for straight (non-premultiplied) alpha. PMA gating happens at
  *  the caller (AtlasProcessor.extractRegion, a later task) — meshGeometry
  *  should already be null for PMA pages by the time it reaches here. */
-function maskInPlace(canvas, meshGeometry, width, height) {
+export function maskInPlace(canvas, meshGeometry, width, height) {
   const mask = rasterizeMeshMask(meshGeometry.uvs, meshGeometry.triangles, width, height);
   const ctx = canvas.getContext('2d');
   ctx.save();
