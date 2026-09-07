@@ -421,11 +421,10 @@ let structuralOpInFlight = false;
 function openRenameModal() {
   if (structuralOpInFlight) return;
   const keys = getSelectedKeys();
-  // Both branches are defensive, not the primary guard -- #btn-rename-region
-  // itself is disabled outside a 1-region selection (updateRenameButtonState()),
-  // same reasoning as #btn-remove-region's own disabled-state check.
-  if (keys.length > 1) { showToast('Select a single region to rename.', 'error'); return; }
-  if (keys.length === 0) return;
+  // Primary guard is updateRenameButtonState() (enabled only for exactly one
+  // selection). Keep a strict click-time check too, in case a stale enabled
+  // state slips through after a selection clear that skipped the updater.
+  if (keys.length !== 1) return;
   const [key] = keys;
   const label = getSelectedLabels()[0];
   const input = document.getElementById('rename-name-input');

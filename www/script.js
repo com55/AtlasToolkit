@@ -4,7 +4,7 @@ import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUp
 import { initPanelResizer } from './js/panel-resizer.js';
 import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
-import { loadRegions, updateButtons } from './js/region-list.js';
+import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
@@ -198,6 +198,8 @@ async function _resetUiAfterFreshLoad() {
   previewImg.style.display = 'none';
   resetPreview();
   updateButtons();
+  updateRemoveButtonState();
+  updateRenameButtonState();
   await loadRegions();
   updateMeshCroppingUI();
 
