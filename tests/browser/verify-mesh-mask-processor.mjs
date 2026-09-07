@@ -201,6 +201,36 @@ window.runCase = async (name) => {
     const outsideFarCorner = alpha(repacked.canvas, 18, 18); // local (18,18) -> full-space (28,28), sum=56 > 40 -- outside the triangle
     check('inside the mesh triangle stays opaque (crop-back math correct at near-origin point)', insideNearOrigin > 200, 'insideNearOrigin=' + insideNearOrigin);
     check('outside the mesh triangle is masked to transparent (crop-back math correct at far corner)', outsideFarCorner === 0, 'outsideFarCorner=' + outsideFarCorner);
+  } else if (name === 'modded-sprites-union-two-regions-meshes') {
+    // Exercises _maskModdedSprites/_combineMeshGeometry/_groupNamesBySpriteIdentity
+    // at the pixel level through the actual production path -- the unit
+    // tests for these helpers only assert on plain objects/geometry
+    // arrays, never a real canvas composite.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\na\\nbounds: 0, 0, 10, 20\\nb\\nbounds: 10, 0, 10, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidDataUrl(20, 20, '#f00') });
+    const lookup = new Map([
+      [ 'a', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] } ],
+      [ 'b', { uvs: [1, 1, 0.7, 1, 1, 0.7], triangles: [0, 1, 2] } ],
+    ]);
+    proc.setMeshMaskData(lookup, true, true);
+    const meshLookupFn = (n) => proc.getRepackMeshGeometry(n);
+
+    const modImg = await new Promise((res) => { const img = new Image(); img.onload = () => res(img); img.src = solidDataUrl(20, 20, '#00f'); });
+    const modCanvas = document.createElement('canvas');
+    modCanvas.width = 20; modCanvas.height = 20;
+    modCanvas.getContext('2d').drawImage(modImg, 0, 0);
+    const moddedSprites = { a: modCanvas, b: modCanvas };
+
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', proc.getPageImage('page1.png'));
+    const repacked = await modifier.repackWithModdedSprites(moddedSprites, new Set(['a', 'b']), meshLookupFn);
+
+    const topLeft = alpha(repacked.canvas, 2, 2);
+    const bottomRightCorner = alpha(repacked.canvas, 19, 19);
+    const midGap = alpha(repacked.canvas, 18, 10);
+    check('top-left kept (inside triangle a)', topLeft > 200, 'topLeft=' + topLeft);
+    check('bottom-right corner kept (inside triangle b)', bottomRightCorner > 200, 'bottomRightCorner=' + bottomRightCorner);
+    check('gap between the two triangles masked away (union, not full canvas)', midGap === 0, 'midGap=' + midGap);
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -225,7 +255,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw', 'get-mesh-geometry-unaffected-by-repack-toggle', 'set-mesh-mask-data-missing-third-arg-defaults-repack-off', 'repack-masks-pristine-offsets-sprite-crop-back'];
+const cases = ['mask-off-by-default-then-on-differs', 'no-lookup-entry-falls-back-to-unmasked', 'pma-page-disables-masking-even-when-enabled', 'null-lookup-with-enabled-true-does-not-throw', 'get-mesh-geometry-unaffected-by-repack-toggle', 'set-mesh-mask-data-missing-third-arg-defaults-repack-off', 'repack-masks-pristine-offsets-sprite-crop-back', 'modded-sprites-union-two-regions-meshes'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
