@@ -1,10 +1,10 @@
 import { AtlasAPI } from './atlas-api.js';
-import { state, getSelectedKeys, getSelectedLabels } from './state.js';
+import { state, getSelectedKeys, getSelectedLabels, getSelectedRegions } from './state.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
-import { previewContainer, previewImg, resetPreview, clearOverlay } from './preview.js';
+import { previewContainer, previewImg, resetPreview, clearOverlay, updatePreview } from './preview.js';
 import { showToast, showConfirm, isAddRegionDialogOpen } from './dialogs.js';
-import { platform, isPywebviewDesktop } from './platform.js';
+import { platform, isPywebviewDesktop, loadFileAsFile, isSkelFilename } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -22,11 +22,13 @@ async function processDroppedFiles(files) {
   if (!files || files.length === 0) return;
 
   const isPng = (f) => f && (f.type === 'image/png' || /\.png$/i.test(f.name || ''));
-  const hasNonImage = files.some(f => !isPng(f));
+  const skelFiles = files.filter((f) => isSkelFilename(f.name));
+  const atlasCandidates = files.filter((f) => !isPng(f) && !isSkelFilename(f.name));
 
-  // Dropping a new atlas (a non-image file is present) over an in-progress
-  // edit session would discard unsaved modifications — confirm first.
-  if (hasNonImage && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
+  // Dropping a new atlas (a non-image, non-skel file is present) over an
+  // in-progress edit session would discard unsaved modifications — confirm
+  // first. A lone .skel drop does not replace the atlas, so skip this.
+  if (atlasCandidates.length > 0 && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
       // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
       'You have unsaved atlas modifications.\nContinue and discard them?',
@@ -35,35 +37,39 @@ async function processDroppedFiles(files) {
     if (!ok) return;
   }
 
-  const loaded = await AtlasAPI.load_from_files(files, { showNoAtlasToast: false });
+  if (atlasCandidates.length > 0) {
+    const loaded = await AtlasAPI.load_from_files(files, { showNoAtlasToast: false });
 
-  if (loaded === 'cancelled') {
-    showToast('Cancelled', 'info');
-    return;
-  }
-
-  if (loaded) {
-    if (state.currentMode === 'modify') {
-      setMode('extract');
-      state.modifyRegionBounds = {};
-      state.hasModImage = false;
+    if (loaded === 'cancelled') {
+      showToast('Cancelled', 'info');
+      return;
     }
-    state.selectedIndices.clear();
-    state.lastClickIndex = -1;
-    previewImg.style.display = 'none';
-    resetPreview();
-    clearOverlay();
-    updateButtons();
-    updateRemoveButtonState();
-    updateRenameButtonState();
-    await loadRegions();
-    updateMeshCroppingUI();
-    showToast('Atlas loaded via drag & drop.', 'success');
+    if (loaded) {
+      if (state.currentMode === 'modify') {
+        setMode('extract');
+        state.modifyRegionBounds = {};
+        state.hasModImage = false;
+      }
+      state.selectedIndices.clear();
+      state.lastClickIndex = -1;
+      previewImg.style.display = 'none';
+      resetPreview();
+      clearOverlay();
+      updateButtons();
+      updateRemoveButtonState();
+      updateRenameButtonState();
+      await loadRegions();
+      updateMeshCroppingUI();
+      showToast('Atlas loaded via drag & drop.', 'success');
+      return;
+    }
+
+    showToast('No valid atlas-format text file found in dropped files.', 'error');
     return;
   }
 
-  if (hasNonImage) {
-    showToast('No valid atlas-format text file found in dropped files.', 'error');
+  if (skelFiles.length > 0) {
+    await applyDroppedSkelFile(skelFiles[0]);
     return;
   }
 
@@ -78,6 +84,35 @@ async function processDroppedFiles(files) {
     }
   } else {
     showToast('Enter Edit Mode first to drop images.', 'error');
+  }
+}
+
+export async function applyDroppedSkelFile(file) {
+  if (!AtlasAPI.get_current_atlas_filename()) {
+    showToast('Load an atlas first to attach a .skel file.', 'error');
+    return false;
+  }
+  const ok = await AtlasAPI.apply_skel_file(file);
+  if (!ok) {
+    showToast('Failed to read .skel file.', 'error');
+    return false;
+  }
+  updateMeshCroppingUI();
+  await updatePreview(getSelectedRegions());
+  showToast(`Loaded ${file.name}.`, 'success');
+  return true;
+}
+
+/** Native OS drop delivers a path, not a browser File — load bytes then reuse
+ *  the same apply path as the in-page drop handler. */
+export async function applyNativeSkelDrop(skelPath) {
+  try {
+    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    return applyDroppedSkelFile(file);
+  } catch (e) {
+    console.error(e);
+    showToast('Failed to read .skel file.', 'error');
+    return false;
   }
 }
 

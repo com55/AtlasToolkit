@@ -47,17 +47,20 @@ export function setMode(mode) {
   }
   updateModeToggleUI();
   updatePageSwitcher();
-  // #repack-options is always-visible now (round-4-reviewed design decision
+  // #options-row is always-visible now (round-4-reviewed design decision
   // -- see the mesh-mask design spec's UI section) and its own height is
   // fixed (--panel-header-h), unaffected by which of its children show per
-  // mode -- so panel-resizer.js's minRightHeight() (repackOptions height +
+  // mode -- so panel-resizer.js's minRightHeight() (options-row height +
   // statusBar height) no longer actually changes across a mode switch.
   // Keeping this call anyway: harmless (a no-op re-clamp to the same
   // floor), and it stays correct if minRightHeight()'s inputs ever change
   // again (corrected post-review, Fable, 2026-08-31 -- the previous comment
-  // here claimed #repack-options' height still changed, which stopped being
+  // here claimed #options-row's height still changed, which stopped being
   // true once this task removed its whole-container .hidden toggle).
   refreshPanelSplit();
+  // Picker visibility follows the mode-relevant mesh toggle; refresh so a
+  // View↔Edit switch doesn't leave the button stuck on the previous mode.
+  updateMeshCroppingUI();
 }
 
 /** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
@@ -308,13 +311,14 @@ const MESH_UNAVAILABLE_MESSAGES = {
   'no-mesh-attachments': 'This .skel file parsed successfully but contains no Mesh attachments to crop with.',
 };
 
-/** Syncs the Mesh Cropping toggle + .skel picker button from
- *  AtlasAPI.get_mesh_mask_state(). Call after anything that can change that
- *  state: an atlas load (either load path), the toggle itself, or a
- *  successful pick_skel_file(). The toggle's checked state always reflects
- *  the user's persisted preference (like Repack's), independent of the
- *  current atlas's .skel availability -- the picker button communicates
- *  availability instead, and is hidden entirely while the toggle is off. */
+/** Syncs the Mesh Cropping / Mesh-Aware Repack toggles + .skel picker button
+ *  from AtlasAPI.get_mesh_mask_state(). Call after anything that can change
+ *  that state: an atlas load (either load path), the toggle itself, a
+ *  successful pick_skel_file(), or a mode switch that changes which toggle
+ *  is the relevant one. The toggles' checked states always reflect the
+ *  user's persisted preferences, independent of the current atlas's .skel
+ *  availability -- the picker button communicates availability instead, and
+ *  is hidden while the mode-relevant toggle is off or no atlas is loaded. */
 export function updateMeshCroppingUI() {
   const { available, enabled, repackEnabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
   document.getElementById('chk-mesh-mask').checked = enabled;
@@ -333,8 +337,11 @@ export function updateMeshCroppingUI() {
   // "either toggle is on" -- the two toggles are otherwise fully
   // independent of each other.
   const btn = document.getElementById('btn-pick-skel');
+  // View mode follows Mesh Cropping; Edit mode follows Mesh-Aware Repack.
+  // Also require an atlas so the picker stays hidden on the empty startup screen.
   const relevantToggleOn = state.currentMode === 'modify' ? repackEnabled : enabled;
-  if (!relevantToggleOn) {
+  const atlasLoaded = !!AtlasAPI.get_current_atlas_filename();
+  if (!relevantToggleOn || !atlasLoaded) {
     btn.classList.add('hidden');
     return;
   }
