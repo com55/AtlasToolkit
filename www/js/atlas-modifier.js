@@ -418,22 +418,41 @@ function maskRawSprite(sprite, meshGeometry, region) {
   ctx.restore();
 }
 
+/** Signed area (UV space) of one triangle -- positive means the winding
+ *  already matches a standard CCW orientation in u/v coordinates; negative
+ *  means reversed. Pure arithmetic, no DOM/Canvas. */
+function _triangleSignedArea(uvs, ia, ib, ic) {
+  const ax = uvs[ia], ay = uvs[ia + 1];
+  const bx = uvs[ib], by = uvs[ib + 1];
+  const cx = uvs[ic], cy = uvs[ic + 1];
+  return (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+}
+
 /** Union the mesh geometry of every name in `names` into one combined
- *  {uvs, triangles} (triangle indices rebased to address the concatenated
- *  uvs array), or null if none of them have mesh data. Pure geometry --
- *  no size/canvas involved, unlike the region-level mask helpers above. */
+ *  {uvs, triangles}, or null if ANY of them lack mesh data (masking the
+ *  whole group would silently clip a mesh-less region pixels to its
+ *  mesh-bearing neighbor silhouette -- confirmed with the user: bail the
+ *  whole group instead, matching the "no mesh data -> unmasked" convention
+ *  used everywhere else in this codebase) or if `names` is empty. Triangle
+ *  winding is normalized per-triangle (flipped to positive signed area
+ *  when negative) before appending, so rasterizeMeshMask nonzero-winding
+ *  fill unions correctly instead of canceling out where two
+ *  independently-authored meshes overlap with opposite winding (final
+ *  whole-branch review finding, verified via empirical Chromium probe). */
 export function _combineMeshGeometry(names, meshLookupFn) {
   const uvs = [], triangles = [];
-  let any = false;
   for (const name of names) {
     const geom = meshLookupFn(name);
-    if (!geom) continue;
-    any = true;
+    if (!geom) return null;
     const base = uvs.length / 2;
     uvs.push(...geom.uvs);
-    triangles.push(...geom.triangles.map(i => i + base));
+    for (let i = 0; i < geom.triangles.length; i += 3) {
+      let ia = geom.triangles[i], ib = geom.triangles[i + 1], ic = geom.triangles[i + 2];
+      if (_triangleSignedArea(geom.uvs, ia * 2, ib * 2, ic * 2) < 0) { const t = ib; ib = ic; ic = t; }
+      triangles.push(ia + base, ib + base, ic + base);
+    }
   }
-  return any ? { uvs, triangles } : null;
+  return names.length > 0 ? { uvs, triangles } : null;
 }
 
 function _cloneCanvas(src) {

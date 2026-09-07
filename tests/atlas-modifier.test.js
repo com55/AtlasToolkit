@@ -240,11 +240,26 @@ test('_combineMeshGeometry: returns null when nobody in the group has mesh data'
   assert.equal(_combineMeshGeometry(['a', 'b'], meshLookupFn), null);
 });
 
-test('_combineMeshGeometry: skips a name with no geometry but still includes the rest', () => {
+test('_combineMeshGeometry: any name lacking geometry bails the whole group (no partial union)', () => {
   const lookup = new Map([['a', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }]]);
   const meshLookupFn = (name) => lookup.get(name) ?? null;
   const combined = _combineMeshGeometry(['a', 'missing'], meshLookupFn);
-  assert.deepEqual(combined, { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] });
+  assert.equal(combined, null);
+});
+
+test('_combineMeshGeometry: normalizes reversed-winding triangles before combining', () => {
+  const lookup = new Map([
+    ['a', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 1, 2] }], // positive winding
+    ['b', { uvs: [0, 0, 1, 0, 0, 1], triangles: [0, 2, 1] }], // same triangle, reversed winding
+  ]);
+  const meshLookupFn = (name) => lookup.get(name) ?? null;
+  const combined = _combineMeshGeometry(['a', 'b'], meshLookupFn);
+  for (let i = 0; i < combined.triangles.length; i += 3) {
+    const ia = combined.triangles[i] * 2, ib = combined.triangles[i + 1] * 2, ic = combined.triangles[i + 2] * 2;
+    const area = (combined.uvs[ib] - combined.uvs[ia]) * (combined.uvs[ic + 1] - combined.uvs[ia + 1])
+      - (combined.uvs[ic] - combined.uvs[ia]) * (combined.uvs[ib + 1] - combined.uvs[ia + 1]);
+    assert.ok(area >= 0, `triangle at offset ${i} has negative signed area: ${area}`);
+  }
 });
 
 test('_groupNamesBySpriteIdentity: names sharing one canvas object group together', () => {
