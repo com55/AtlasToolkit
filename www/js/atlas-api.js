@@ -582,7 +582,10 @@ export const AtlasAPI = {
    *  either way). */
   async init_nest_regions_from_pref() {
     _nestRegionsEnabled = await AtlasAPI.get_pref('nestRegionsEnabled', false);
-    _nestGapDistance = await AtlasAPI.get_pref('nestGapDistance', 4);
+    // normalizeGap here too, not just in the setter -- a pref written by an
+    // older build (before set_nest_gap_distance normalized on write), or
+    // hand-edited storage, must not reach the packer/UI unnormalized either.
+    _nestGapDistance = normalizeGap(await AtlasAPI.get_pref('nestGapDistance', 4));
     if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
   },
 
