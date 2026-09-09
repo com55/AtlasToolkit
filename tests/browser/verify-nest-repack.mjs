@@ -101,18 +101,44 @@ window.runCase = async (name) => {
     } catch (e) { threw = true; }
     check('does not throw with a null meshLookupFn', !threw);
     check('returns a fully-solid mask (Gap A fallback)', mask && mask.length === 20 && Array.from(mask).every(v => v === 1), mask && Array.from(mask || []).join(''));
-  } else if (name === 'toggle-off-byte-identical-to-shelfpack') {
-    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\na\\nbounds: 0, 0, 10, 20\\nb\\nbounds: 10, 0, 10, 20\\n';
+  } else if (name === 'toggle-off-shelfpack-output-is-correct') {
+    // Distinct, FILLED, differently-shaped sprites -- 'tall' is taller than
+    // wide (exercises _shelfPack's own rotation logic). Verifies the
+    // toggle-off path (both nestOptions omitted and explicitly
+    // {enabled:false} -- both take the SAME _shelfPack branch, so this is
+    // NOT a nest-vs-shelf comparison) produces objectively correct output:
+    // real pixel content lands at the reported bounds. This is what proves
+    // adding the nestOptions parameter/branch to _packAndEmit did not
+    // silently corrupt the untouched _shelfPack path -- the previous version
+    // of this test compared two branches that are always identical to each
+    // other regardless of what the code does, so it could never fail.
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\ntall\\nbounds: 0, 0, 6, 10\\nwide\\nbounds: 6, 0, 8, 8\\n';
     const proc = new AtlasProcessor(ATLAS_TEXT);
-    await proc.loadImages({ 'page1.png': solidCanvas(20, 20).toDataURL ? solidCanvas(20, 20).toDataURL() : '' });
+    const page = document.createElement('canvas');
+    page.width = 20; page.height = 20;
+    const pctx = page.getContext('2d');
+    pctx.fillStyle = '#f00'; pctx.fillRect(0, 0, 6, 10);
+    pctx.fillStyle = '#00f'; pctx.fillRect(6, 0, 8, 8);
+    await proc.loadImages({ 'page1.png': page.toDataURL() });
     const img = proc.getPageImage('page1.png');
     const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', img);
-    const withoutNest = await modifier.repackWithModdedSprites({}, null, null, null);
-    const withNestDisabled = await modifier.repackWithModdedSprites({}, null, null, { enabled: false, gapDistance: 4 });
-    check('nestOptions omitted vs. explicitly disabled produce the same canvas size',
-      withoutNest.canvas.width === withNestDisabled.canvas.width && withoutNest.canvas.height === withNestDisabled.canvas.height,
-      withoutNest.canvas.width + 'x' + withoutNest.canvas.height + ' vs ' + withNestDisabled.canvas.width + 'x' + withNestDisabled.canvas.height);
-    check('same atlas text either way', withoutNest.atlasText === withNestDisabled.atlasText);
+    const r1 = await modifier.repackWithModdedSprites({}, null, null, null);
+    const r2 = await modifier.repackWithModdedSprites({}, null, null, { enabled: false, gapDistance: 4 });
+    check('nestOptions omitted vs. explicitly disabled produce identical canvas size',
+      r1.canvas.width === r2.canvas.width && r1.canvas.height === r2.canvas.height,
+      r1.canvas.width + 'x' + r1.canvas.height + ' vs ' + r2.canvas.width + 'x' + r2.canvas.height);
+    check('same atlas text either way', r1.atlasText === r2.atlasText);
+    for (const r of [r1, r2]) {
+      const [tx, ty] = r.regionBounds.tall;
+      const [wx, wy] = r.regionBounds.wide;
+      const px = (x, y) => { const d = r.canvas.getContext('2d').getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; };
+      const tallPixel = px(tx + 1, ty + 1);
+      const widePixel = px(wx + 1, wy + 1);
+      check('tall region pixel at its reported bounds is red',
+        tallPixel[0] > 200 && tallPixel[2] < 50, 'rgba=' + tallPixel.join(','));
+      check('wide region pixel at its reported bounds is blue',
+        widePixel[2] > 200 && widePixel[0] < 50, 'rgba=' + widePixel.join(','));
+    }
   } else if (name === 'toggle-on-no-mesh-uses-gap-a-space') {
     // No mesh anywhere in this fixture: meshLookupFn is null, so
     // footprintForCanonical falls back to a solid mask for every item and the
@@ -127,6 +153,9 @@ window.runCase = async (name) => {
     const proc = new AtlasProcessor(ATLAS_TEXT);
     const canvas = document.createElement('canvas');
     canvas.width = 40; canvas.height = 40;
+    const pctx = canvas.getContext('2d');
+    pctx.fillStyle = '#0f0'; pctx.fillRect(0, 0, 20, 20);   // 'big': solid green
+    pctx.fillStyle = '#ff0'; pctx.fillRect(20, 0, 4, 4);    // 'small': solid yellow
     await proc.loadImages({ 'page1.png': canvas.toDataURL() });
     const img = proc.getPageImage('page1.png');
     const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', img);
@@ -150,6 +179,13 @@ window.runCase = async (name) => {
                  && bigB.y < smallB.y + smallB.h && smallB.y < bigB.y + bigB.h;
     check('nest placements do not overlap',
       !overlap, 'big=' + JSON.stringify(bigB) + ' small=' + JSON.stringify(smallB));
+    const px = (x, y) => { const d = nestResult.canvas.getContext('2d').getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; };
+    const bigPixel = px(bigB.x + 1, bigB.y + 1);
+    const smallPixel = px(smallB.x + 1, smallB.y + 1);
+    check('big region pixel at its reported nest-mode bounds is green',
+      bigPixel[1] > 200 && bigPixel[0] < 50, 'rgba=' + bigPixel.join(','));
+    check('small region pixel at its reported nest-mode bounds is yellow',
+      smallPixel[0] > 200 && smallPixel[1] > 200 && smallPixel[2] < 50, 'rgba=' + smallPixel.join(','));
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -174,7 +210,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw', 'toggle-off-byte-identical-to-shelfpack', 'toggle-on-no-mesh-uses-gap-a-space'];
+const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw', 'toggle-off-shelfpack-output-is-correct', 'toggle-on-no-mesh-uses-gap-a-space'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
