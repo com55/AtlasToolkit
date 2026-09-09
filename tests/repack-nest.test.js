@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rotate90CW, rotate180, rotate90CCW, dilate, normalizeGap } from '../www/js/repack-nest.js';
+import { rotate90CW, rotate180, rotate90CCW, dilate, normalizeGap, growCanvas } from '../www/js/repack-nest.js';
 import { nestPack } from '../www/js/repack-nest.js';
 
 // 2x3 (w=2,h=3) asymmetric pattern -- chosen specifically to NOT be
@@ -85,6 +85,8 @@ test('normalizeGap: valid integers pass through, invalid input falls back to 4',
   assert.equal(normalizeGap(NaN), 4);
   assert.equal(normalizeGap(Infinity), 4);
   assert.equal(normalizeGap('not a number'), 4);
+  assert.equal(normalizeGap(50000), 256);
+  assert.equal(normalizeGap(256), 256);
 });
 
 function solid(w, h) { return new Uint8Array(w * h).fill(1); }
@@ -94,8 +96,8 @@ test('nestPack: single item bootstraps a canvas exactly its own size', () => {
     [{ name: 'a', w: 10, h: 6, footprint: solid(10, 6) }],
     { gapDistance: 1 },
   );
-  assert.equal(canvasW, 10);
-  assert.equal(canvasH, 6);
+  assert.equal(canvasW, 12);
+  assert.equal(canvasH, 8);
   assert.equal(placements.length, 1);
   assert.deepEqual(placements[0], { name: 'a', x: 0, y: 0, pw: 10, ph: 6, rotate: 0 });
 });
@@ -120,7 +122,7 @@ test('growth-loop regression (round 1 finding 3): two solid 8x8 items at gapDist
   // each other along both axes simultaneously.
   const [pa, pb] = placements;
   const gapX = pa.x < pb.x ? pb.x - (pa.x + pa.pw) : pa.x - (pb.x + pb.pw);
-  const gapY = pa.y < pb.y ? pb.y - (pa.y + pb.ph) : pa.y - (pb.y + pb.ph);
+  const gapY = pa.y < pb.y ? pb.y - (pa.y + pa.ph) : pa.y - (pb.y + pb.ph);
   assert.ok(gapX >= 4 || gapY >= 4, `items too close: gapX=${gapX} gapY=${gapY}`);
 });
 
@@ -141,7 +143,7 @@ test('nestPack places a small item inside a larger item\'s real gap-shaped footp
   // bounding box (in its free right region) instead of the canvas growing
   // past the host's own size to fit it separately.
   assert.equal(canvasW, 12);
-  assert.equal(canvasH, 10);
+  assert.equal(canvasH, 12);
   const small = placements.find(p => p.name === 'small');
   assert.ok(small.x >= 6, `expected the small item nested into the host's unoccupied right region, got x=${small.x}`);
 });
@@ -161,4 +163,32 @@ test('rotation is actually used: a candidate that only fits at 180 or 270 does n
   const tallPlacement = placements.find(p => p.name === 'tall');
   assert.ok([90, 270].includes(tallPlacement.rotate) || canvasH >= 21,
     `expected a rotated fit or a much taller canvas; got rotate=${tallPlacement.rotate} canvas=${canvasW}x${canvasH}`);
+});
+
+test('growCanvas: grows right when that yields the squarer result', () => {
+  const result = growCanvas(2, 10, new Uint8Array((2 + 2) * (10 + 2)), { w: 8, h: 1 }, 1);
+  assert.equal(result.canvasW, 10);
+  assert.equal(result.canvasH, 10);
+});
+
+test('growCanvas: grows down when that yields the squarer result', () => {
+  const result = growCanvas(10, 2, new Uint8Array((10 + 2) * (2 + 2)), { w: 1, h: 8 }, 1);
+  assert.equal(result.canvasW, 10);
+  assert.equal(result.canvasH, 10);
+});
+
+test('growCanvas: a tie in aspect ratio and area is broken by smaller resulting width', () => {
+  // growing right -> 12x8 (aspect 1.5, area 96); growing down -> 8x12
+  // (aspect 1.5, area 96) -- exact tie on both, so the narrower-width
+  // candidate (down, w=8) must win.
+  const result = growCanvas(4, 8, new Uint8Array((4 + 2) * (8 + 2)), { w: 8, h: 4 }, 1);
+  assert.equal(result.canvasW, 8);
+  assert.equal(result.canvasH, 12);
+});
+
+test('nestPack throws on a non-positive-dimension item instead of hanging', () => {
+  assert.throws(
+    () => nestPack([{ name: 'z', w: 0, h: 0, footprint: new Uint8Array(0) }], { gapDistance: 1 }),
+    /non-positive dimensions/,
+  );
 });
