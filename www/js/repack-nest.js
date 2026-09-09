@@ -242,3 +242,136 @@ export function nestPack(items, { gapDistance = 4 } = {}) {
   }
   return { canvasW: roundUpToMultiple(canvasW), canvasH: roundUpToMultiple(canvasH), placements };
 }
+
+import { rasterizeMeshMask } from './region-mesh-mask.js';
+
+// ─── Occupied footprint from mesh geometry (Canvas-touching — see file header) ─
+
+/** Alpha-channel canvas -> Uint8Array mask (1 where alpha > 0, else 0). Only
+ *  ever called on the OUTPUT of rasterizeMeshMask (pure geometry) below --
+ *  never on a sprite's own rendered pixels (see the spec §1's central
+ *  correctness rule). */
+function thresholdAlpha(canvas) {
+  const { width: w, height: h } = canvas;
+  const data = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] > 0 ? 1 : 0;
+  return mask;
+}
+
+/** All-1 mask, w*h -- the "no usable mesh, protect the whole rect" fallback. */
+function solidMask(w, h) {
+  return new Uint8Array(w * h).fill(1);
+}
+
+/** Crop a {x,y,w,h} sub-rect out of a full-size canvas into a fresh
+ *  w x h canvas -- mirrors maskRawSprite's own crop-back pattern
+ *  (atlas-modifier.js), but as a plain copy since there's no sprite to
+ *  composite onto here, only the geometry mask itself. */
+function cropCanvas(src, rect) {
+  const c = document.createElement('canvas');
+  c.width = rect.w; c.height = rect.h;
+  c.getContext('2d').drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+  return c;
+}
+
+/** OR every mask in `masks` together. Empty input (no contributing member
+ *  at all) returns a solid mask, matching the "no mesh data -> unmasked"
+ *  convention used throughout this codebase. */
+function unionMasks(masks, w, h) {
+  if (masks.length === 0) return solidMask(w, h);
+  const out = new Uint8Array(w * h);
+  for (const m of masks) for (let i = 0; i < out.length; i++) if (m[i]) out[i] = 1;
+  return out;
+}
+
+/**
+ * The occupied-footprint mask for ONE canonical (post-dedup) packed item,
+ * in the SAME (w x h) coordinate space as the sprite that will actually be
+ * packed. Never reads any sprite's rendered pixel alpha -- always derived
+ * from mesh GEOMETRY, reusing exactly the masking decision spec 2 already
+ * makes for each contributing sprite (never independently re-derived). See
+ * the design spec's §1 for the full reasoning and the two verified
+ * counterexamples this implementation exists to avoid.
+ *
+ * @param {string[]} dedupNames  every region name _packAndEmit's
+ *   canonicalMap mapped to this one canonical placement -- NOT
+ *   groupNamesBySpriteIdentity's narrower shared-canvas-mod grouping (a
+ *   dedup group can legitimately contain several independent mod-canvas
+ *   groups, or singletons, that only coincide by final rendered
+ *   appearance).
+ * @param {object} ctx
+ * @param {{[name:string]: HTMLCanvasElement}} ctx.sprites
+ * @param {{[name:string]: HTMLCanvasElement}|null} ctx.moddedSprites
+ * @param {{[name:string]: HTMLCanvasElement}|null} ctx.addedSprites
+ * @param {{[name:string]: object}} ctx.regions
+ * @param {((name: string) => {uvs, triangles}|null)|null} ctx.meshLookupFn
+ * @param {(names: string[], meshLookupFn) => {uvs,triangles}|null} ctx.combineMeshGeometry
+ *   injected (atlas-modifier.js's _combineMeshGeometry) -- never imported
+ *   here, to avoid a circular import.
+ * @param {(sprites, moddedSprites) => string[][]} ctx.groupNamesBySpriteIdentity
+ *   injected (atlas-modifier.js's _groupNamesBySpriteIdentity).
+ * @param {(offsets, w, h) => {x,y,w,h}} ctx.maskCropRectForOffsets
+ *   injected (atlas-modifier.js's maskCropRectForOffsets).
+ * @returns {Uint8Array}
+ */
+export function footprintForCanonical(dedupNames, ctx) {
+  const { sprites, moddedSprites, addedSprites, regions, meshLookupFn,
+    combineMeshGeometry, groupNamesBySpriteIdentity, maskCropRectForOffsets } = ctx;
+  const canonicalSprite = sprites[dedupNames[0]];
+  const { width: w, height: h } = canonicalSprite;
+  if (!meshLookupFn) return solidMask(w, h); // covers every path below, including
+    // the shared-canvas-mod branch -- combineMeshGeometry itself calls
+    // meshLookupFn unconditionally and would throw otherwise.
+
+  const modGroups = groupNamesBySpriteIdentity(sprites, moddedSprites);
+
+  // Dedup does NOT guarantee every name in this group shares the
+  // canonical's own dimensions -- a pixel-hash collision between
+  // differently-shaped sprites (same total byte count, matching content)
+  // is possible with this codebase's current _canvasHash (its primary
+  // SHA-256 path hashes only RGBA bytes, never width/height). This does
+  // not fix that pre-existing gap (out of scope here); it only keeps this
+  // function's own footprint from being corrupted by it. Resolved once,
+  // for the whole dedup group, before any branching below -- a
+  // shared-canvas-mod group's contribution must only ever include the
+  // subset of its members that are BOTH part of this dedup group AND
+  // dimension-compatible, never the group's full, unfiltered membership.
+  const dedupSet = new Set(dedupNames);
+  const compatible = new Map();
+  for (const name of dedupNames) {
+    compatible.set(name, sprites[name].width === w && sprites[name].height === h);
+  }
+
+  const masks = [];
+  const handled = new Set();
+  for (const name of dedupNames) {
+    if (handled.has(name)) continue;
+    if (!compatible.get(name)) { handled.add(name); continue; }
+    const modGroup = modGroups.find(g => g.includes(name));
+    if (modGroup) {
+      const usableGroup = modGroup.filter(n => dedupSet.has(n) && compatible.get(n));
+      const combined = usableGroup.length > 0 ? combineMeshGeometry(usableGroup, meshLookupFn) : null;
+      masks.push(combined
+        ? thresholdAlpha(rasterizeMeshMask(combined.uvs, combined.triangles, w, h))
+        : solidMask(w, h));
+      for (const n of modGroup) handled.add(n);
+      continue;
+    }
+    handled.add(name);
+    const geom = meshLookupFn(name);
+    if (!geom) { masks.push(solidMask(w, h)); continue; }
+    const isModdedOrAdded = (moddedSprites && name in moddedSprites)
+      || (addedSprites && name in addedSprites);
+    const region = regions[name];
+    if (isModdedOrAdded || !region.offsets) {
+      masks.push(thresholdAlpha(rasterizeMeshMask(geom.uvs, geom.triangles, w, h)));
+    } else {
+      const rect = maskCropRectForOffsets(region.offsets, w, h);
+      const [, , origW, origH] = region.offsets;
+      const full = rasterizeMeshMask(geom.uvs, geom.triangles, origW, origH);
+      masks.push(thresholdAlpha(cropCanvas(full, rect)));
+    }
+  }
+  return unionMasks(masks, w, h);
+}
