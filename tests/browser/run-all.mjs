@@ -36,21 +36,42 @@ const SUITES = [
 ];
 
 let anyFailed = false;
+let anySkipped = false;
 const results = [];
 
 for (const suite of SUITES) {
-  const result = spawnSync('node', [path.join(HERE, suite)], { stdio: 'inherit' });
+  // Captured (not 'inherit') so this runner can tell a genuine pass from a
+  // self-skip (playwright-core absent, ground_truth_ops.json missing, etc
+  // -- several suites print 'SKIP: ...' and exit 0 in that case, same as a
+  // real pass). Without this, a fresh clone with no playwright gets an
+  // authoritative-looking "All suites passed" summary having tested
+  // nothing in a browser -- the individual suites are honest about this,
+  // the aggregate wasn't. Still echoed live so nothing about the visible
+  // per-suite output changes.
+  const result = spawnSync('node', [path.join(HERE, suite)], { encoding: 'utf8' });
+  const output = (result.stdout || '') + (result.stderr || '');
+  process.stdout.write(output);
   const code = result.status ?? 1;
+  // A suite that ran real checks may still print a PARTIAL 'SKIP N case(s)'
+  // line (e.g. verify-ops.mjs skipping its .workspaces/-dependent
+  // real-world cases while its other checks genuinely ran) -- that's not
+  // a whole-suite self-skip. Only treat it as one when the suite produced
+  // NO 'PASS' line at all, i.e. it tested nothing whatsoever this run.
+  const skipped = code === 0 && /^SKIP\b/m.test(output) && !/^PASS\b/m.test(output);
   if (code !== 0) anyFailed = true;
-  results.push({ suite, code });
+  if (skipped) anySkipped = true;
+  results.push({ suite, code, skipped });
 }
 
 console.log('\n─── run-all summary ───');
-for (const { suite, code } of results) {
-  console.log(`${code === 0 ? 'PASS' : 'FAIL'}  ${suite} (exit ${code})`);
+for (const { suite, code, skipped } of results) {
+  const label = code !== 0 ? 'FAIL' : skipped ? 'SKIP' : 'PASS';
+  console.log(`${label}  ${suite} (exit ${code})`);
 }
 console.log(anyFailed
   ? '\nAt least one suite reported failures above -- verify-ui-flows.mjs\'s own documented 3-4-item flaky baseline is expected and not itself a regression; any OTHER failure is real.'
-  : '\nAll suites passed.');
+  : anySkipped
+    ? '\nNo suite failed, but at least one SKIPPED (see above) -- that suite tested nothing this run (playwright-core or a fixture file was missing), not a pass. Set $PLAYWRIGHT_CORE and re-run for real coverage.'
+    : '\nAll suites passed.');
 
 process.exit(anyFailed ? 1 : 0);
