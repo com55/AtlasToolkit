@@ -181,6 +181,8 @@ const readUi = (page) => page.evaluate(() => ({
   missingDialog: !!document.querySelector('.missing-images-overlay'),
   pickSkelVisible: !document.getElementById('btn-pick-skel').classList.contains('hidden')
     && getComputedStyle(document.getElementById('btn-pick-skel')).display !== 'none',
+  nestGapVisible: !document.getElementById('nest-gap-distance').classList.contains('hidden')
+    && getComputedStyle(document.getElementById('nest-gap-distance')).display !== 'none',
 }));
 
 // ─── Desktop pass ─────────────────────────────────────────────────────────────
@@ -246,6 +248,22 @@ const browser = await chromium.launch({ headless: true });
   ui = await readUi(page);
   check('desktop: mode toggle enters edit mode', ui.mode === 'modify' && ui.modifyControlsVisible);
   check('desktop: repack row + Save As appear in edit mode', ui.repackRowVisible && ui.saveVisible);
+  check('desktop: gap-distance input visible in edit mode', ui.nestGapVisible);
+  // #chk-nest-regions is display:none (styled as a .toggle-switch); the real
+  // user control is the wrapping label. Clicking it toggles the checkbox and
+  // fires the change handler that enables the gap-distance input.
+  await page.click('#nest-regions-toggle-row');
+  await page.waitForTimeout(500); // clear the 400ms toggle debounce/rerun window
+  const gapInput = page.locator('#nest-gap-distance');
+  check('desktop: gap-distance input enabled once Nest Regions is checked', !(await gapInput.isDisabled()));
+  await gapInput.fill('2');
+  await gapInput.type('7'); // rapid sequential edits -- should collapse to one rerun via debounce
+  await gapInput.dispatchEvent('input');
+  await page.waitForTimeout(600);
+  check('desktop: no page errors after rapid gap-distance edits (debounce did not crash/queue)', errors.length === 0, errors.join('; '));
+  await page.click('#nest-regions-toggle-row');
+  await page.waitForTimeout(200);
+  check('desktop: gap-distance input disabled again once Nest Regions is unchecked', await gapInput.isDisabled());
   check('desktop: Save As chevron is visible', await page.locator('#btn-save-menu').isVisible());
   await page.click('#btn-save-menu');
   await page.waitForTimeout(80);
