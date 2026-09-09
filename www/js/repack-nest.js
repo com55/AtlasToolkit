@@ -5,14 +5,18 @@
  * (https://jakesgordon.com/writing/bin-packing/). See
  * docs/superpowers/specs/2026-09-08-mesh-silhouette-nesting-design.md §3-4.
  *
- * This file has NO imports and touches no DOM/Canvas -- every function here
- * is pure array arithmetic, exercised directly by node --test. The
+ * This file touches no DOM/Canvas at module load -- every function here
+ * is pure array arithmetic, exercised directly by node --test. (It imports
+ * roundUpToMultiple from core-region-ops.js, which itself only touches the
+ * DOM inside function bodies, so the import is load-safe under plain Node.) The
  * Canvas-touching half (footprintForCanonical, which derives a packed
  * item's occupied footprint from mesh geometry) is added in a later commit
  * to this same file and is Browser-harness-tested instead, matching this
  * project's established pure/DOM-touching split (see atlas-modifier.js's
  * own maskCropRectForOffsets vs. maskRawSprite for the same pattern).
  */
+
+import { roundUpToMultiple } from './core-region-ops.js';
 
 // ─── Rotation (pure array arithmetic on w*h Uint8Array masks) ────────────────
 
@@ -86,7 +90,8 @@ export function dilate(mask, w, h, gap) {
  *  bad direct API call) is closer to "unset" than "user chose 1". */
 export function normalizeGap(v) {
   const n = Math.floor(Number(v));
-  return Number.isFinite(n) && n >= 1 ? n : 4;
+  if (!Number.isFinite(n) || n < 1) return 4;
+  return Math.min(n, 256);
 }
 
 // ─── The packer ───────────────────────────────────────────────────────────────
@@ -149,7 +154,7 @@ function findFirstFit(variants, occupied, canvasW, canvasH, gap) {
  *  then area, then width) to Jake Gordon's incremental-growth heuristic.
  *  At canvasW===0 both candidates come out identical, so the stable sort
  *  naturally keeps "grow right" (listed first) without a special case. */
-function growCanvas(canvasW, canvasH, occupied, seedRot, gap) {
+export function growCanvas(canvasW, canvasH, occupied, seedRot, gap) {
   const candidates = [
     { goRight: true, w: canvasW + seedRot.w, h: Math.max(canvasH, seedRot.h) },
     { goRight: false, w: Math.max(canvasW, seedRot.w), h: canvasH + seedRot.h },
@@ -206,6 +211,11 @@ function stampOccupied(occupied, canvasW, gap, rot, x, y) {
 export function nestPack(items, { gapDistance = 4 } = {}) {
   const gap = normalizeGap(gapDistance);
   if (items.length === 0) return { canvasW: 0, canvasH: 0, placements: [] };
+  for (const item of items) {
+    if (item.w <= 0 || item.h <= 0) {
+      throw new Error(`nestPack: item "${item.name}" has non-positive dimensions (${item.w}x${item.h})`);
+    }
+  }
 
   const sorted = [...items].sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
 
@@ -230,5 +240,5 @@ export function nestPack(items, { gapDistance = 4 } = {}) {
       pw: spot.rot.w, ph: spot.rot.h, rotate: spot.rot.deg,
     });
   }
-  return { canvasW, canvasH, placements };
+  return { canvasW: roundUpToMultiple(canvasW), canvasH: roundUpToMultiple(canvasH), placements };
 }
