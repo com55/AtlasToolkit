@@ -264,7 +264,9 @@ body.mode-extract #advance-mode-row,
 body.mode-extract #advance-mode-row + .options-row-divider { display: none; }
 
 body.mode-modify #mesh-mask-toggle-row { display: none; }
-body.mode-extract #mesh-aware-repack-toggle-row { display: none; }
+body.mode-extract #mesh-aware-repack-toggle-row,
+body.mode-extract #nest-regions-toggle-row,
+body.mode-extract #nest-gap-distance { display: none; }
 
 #status-bar {
   padding: 0 12px;
@@ -562,6 +564,19 @@ button {
 .skel-picker-btn.skel-ok {
   color: #4caf50;
   border-color: #2d6930;
+}
+
+.nest-gap-input {
+  width: 42px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+  border-radius: 3px;
+  border: 1px solid #555;
+  background-color: #2f2f2f;
+  color: #ddd;
+  box-sizing: border-box;
 }
 
 /* Preview Area */

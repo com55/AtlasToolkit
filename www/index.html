@@ -145,6 +145,12 @@
             <span class="toggle-switch"></span>
             <span>Mesh-Aware Repack</span>
           </label>
+          <label class="toggle-label" id="nest-regions-toggle-row" title="Try to fit smaller regions into unused space left by other regions' packed layout (and, when Mesh-Aware Repack is on, into unused space inside their mesh silhouette too), instead of always starting a new row.">
+            <input type="checkbox" id="chk-nest-regions" />
+            <span class="toggle-switch"></span>
+            <span>Nest Regions</span>
+          </label>
+          <input type="number" id="nest-gap-distance" class="nest-gap-input" min="1" value="4" disabled title="Minimum pixel gap kept between a nested region and its neighbors." />
           <button id="btn-pick-skel" class="skel-picker-btn hidden" type="button"></button>
         </div>
         <div id="status-bar">
