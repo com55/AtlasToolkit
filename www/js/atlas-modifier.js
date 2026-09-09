@@ -800,8 +800,12 @@ export class AtlasModifier {
       ];
     }
 
-    // Additive: expose the placement data already computed above (see the
-    // existing comment on regionBounds below for why this exists).
+    // Additive: expose the placement data already computed above (previously
+    // discarded after folding into atlasText) so a structural caller doesn't
+    // have to reparse the serialized output to recover per-region bounds —
+    // that reparse is what silently lost identity on Rename (spec §2.6,
+    // round 3 finding 1). rotate is 0/90/180/270 (never boolean), matching
+    // every other rotate field in this codebase.
     const regionBounds = {};
     for (const name of regionNames) {
       if (!(name in canonicalMap)) continue;
@@ -1006,7 +1010,7 @@ function _rotate90CCW(src) {
 
 /**
  * Rotate a whole canvas 90° CW for packing, via the single rotation seam in
- * core-region-ops. Symmetric counterpart to _rotate90CCW below (that one
+ * core-region-ops. Symmetric counterpart to _rotate90CCW above (that one
  * passes rotate=270 to cropAndRotate; this one passes rotate=90 — see
  * core-region-ops.js's header comment for the PIL-rotation-direction
  * mapping both are derived from).
