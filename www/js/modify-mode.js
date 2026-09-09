@@ -61,6 +61,7 @@ export function setMode(mode) {
   // Picker visibility follows the mode-relevant mesh toggle; refresh so a
   // View↔Edit switch doesn't leave the button stuck on the previous mode.
   updateMeshCroppingUI();
+  updateNestRegionsUI();
 }
 
 /** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
@@ -362,6 +363,22 @@ export function updateMeshCroppingUI() {
   }
 }
 
+/** Syncs the Nest Regions checkbox + gap-distance input from
+ *  AtlasAPI.get_nest_options(). Call after anything that can change that
+ *  state: the toggle itself, the gap-distance input, or app startup.
+ *  Unlike updateMeshCroppingUI(), this is never gated by mesh availability
+ *  -- Nest Regions works with no mesh data at all (Gap A space alone). */
+export function updateNestRegionsUI() {
+  const { enabled, gapDistance } = AtlasAPI.get_nest_options();
+  document.getElementById('chk-nest-regions').checked = enabled;
+  const gapInput = document.getElementById('nest-gap-distance');
+  gapInput.disabled = !enabled;
+  // Don't clobber an in-progress edit if this gets called while the user is
+  // actively typing in the field (e.g. from a toggle elsewhere firing a
+  // broader UI sync).
+  if (document.activeElement !== gapInput) gapInput.value = gapDistance;
+}
+
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
   if (structuralOpInFlight) {
     e.target.checked = !e.target.checked;
@@ -401,6 +418,45 @@ document.getElementById('chk-mesh-aware-repack').addEventListener('change', asyn
   } finally {
     structuralOpInFlight = false;
   }
+});
+
+document.getElementById('chk-nest-regions').addEventListener('change', async (e) => {
+  if (structuralOpInFlight) {
+    e.target.checked = !e.target.checked;
+    showToast('Please wait for the current operation to finish.', 'error');
+    return;
+  }
+  structuralOpInFlight = true;
+  try {
+    const result = await AtlasAPI.set_nest_regions_enabled(e.target.checked);
+    updateNestRegionsUI();
+    if (result) await onModPreviewReceived(result);
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Nest Regions.', 'error');
+  } finally {
+    structuralOpInFlight = false;
+  }
+});
+
+let nestGapDebounceTimer = null;
+
+document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
+  const px = Number(e.target.value);
+  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
+  nestGapDebounceTimer = setTimeout(async () => {
+    if (structuralOpInFlight) return; // a structural op is mid-flight -- skip this cycle rather than queue behind it
+    structuralOpInFlight = true;
+    try {
+      const result = await AtlasAPI.set_nest_gap_distance(px);
+      if (result) await onModPreviewReceived(result);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update gap distance.', 'error');
+    } finally {
+      structuralOpInFlight = false;
+    }
+  }, 400);
 });
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {

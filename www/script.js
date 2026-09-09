@@ -2,7 +2,7 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
@@ -66,6 +66,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await AtlasAPI.init_mesh_aware_repack_from_pref();
   await AtlasAPI.init_nest_regions_from_pref();
   updateMeshCroppingUI();
+  updateNestRegionsUI();
 
   initSaveSplitMenu();
 
@@ -203,6 +204,7 @@ async function _resetUiAfterFreshLoad() {
   updateRenameButtonState();
   await loadRegions();
   updateMeshCroppingUI();
+  updateNestRegionsUI();
 
   // Native window title (old Python engine's load_atlas() used to do this;
   // the JS engine has no equivalent hook, so it's centralized here instead
