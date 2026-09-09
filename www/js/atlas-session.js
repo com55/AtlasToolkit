@@ -297,8 +297,9 @@ export class AtlasSession {
     const modifier = this._freshSinglePageModifier();
     if (!modifier) throw new Error('No single-page modifier');
     const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
+    const nestOptions = this.processor.getNestOptions();
     const repacked = await modifier.repackWithModdedSprites(
-      this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
+      this.moddedSprites, this._fullCanvasRegions(), meshLookupFn, nestOptions);
     return { canvas: repacked.canvas, text: repacked.atlasText,
              regionBounds: repacked.regionBounds, wasStructural: false };
   }
@@ -316,9 +317,10 @@ export class AtlasSession {
       if (batch.type === 'add') addedSprites[batch.internalKey] = batch.sourceCanvas;
     }
     const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
+    const nestOptions = this.processor.getNestOptions();
     const packed = await modifier.repackWithEffectiveModel(
       effectiveModel.regionNames, effectiveModel.regions,
-      addedSprites, this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
+      addedSprites, this.moddedSprites, this._fullCanvasRegions(), meshLookupFn, nestOptions);
     return { canvas: packed.canvas, text: packed.atlasText, regionBounds: packed.regionBounds };
   }
 
@@ -362,11 +364,12 @@ export class AtlasSession {
     let text = this.atlasText;
 
     const meshLookupFn = (name) => this.processor.getRepackMeshGeometry(name);
+    const nestOptions = this.processor.getNestOptions();
     for (const pageName of pageOrder) {
       if (!touched.has(pageName) || !pageImages[pageName]) continue;
       const modifier = new AtlasModifier(text, this.filename, pageImages[pageName], pageName);
       const packed = await modifier.repackWithModdedSprites(
-        this.moddedSprites, this._fullCanvasRegions(), meshLookupFn);
+        this.moddedSprites, this._fullCanvasRegions(), meshLookupFn, nestOptions);
       text = replacePageInAtlas(text, pageName, packed.atlasText);
       pageImages[pageName] = packed.canvas;
     }
