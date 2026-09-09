@@ -90,3 +90,8 @@ raw crops but different meshes no longer dedup together; two regions with differ
 crops that happen to look identical after their respective masks now do. This is strictly
 more correct (dedup is meant to mean "these end up looking the same") and is a documented,
 intentional side effect, not a bug.
+
+Nest Regions (mesh-silhouette-nesting spec), when its own toggle is on, is a further, opt-in
+deviation from any Python parity concept -- packing shape and canvas dimensions are not
+expected to match `repacker.py` at all once enabled, same spirit as the squareness-bias note
+above.
