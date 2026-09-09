@@ -48,6 +48,15 @@ let _meshMaskEnabled = true;
 // mode extraction is masked. Same persisted-pref pattern as
 // _meshMaskEnabled. Initialized via init_mesh_aware_repack_from_pref().
 let _meshAwareRepackEnabled = true;
+// Separate from either mesh toggle -- gates the "Nest Regions" packer swap
+// (mesh-silhouette-nesting spec). Same persisted-pref pattern as
+// _meshMaskEnabled/_meshAwareRepackEnabled. Default false (unlike the mesh
+// toggles' default true): Nest Regions changes packing layout even with no
+// nesting opportunity present, a more visible change to default output
+// than a pure masking correctness fix, so existing users see no behavior
+// change until they opt in.
+let _nestRegionsEnabled = false;
+let _nestGapDistance = 4;
 // null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
 // why the current .skel (if any) can't be used, for the picker button's
 // tooltip. null when there's no .skel captured yet, or when it parsed with
@@ -475,7 +484,10 @@ async function _reparseSkelAndPushToProcessor() {
       }
     }
   }
-  if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+  if (_processor) {
+    _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+  }
   _clearPreviewMemo();
 }
 
@@ -558,6 +570,36 @@ export const AtlasAPI = {
     _meshAwareRepackEnabled = !!enabled;
     AtlasAPI.set_pref('meshAwareRepack', _meshAwareRepackEnabled);
     if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    return await _maybeRerunRepack();
+  },
+
+  /** Reads the persisted 'nestRegionsEnabled'/'nestGapDistance' prefs.
+   *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. Also
+   *  pushes the result to _processor if one already exists (mirrors
+   *  init_mesh_mask_from_pref's own ordering relative to atlas load --
+   *  in practice this fires before any atlas is loaded, but stays correct
+   *  either way). */
+  async init_nest_regions_from_pref() {
+    _nestRegionsEnabled = await AtlasAPI.get_pref('nestRegionsEnabled', false);
+    _nestGapDistance = await AtlasAPI.get_pref('nestGapDistance', 4);
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+  },
+
+  get_nest_options() {
+    return { enabled: _nestRegionsEnabled, gapDistance: _nestGapDistance };
+  },
+
+  async set_nest_regions_enabled(enabled) {
+    _nestRegionsEnabled = !!enabled;
+    AtlasAPI.set_pref('nestRegionsEnabled', _nestRegionsEnabled);
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+    return await _maybeRerunRepack();
+  },
+
+  async set_nest_gap_distance(px) {
+    _nestGapDistance = px;
+    AtlasAPI.set_pref('nestGapDistance', _nestGapDistance);
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
     return await _maybeRerunRepack();
   },
 
