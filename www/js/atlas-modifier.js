@@ -1028,7 +1028,7 @@ function _rotate180(src) {
  *  pasting onto a packed canvas — the single dispatch point _packAndEmit
  *  uses for both _shelfPack (0/90 only) and nestPack (0/90/180/270)
  *  placements. */
-function _rotateSpriteForPack(sprite, deg) {
+export function _rotateSpriteForPack(sprite, deg) {
   if (deg === 90) return _rotate90CCW(sprite);
   if (deg === 180) return _rotate180(sprite);
   if (deg === 270) return _rotate90CW(sprite);
