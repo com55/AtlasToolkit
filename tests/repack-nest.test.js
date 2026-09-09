@@ -165,6 +165,78 @@ test('rotation is actually used: a candidate that only fits at 180 or 270 does n
     `expected a rotated fit or a much taller canvas; got rotate=${tallPlacement.rotate} canvas=${canvasW}x${canvasH}`);
 });
 
+test('rotation is actually used: the packer\'s search genuinely picks rotate=180 over rotate=0, deterministically', () => {
+  // Task 6 scrutinize finding: neither browser-level rotation test actually
+  // forces the PACKER's own search to choose a rotation (rotation-mask-
+  // pixel-agreement only ever reaches deg=0 in practice; rotate-180-270-
+  // pixel-correctness calls _rotateSpriteForPack directly, no packer
+  // search involved). The sibling test above ("only fits at 180 or 270")
+  // pre-dates that finding and settled for an OR-fallback assertion
+  // (rotated OR canvas grew) specifically because constructing a fixture
+  // that discriminates a PARTICULAR rotation is fiddly -- solid-rect
+  // footprints are 180-symmetric (0 and 180 are geometrically identical,
+  // so the search's tie-break always keeps deg=0), so forcing 180
+  // specifically requires a genuinely asymmetric footprint, not a solid
+  // rect. This test builds one and asserts the exact resulting `rotate`
+  // value, not an OR-fallback -- it can actually fail if the search regresses.
+  //
+  // Construction (each element verified by hand + a Node probe against the
+  // real implementation before being written down here):
+  //   - `cand` (20 wide x 7 tall): row0 has a single occupied cell at
+  //     col0 (a "tab"); rows1-3 are an empty buffer; rows4-6 are solid
+  //     (all 20 cols). rotate180 (a full 1D reversal) turns this into the
+  //     mirror image: rows0-2 solid, rows3-5 empty buffer, row6's tab at
+  //     col19 (the opposite corner) -- i.e. deg=0 and deg=180 differ in
+  //     EVERY row except none (this shape has no rotationally-invariant
+  //     cell), so they are trivially distinguishable.
+  //   - `blocker` (21 wide x 9 tall, so its max dimension, 21, exceeds
+  //     cand's, 20 -- nestPack sorts largest-first, so blocker is placed
+  //     before cand with nothing to collide with, landing at (0,0)) has
+  //     exactly ONE occupied cell, at local (col=0, row=5).
+  //   - At scan origin (0,0): deg=0's row5 is part of its solid block
+  //     (col0=1) -- direct collision with the blocker's cell. deg=180's
+  //     row5 is part of ITS buffer (col0=0) -- no collision, and 1px
+  //     dilation of the blocker's single cell (rows4-6, cols -1..1) still
+  //     only ever touches deg=180's buffer/tab cells, never its solid
+  //     block (there are 2 clear buffer rows on the solid-block side of
+  //     row5 in every orientation) -- verified empirically, not assumed.
+  //   - deg=90/270 swap cand's dimensions to 7 wide x 20 tall. The
+  //     blocker's OWN bounding box (21x9) constrains the canvas to 9 tall
+  //     before cand is even considered, so a 20-tall placement cannot fit
+  //     at all -- deg=90/270 are excluded by dimension alone, leaving
+  //     deg=0 vs deg=180 as the only geometrically-viable candidates.
+  //   - Negative control (run separately during this test's construction,
+  //     not asserted here): removing the blocker's one occupied cell makes
+  //     cand land at rotate=0 instead -- confirming the obstacle, not some
+  //     unrelated artifact, is what forces the 180 choice.
+  const W = 20, H = 7;
+  const row0 = [1, ...Array(W - 1).fill(0)];
+  const bufferRow = Array(W).fill(0);
+  const solidRow = Array(W).fill(1);
+  const candRows = [row0, bufferRow, bufferRow, bufferRow, solidRow, solidRow, solidRow];
+  const candFootprint = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) candFootprint[y * W + x] = candRows[y][x];
+
+  const BW = 21, BH = 9;
+  const blockerFootprint = new Uint8Array(BW * BH);
+  blockerFootprint[5 * BW + 0] = 1; // the single obstacle cell, at local (col=0, row=5)
+
+  const blocker = { name: 'blocker', w: BW, h: BH, footprint: blockerFootprint };
+  const cand = { name: 'cand', w: W, h: H, footprint: candFootprint };
+  const { canvasW, canvasH, placements } = nestPack([blocker, cand], { gapDistance: 1 });
+
+  const candPlacement = placements.find(p => p.name === 'cand');
+  assert.equal(candPlacement.rotate, 180,
+    `expected the packer's own search to choose rotate=180; got rotate=${candPlacement.rotate} at (${candPlacement.x},${candPlacement.y})`);
+  assert.equal(candPlacement.x, 0);
+  assert.equal(candPlacement.y, 0);
+  // Canvas stayed at the blocker's own footprint size (rounded up to a
+  // multiple of 4) -- cand fit WITHOUT growing the canvas, proving this
+  // wasn't a "grew anyway, rotation incidental" result.
+  assert.equal(canvasW, 24);
+  assert.equal(canvasH, 12);
+});
+
 test('growCanvas: grows right when that yields the squarer result', () => {
   const result = growCanvas(2, 10, new Uint8Array((2 + 2) * (10 + 2)), { w: 8, h: 1 }, 1);
   assert.equal(result.canvasW, 10);
