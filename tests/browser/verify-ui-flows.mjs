@@ -968,19 +968,36 @@ for (const vp of [{ w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
 
   const geometry = await page.evaluate(() => {
     const row = document.getElementById('options-row');
-    const rowRect = row.getBoundingClientRect();
+    // Round-2 scrutinize finding: getBoundingClientRect().height (35, the
+    // border-box) understates how tall a label can get before it's
+    // actually clipped -- overflow-y:hidden clips against clientHeight
+    // (34, the content-box, since the row has a 1px border-bottom). A
+    // label at 35-36px would pass the old +1px-slack comparison against
+    // the border-box while genuinely being clipped -- not hypothetical,
+    // the coarse-pointer media query puts labels at exactly 34px with
+    // zero margin. Compare against clientHeight instead.
+    const rowClientHeight = row.clientHeight;
     const labels = [...row.querySelectorAll('.toggle-label')].map((l) => {
       const cs = getComputedStyle(l);
       return { id: l.id, height: l.getBoundingClientRect().height, visible: cs.display !== 'none' };
     });
-    return { rowHeight: rowRect.height, labels };
+    const gapInput = document.getElementById('nest-gap-distance');
+    return { rowClientHeight, labels, gapInputWidth: gapInput.getBoundingClientRect().width };
   });
   const visibleLabels = geometry.labels.filter((l) => l.visible);
   check(`portrait ${vp.w}x${vp.h}: at least the 3 edit-mode toggle labels are visible`,
     visibleLabels.length >= 3, JSON.stringify(geometry.labels));
-  const clipped = visibleLabels.filter((l) => l.height > geometry.rowHeight + 1); // +1px rounding slack
-  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- no toggle label is taller than #options-row itself (clipped)`,
+  const clipped = visibleLabels.filter((l) => l.height > geometry.rowClientHeight + 1); // +1px rounding slack
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- no toggle label is taller than #options-row's content box (clipped)`,
     clipped.length === 0, JSON.stringify(geometry));
+  // Round-2 scrutinize finding: the FIRST fix round's own CSS change
+  // (.toggle-label flex-shrink:0) concentrated all of #options-row's
+  // shrink pressure onto #nest-gap-distance (which had no flex-shrink
+  // override), collapsing it to 10px -- padding+border only, its value
+  // rendered invisibly -- at exactly these 3 viewports. Assert it stays
+  // at a usable width (its own CSS width is 42px).
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- gap-distance input is not collapsed to zero content width`,
+    geometry.gapInputWidth >= 30, `gapInputWidth=${geometry.gapInputWidth}`);
 
   check(`portrait ${vp.w}x${vp.h}: zero page errors`, errors.length === 0, errors.join('; '));
   await ctx.close();
