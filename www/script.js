@@ -64,6 +64,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('chk-copy-skel').checked = copySkelPref;
   await AtlasAPI.init_mesh_mask_from_pref();
   await AtlasAPI.init_mesh_aware_repack_from_pref();
+  await AtlasAPI.init_nest_regions_from_pref();
   updateMeshCroppingUI();
 
   initSaveSplitMenu();
