@@ -952,9 +952,11 @@ const browser = await chromium.launch({ headless: true });
 // edge -- text rendered outside the visible row, unreadable). The fix gives
 // .toggle-label nowrap+flex-shrink:0 and #options-row overflow-x:auto, so the
 // row scrolls horizontally instead of clipping vertically. Assert every
-// visible toggle label stays within the row's own height at each of the 3
-// viewports the reviewer's own screenshots demonstrated the clipping at.
-for (const vp of [{ w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
+// visible toggle label stays within the row's own height at each of the
+// viewports the reviewer's own screenshots demonstrated the clipping at
+// (430 added per the final whole-branch review, which found the same bug
+// class recurring there too -- see the #btn-pick-skel check below).
+for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
   const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   const errors = [];
@@ -982,7 +984,23 @@ for (const vp of [{ w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
       return { id: l.id, height: l.getBoundingClientRect().height, visible: cs.display !== 'none' };
     });
     const gapInput = document.getElementById('nest-gap-distance');
-    return { rowClientHeight, labels, gapInputWidth: gapInput.getBoundingClientRect().width };
+    // Final whole-branch review finding: #btn-pick-skel (flex-shrink:1,
+    // its own narrow-width answer was text-overflow:ellipsis) became the
+    // LAST remaining shrinkable child once .toggle-label and
+    // .nest-gap-input were both pinned to flex-shrink:0 -- it absorbed
+    // 100% of the row's shrink pressure and collapsed to an 18px
+    // unlabeled sliver, the exact same bug relocated a third time. The
+    // fixture atlas has no real .skel, so the button starts hidden --
+    // force it visible with representative text to measure the same
+    // failure mode the reviewer found.
+    const skelBtn = document.getElementById('btn-pick-skel');
+    skelBtn.classList.remove('hidden');
+    skelBtn.textContent = 'my_skeleton_name.skel';
+    return {
+      rowClientHeight, labels,
+      gapInputWidth: gapInput.getBoundingClientRect().width,
+      skelBtnWidth: skelBtn.getBoundingClientRect().width,
+    };
   });
   const visibleLabels = geometry.labels.filter((l) => l.visible);
   check(`portrait ${vp.w}x${vp.h}: at least the 3 edit-mode toggle labels are visible`,
@@ -998,6 +1016,12 @@ for (const vp of [{ w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
   // at a usable width (its own CSS width is 42px).
   check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- gap-distance input is not collapsed to zero content width`,
     geometry.gapInputWidth >= 30, `gapInputWidth=${geometry.gapInputWidth}`);
+  // Final whole-branch review finding -- see the comment at this check's
+  // own measurement above. A genuinely collapsed button measures ~18px
+  // (padding+border only); its natural (pre-collapse) width for this
+  // fixture's text is ~136px.
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- .skel picker button is not collapsed to zero content width`,
+    geometry.skelBtnWidth >= 30, `skelBtnWidth=${geometry.skelBtnWidth}`);
 
   check(`portrait ${vp.w}x${vp.h}: zero page errors`, errors.length === 0, errors.join('; '));
   await ctx.close();
