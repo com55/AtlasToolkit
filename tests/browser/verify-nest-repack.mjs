@@ -46,6 +46,8 @@ if (!chromium) {
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
 import { footprintForCanonical } from '/www/js/repack-nest.js';
 import { _combineMeshGeometry, _groupNamesBySpriteIdentity, maskCropRectForOffsets } from '/www/js/atlas-modifier.js';
+import { AtlasProcessor } from '/www/js/atlas-extracter.js';
+import { AtlasModifier } from '/www/js/atlas-modifier.js';
 
 function solidCanvas(w, h) {
   const c = document.createElement('canvas');
@@ -99,6 +101,55 @@ window.runCase = async (name) => {
     } catch (e) { threw = true; }
     check('does not throw with a null meshLookupFn', !threw);
     check('returns a fully-solid mask (Gap A fallback)', mask && mask.length === 20 && Array.from(mask).every(v => v === 1), mask && Array.from(mask || []).join(''));
+  } else if (name === 'toggle-off-byte-identical-to-shelfpack') {
+    const ATLAS_TEXT = 'page1.png\\nsize: 20,20\\na\\nbounds: 0, 0, 10, 20\\nb\\nbounds: 10, 0, 10, 20\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    await proc.loadImages({ 'page1.png': solidCanvas(20, 20).toDataURL ? solidCanvas(20, 20).toDataURL() : '' });
+    const img = proc.getPageImage('page1.png');
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', img);
+    const withoutNest = await modifier.repackWithModdedSprites({}, null, null, null);
+    const withNestDisabled = await modifier.repackWithModdedSprites({}, null, null, { enabled: false, gapDistance: 4 });
+    check('nestOptions omitted vs. explicitly disabled produce the same canvas size',
+      withoutNest.canvas.width === withNestDisabled.canvas.width && withoutNest.canvas.height === withNestDisabled.canvas.height,
+      withoutNest.canvas.width + 'x' + withoutNest.canvas.height + ' vs ' + withNestDisabled.canvas.width + 'x' + withNestDisabled.canvas.height);
+    check('same atlas text either way', withoutNest.atlasText === withNestDisabled.atlasText);
+  } else if (name === 'toggle-on-no-mesh-uses-gap-a-space') {
+    // No mesh anywhere in this fixture: meshLookupFn is null, so
+    // footprintForCanonical falls back to a solid mask for every item and the
+    // nest path still runs end-to-end through the full pipeline. We can't
+    // assert the canvas is SMALLER than shelf packing here — with solid
+    // footprints a large item's dilated mask fills the padded grid, so nest
+    // packing legitimately grows the canvas to place the small item (nesting's
+    // advantage only shows with concave mesh-derived footprints). Instead we
+    // assert the nest path is well-formed: both items are placed, the canvas
+    // dims are positive multiples of 4, and the two placements don't overlap.
+    const ATLAS_TEXT = 'page1.png\\nsize: 40,40\\nbig\\nbounds: 0, 0, 20, 20\\nsmall\\nbounds: 20, 0, 4, 4\\n';
+    const proc = new AtlasProcessor(ATLAS_TEXT);
+    const canvas = document.createElement('canvas');
+    canvas.width = 40; canvas.height = 40;
+    await proc.loadImages({ 'page1.png': canvas.toDataURL() });
+    const img = proc.getPageImage('page1.png');
+    const modifier = new AtlasModifier(ATLAS_TEXT, 'a.atlas', img);
+    const nestResult = await modifier.repackWithModdedSprites({}, null, null, { enabled: true, gapDistance: 1 });
+    const { canvasW, canvasH } = { canvasW: nestResult.canvas.width, canvasH: nestResult.canvas.height };
+    check('nest path places the big item',
+      Array.isArray(nestResult.regionBounds.big), 'regionBounds.big=' + JSON.stringify(nestResult.regionBounds.big));
+    check('nest path places the small item',
+      Array.isArray(nestResult.regionBounds.small), 'regionBounds.small=' + JSON.stringify(nestResult.regionBounds.small));
+    check('nest canvas dims are positive multiples of 4',
+      canvasW > 0 && canvasH > 0 && canvasW % 4 === 0 && canvasH % 4 === 0, 'canvas=' + canvasW + 'x' + canvasH);
+    const effBox = (b) => {
+      const [x, y, w, h, rot] = b;
+      const ew = (rot === 90 || rot === 270) ? h : w;
+      const eh = (rot === 90 || rot === 270) ? w : h;
+      return { x, y, w: ew, h: eh };
+    };
+    const bigB = effBox(nestResult.regionBounds.big);
+    const smallB = effBox(nestResult.regionBounds.small);
+    const overlap = bigB.x < smallB.x + smallB.w && smallB.x < bigB.x + bigB.w
+                 && bigB.y < smallB.y + smallB.h && smallB.y < bigB.y + bigB.h;
+    check('nest placements do not overlap',
+      !overlap, 'big=' + JSON.stringify(bigB) + ' small=' + JSON.stringify(smallB));
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -123,7 +174,7 @@ const page = await browser.newPage();
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw'];
+const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw', 'toggle-off-byte-identical-to-shelfpack', 'toggle-on-no-mesh-uses-gap-a-space'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);

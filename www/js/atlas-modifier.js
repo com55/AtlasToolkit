@@ -7,6 +7,7 @@ import { AtlasProcessor } from './atlas-extracter.js';
 import { AtlasDocument } from './atlas-document.js';
 import { cropAndRotate, roundHalfEven, roundUpToMultiple, maskInPlace } from './core-region-ops.js';
 import { rasterizeMeshMask } from './region-mesh-mask.js';
+import { nestPack, footprintForCanonical } from './repack-nest.js';
 
 // ─── Parse atlas text using AtlasProcessor ──────────────────────────────────
 
@@ -711,7 +712,7 @@ export class AtlasModifier {
    * @param {Set<string>|null} fullCanvasRegions  regions whose offsets should be
    *   reset to default (0,0,w,h); all others keep their pristine `offsets`.
    */
-  async _packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions) {
+  async _packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions, nestOptions = null, moddedSprites = null, addedSprites = null, meshLookupFn = null) {
     // 1. Deduplicate by pixel hash (single-page repack keeps dedup ON)
     const hashToCanonical = {}, canonicalMap = {};
     for (const name of regionNames) {
@@ -726,41 +727,69 @@ export class AtlasModifier {
     }
     const uniqueNames = Object.values(hashToCanonical);
 
-    // 2. Bin-pack unique sprites
+    // 2. Bin-pack unique sprites. Nest Regions toggle swaps the packer
+    //    entirely (mesh-silhouette-nesting spec §7) -- _shelfPack itself
+    //    is never touched, so toggle-off output stays byte-identical.
     const packItems = uniqueNames.map(n => ({ name: n, w: sprites[n].width, h: sprites[n].height }));
-    const { canvasW, canvasH, placements } = _shelfPack(packItems);
+    const usingNestPack = !!(nestOptions && nestOptions.enabled);
+    let canvasW, canvasH, placements;
+    if (usingNestPack) {
+      const dedupGroups = new Map(); // canonical name -> every name mapped to it
+      for (const [name, canonical] of Object.entries(canonicalMap)) {
+        if (!dedupGroups.has(canonical)) dedupGroups.set(canonical, []);
+        dedupGroups.get(canonical).push(name);
+      }
+      const items = uniqueNames.map(n => ({
+        name: n, w: sprites[n].width, h: sprites[n].height,
+        footprint: footprintForCanonical(dedupGroups.get(n), {
+          sprites, moddedSprites, addedSprites, regions, meshLookupFn,
+          combineMeshGeometry: _combineMeshGeometry,
+          groupNamesBySpriteIdentity: _groupNamesBySpriteIdentity,
+          maskCropRectForOffsets,
+        }),
+      }));
+      ({ canvasW, canvasH, placements } = nestPack(items, { gapDistance: nestOptions.gapDistance }));
+    } else {
+      ({ canvasW, canvasH, placements } = _shelfPack(packItems));
+    }
 
     const placementMap = {};
     for (const p of placements) placementMap[p.name] = p;
+
+    // Normalizes both packers' placement shape to one 0/90/180/270 value --
+    // _shelfPack's own `rotated` boolean never reaches downstream code past
+    // this point.
+    const rotateOf = (canonical) => usingNestPack
+      ? placementMap[canonical].rotate
+      : (placementMap[canonical].rotated ? 90 : 0);
 
     // 3. Paste sprites onto new canvas
     const canvas = document.createElement('canvas');
     canvas.width = canvasW; canvas.height = canvasH;
     const ctx = canvas.getContext('2d');
     for (const name of uniqueNames) {
-      const { x, y, rotated } = placementMap[name];
-      const sprite = sprites[name];
-      if (rotated) {
-        ctx.drawImage(_rotate90CCW(sprite), x, y); // PIL ROTATE_90 (90° CCW)
-      } else {
-        ctx.drawImage(sprite, x, y);
-      }
+      const { x, y } = placementMap[name];
+      ctx.drawImage(_rotateSpriteForPack(sprites[name], rotateOf(name)), x, y);
     }
 
     // 4. Build region data. Offsets: full-canvas regions reset to default,
-    //    everyone else preserves their pristine offsets verbatim.
+    //    everyone else preserves their pristine offsets verbatim. bounds
+    //    always uses the sprite's own PRE-ROTATION dimensions regardless of
+    //    rotateOf(canonical)'s value -- already rotation-invariant by
+    //    construction (spec §5's round-3 clarification), no change needed
+    //    to this part beyond reading rotateOf() instead of `rotated`.
     const full = fullCanvasRegions || null;
     const regionData = {};
     for (const name of regionNames) {
       if (!(name in canonicalMap)) continue;
       const canonical = canonicalMap[name];
-      const { x, y, rotated } = placementMap[canonical];
+      const { x, y } = placementMap[canonical];
       const orig = sprites[name];
       const bounds = [x, y, orig.width, orig.height];
       regionData[name] = [
         bounds,
         repackOffsetsForRegion(name, full, regions[name].offsets, orig.width, orig.height),
-        rotated ? 90 : 0,
+        rotateOf(canonical),
         {
           atlasName: regions[name].atlasName || regions[name].name,
           index: regions[name].index,
@@ -771,19 +800,15 @@ export class AtlasModifier {
       ];
     }
 
-    // Additive: expose the placement data already computed above (previously
-    // discarded after folding into atlasText) so a structural caller doesn't
-    // have to reparse the serialized output to recover per-region bounds —
-    // that reparse is what silently lost identity on Rename (spec §2.6,
-    // round 3 finding 1). rotate is 0/90 (never boolean), matching every
-    // other rotate field in this codebase.
+    // Additive: expose the placement data already computed above (see the
+    // existing comment on regionBounds below for why this exists).
     const regionBounds = {};
     for (const name of regionNames) {
       if (!(name in canonicalMap)) continue;
       const canonical = canonicalMap[name];
-      const { x, y, rotated } = placementMap[canonical];
+      const { x, y } = placementMap[canonical];
       const orig = sprites[name];
-      regionBounds[name] = [x, y, orig.width, orig.height, rotated ? 90 : 0];
+      regionBounds[name] = [x, y, orig.width, orig.height, rotateOf(canonical)];
     }
 
     const newAtlasText = rebuildAtlasText(pageInfo, [canvasW, canvasH], regionNames, regionData);
@@ -814,7 +839,7 @@ export class AtlasModifier {
    * expressible — impossible when repacking an already-merged canvas.
    * Returns { canvas, atlasText }.
    */
-  async repackWithModdedSprites(moddedSprites, fullCanvasRegions = null, meshLookupFn = null) {
+  async repackWithModdedSprites(moddedSprites, fullCanvasRegions = null, meshLookupFn = null, nestOptions = null) {
     const { pageInfo, regionNames, regions } = this._parseScoped(this.atlasText);
     const sprites = {};
     for (const [name, info] of Object.entries(regions)) {
@@ -828,7 +853,7 @@ export class AtlasModifier {
       if (name in sprites) sprites[name] = _toCanvas(sprite);
     }
     _maskModdedSprites(sprites, moddedSprites, meshLookupFn);
-    return this._packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions);
+    return this._packAndEmit(sprites, pageInfo, regionNames, regions, fullCanvasRegions, nestOptions, moddedSprites, null, meshLookupFn);
   }
 
   /**
@@ -843,7 +868,7 @@ export class AtlasModifier {
    * @param {{[key:string]: HTMLCanvasElement}} moddedSprites  pixel ModBatch overlays (session's existing map)
    * @param {Set<string>|null} fullCanvasRegions
    */
-  async repackWithEffectiveModel(effectiveRegionNames, effectiveRegions, addedSprites, moddedSprites, fullCanvasRegions = null, meshLookupFn = null) {
+  async repackWithEffectiveModel(effectiveRegionNames, effectiveRegions, addedSprites, moddedSprites, fullCanvasRegions = null, meshLookupFn = null, nestOptions = null) {
     const { pageInfo, regions: pristineRegions } = this._parseScoped(this.atlasText);
     const sprites = {};
     for (const [name, info] of Object.entries(pristineRegions)) {
@@ -861,7 +886,7 @@ export class AtlasModifier {
     for (const [key, canvas] of Object.entries(addedSprites || {})) {
       sprites[key] = _toCanvas(canvas); // AddBatch — new key, never in the pristine parse
     }
-    return this._packAndEmit(sprites, pageInfo, effectiveRegionNames, effectiveRegions, fullCanvasRegions);
+    return this._packAndEmit(sprites, pageInfo, effectiveRegionNames, effectiveRegions, fullCanvasRegions, nestOptions, moddedSprites, addedSprites, meshLookupFn);
   }
 }
 
@@ -977,6 +1002,33 @@ export async function repackMultiPage(allSprites, numPages, pageInfos, regionMet
  */
 function _rotate90CCW(src) {
   return cropAndRotate(src, 0, 0, src.height, src.width, 270);
+}
+
+/**
+ * Rotate a whole canvas 90° CW for packing, via the single rotation seam in
+ * core-region-ops. Symmetric counterpart to _rotate90CCW below (that one
+ * passes rotate=270 to cropAndRotate; this one passes rotate=90 — see
+ * core-region-ops.js's header comment for the PIL-rotation-direction
+ * mapping both are derived from).
+ */
+function _rotate90CW(src) {
+  return cropAndRotate(src, 0, 0, src.height, src.width, 90);
+}
+
+/** Rotate a whole canvas 180° for packing, via the same rotation seam. */
+function _rotate180(src) {
+  return cropAndRotate(src, 0, 0, src.width, src.height, 180);
+}
+
+/** Rotate a sprite canvas by an atlas rotate degree (0/90/180/270) for
+ *  pasting onto a packed canvas — the single dispatch point _packAndEmit
+ *  uses for both _shelfPack (0/90 only) and nestPack (0/90/180/270)
+ *  placements. */
+function _rotateSpriteForPack(sprite, deg) {
+  if (deg === 90) return _rotate90CCW(sprite);
+  if (deg === 180) return _rotate180(sprite);
+  if (deg === 270) return _rotate90CW(sprite);
+  return sprite;
 }
 
 function _toCanvas(img) {
