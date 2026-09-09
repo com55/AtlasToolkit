@@ -554,7 +554,17 @@ button {
   padding: 0 8px;
   font-size: 11px;
   align-self: center;
-  flex-shrink: 1;
+  /* Final whole-branch review finding: this was flex-shrink:1 (its own
+     text-overflow:ellipsis was its narrow-width escape hatch), which made
+     it the LAST remaining shrinkable child once .toggle-label and
+     .nest-gap-input were both pinned to flex-shrink:0 across 2 earlier
+     fix rounds -- it absorbed 100% of #options-row's shrink pressure and
+     collapsed to an 18px unlabeled sliver in portrait, the exact same bug
+     class relocated a third time. #options-row's own overflow-x:auto
+     (added for the same reason) is the row's real narrow-width answer
+     now; ellipsis-via-shrinking is no longer needed on top of it.
+     max-width:160px above still caps this at its natural width. */
+  flex-shrink: 0;
   border-radius: 3px;
   border: 1px solid #555;
   background-color: #2f2f2f;

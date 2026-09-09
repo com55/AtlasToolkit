@@ -421,6 +421,13 @@ document.getElementById('chk-mesh-aware-repack').addEventListener('change', asyn
 });
 
 document.getElementById('chk-nest-regions').addEventListener('change', async (e) => {
+  // Final whole-branch review finding: the gap-distance debounce timer
+  // (declared below) was not cleared here -- toggling off within its
+  // 400ms window let it fire afterward (a stale repack for a
+  // now-irrelevant setting) or during this op (an error toast for an
+  // action the user already completed, via the structuralOpInFlight
+  // guard in that other handler).
+  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
   if (structuralOpInFlight) {
     e.target.checked = !e.target.checked;
     showToast('Please wait for the current operation to finish.', 'error');
@@ -428,12 +435,27 @@ document.getElementById('chk-nest-regions').addEventListener('change', async (e)
   }
   structuralOpInFlight = true;
   try {
+    // Final whole-branch review finding: nestPack is fully synchronous and
+    // can take several real seconds on a large atlas (mesh-driven concave
+    // footprints measured ~6.5x slower than the shipped benchmark's
+    // no-mesh case) -- with no status message the tab just hard-freezes,
+    // no spinner would even have a chance to animate. Paint the status
+    // BEFORE the potentially-blocking call, with an explicit yield (a
+    // synchronous DOM write alone isn't guaranteed to reach the screen
+    // before a long synchronous stretch begins).
+    setStatus('Repacking...');
+    await new Promise(requestAnimationFrame);
     const result = await AtlasAPI.set_nest_regions_enabled(e.target.checked);
     updateNestRegionsUI();
-    if (result) await onModPreviewReceived(result);
+    if (result) {
+      await onModPreviewReceived(result); // resets status itself once done
+    } else {
+      setStatus('Ready'); // _maybeRerunRepack no-op'd (no mods yet) -- don't leave 'Repacking...' stuck
+    }
   } catch (err) {
     console.error(err);
     showToast('Failed to update Nest Regions.', 'error');
+    setStatus('Ready');
   } finally {
     structuralOpInFlight = false;
   }
@@ -462,12 +484,21 @@ document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
     }
     structuralOpInFlight = true;
     try {
+      // See the same-purpose comment on the Nest Regions checkbox handler
+      // above -- nestPack is synchronous and can run for real seconds.
+      setStatus('Repacking...');
+      await new Promise(requestAnimationFrame);
       const result = await AtlasAPI.set_nest_gap_distance(px);
       updateNestRegionsUI(); // resync the field to the actually-applied (normalized) value
-      if (result) await onModPreviewReceived(result);
+      if (result) {
+        await onModPreviewReceived(result); // resets status itself once done
+      } else {
+        setStatus('Ready'); // _maybeRerunRepack no-op'd (no mods yet) -- don't leave 'Repacking...' stuck
+      }
     } catch (err) {
       console.error(err);
       showToast('Failed to update gap distance.', 'error');
+      setStatus('Ready');
     } finally {
       structuralOpInFlight = false;
     }

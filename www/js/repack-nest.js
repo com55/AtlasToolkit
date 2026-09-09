@@ -361,6 +361,20 @@ export function footprintForCanonical(dedupNames, ctx) {
     handled.add(name);
     const geom = meshLookupFn(name);
     if (!geom) { masks.push(solidMask(w, h)); continue; }
+    // Final whole-branch review finding, confirmed NOT reachable today but
+    // worth pinning: an ADDED sprite that reached this line with a real
+    // `geom` would take the tight mesh-silhouette footprint below (line
+    // ~368) while its actual pasted pixels are never masked (added sprites
+    // are excluded from maskRawSprite in atlas-modifier.js and inserted
+    // raw) -- footprint SMALLER than the real opaque pixels, the direction
+    // that produces visible overlap. This can't happen currently because
+    // an added sprite's internal key is guaranteed absent from
+    // AtlasProcessor.regions (see _generateAddInternalKey in atlas-api.js),
+    // and getRepackMeshGeometry/_meshAvailableFor return null for any name
+    // not in `regions` -- so `geom` above is always null for an added
+    // sprite, and this branch is never reached for one. If that
+    // key-generation invariant ever changes (e.g. added sprites start
+    // reusing/registering a real region name), this stops being safe.
     const isModdedOrAdded = (moddedSprites && name in moddedSprites)
       || (addedSprites && name in addedSprites);
     const region = regions[name];
