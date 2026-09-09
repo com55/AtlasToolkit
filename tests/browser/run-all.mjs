@@ -24,6 +24,16 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
+// Final whole-branch review finding: this list originally covered only 8
+// of the 13 verify-*.mjs files actually in this directory, contradicting
+// this file's own header comment ("every browser test file"). Two of the
+// omitted five are directly load-bearing for this branch specifically --
+// verify-app-e2e.mjs exercises multi-page repack through the public
+// AtlasAPI (the only coverage of AtlasSession._rebuildMultiPageRepack,
+// still-open gap tracked in the SDD ledger), and verify-rotation.mjs is
+// the PIL rotation-direction pixel oracle on a branch that adds two new
+// rotate values (180/270) AtlasToolkit had never emitted before. All 13
+// verified passing before being added here.
 const SUITES = [
   'verify-ops.mjs',
   'verify-ui-flows.mjs',
@@ -33,6 +43,11 @@ const SUITES = [
   'verify-nest-repack.mjs',
   'verify-repack-asymmetry.mjs',
   'verify-region-editing.mjs',
+  'verify-app-e2e.mjs',
+  'verify-rotation.mjs',
+  'verify-mesh-mask.mjs',
+  'verify-mesh-mask-acceptance.mjs',
+  'verify-mesh-mask-integration.mjs',
 ];
 
 let anyFailed = false;
