@@ -14,6 +14,7 @@ import { validateRegionName } from './region-name-validation.js';
 import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
 import { parseSkeleton, UnsupportedVersionError } from './vendor/spine-skeleton-binary/index.js';
 import { buildMeshLookup } from './region-mesh-lookup.js';
+import { normalizeGap } from './repack-nest.js';
 
 /** Returned by load helpers when the user cancels a missing-images dialog. */
 export const LOAD_CANCELLED = 'cancelled';
@@ -597,7 +598,13 @@ export const AtlasAPI = {
   },
 
   async set_nest_gap_distance(px) {
-    _nestGapDistance = px;
+    // Normalize to a finite integer >=1 (clamped to 256) at the boundary so a
+    // raw string from a UI <input> (e.g. '5') can't be persisted unnormalized
+    // and then silently diverge: getNestOptions()'s Number.isFinite guard would
+    // substitute 4 for the actual packer while get_nest_options() kept reporting
+    // the raw value. Enforces the Global Constraint (gapDistance normalized
+    // everywhere it is read).
+    _nestGapDistance = normalizeGap(px);
     AtlasAPI.set_pref('nestGapDistance', _nestGapDistance);
     if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
     return await _maybeRerunRepack();
