@@ -194,6 +194,20 @@ const browser = await chromium.launch({ headless: true });
   // download fallback — same code path a non-FS-API browser (Firefox) gets —
   // which Playwright can observe via the 'download' event.
   await ctx.addInitScript(() => { try { delete window.showSaveFilePicker; } catch { /* ignore */ } });
+  // Task 7 scrutinize finding: the existing "no page errors after rapid
+  // gap-distance edits" check passes identically whether the debounce
+  // collapses N keystrokes to 1 rerun or fires N reruns -- it never
+  // actually verifies debouncing. Count writes to the specific persisted
+  // pref key (set_nest_gap_distance's only externally-observable side
+  // effect besides the packer call itself) to get a real assertion.
+  await ctx.addInitScript(() => {
+    window.__nestGapWriteCount = 0;
+    const realSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'atlastoolkit.nestGapDistance') window.__nestGapWriteCount++;
+      return realSetItem.call(this, key, value);
+    };
+  });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -242,6 +256,10 @@ const browser = await chromium.launch({ headless: true });
   const download1 = await dl1;
   check('desktop: Extract Selected downloads a PNG', download1.suggestedFilename().endsWith('.png'), download1.suggestedFilename());
 
+  // View mode: gap-distance input must not be visible yet (Task 7 scrutinize
+  // finding -- the CSS rule hiding it in view mode had no test either way).
+  check('desktop: gap-distance input hidden in view mode', !ui.nestGapVisible);
+
   // 4. Enter edit mode via the toggle
   await page.click('#mode-modify');
   await page.waitForTimeout(200);
@@ -256,11 +274,21 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(500); // clear the 400ms toggle debounce/rerun window
   const gapInput = page.locator('#nest-gap-distance');
   check('desktop: gap-distance input enabled once Nest Regions is checked', !(await gapInput.isDisabled()));
+  await page.evaluate(() => { window.__nestGapWriteCount = 0; }); // clean baseline before the burst
   await gapInput.fill('2');
   await gapInput.type('7'); // rapid sequential edits -- should collapse to one rerun via debounce
   await gapInput.dispatchEvent('input');
   await page.waitForTimeout(600);
   check('desktop: no page errors after rapid gap-distance edits (debounce did not crash/queue)', errors.length === 0, errors.join('; '));
+  // Task 7 scrutinize finding: the check above never actually verified
+  // debouncing -- it passes identically whether N keystrokes collapse to 1
+  // rerun or fire N reruns. This counts real writes to the persisted pref
+  // key (set_nest_gap_distance's own externally-observable side effect) --
+  // a genuine burst of edits (fill '2', type '7') must still produce
+  // exactly ONE write after the debounce window, not one per keystroke.
+  const writeCount = await page.evaluate(() => window.__nestGapWriteCount);
+  check('desktop: rapid gap-distance edits collapse to exactly one debounced write, not one per keystroke',
+    writeCount === 1, `writeCount=${writeCount}`);
   await page.click('#nest-regions-toggle-row');
   await page.waitForTimeout(200);
   check('desktop: gap-distance input disabled again once Nest Regions is unchecked', await gapInput.isDisabled());
@@ -913,6 +941,48 @@ const browser = await chromium.launch({ headless: true });
   }
 
   check('task11: zero page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
+// ─── #options-row overflow at narrow/portrait widths (Task 7 fix round) ───────
+// Scrutinize finding: #options-row is fixed-height (35px) and flex-nowrap --
+// adding the Nest Regions toggle + gap-distance input pushed it over capacity
+// at narrow widths, and without white-space:nowrap the labels wrapped to 2-3
+// lines and got clipped INSIDE the fixed-height box (not just cut off at an
+// edge -- text rendered outside the visible row, unreadable). The fix gives
+// .toggle-label nowrap+flex-shrink:0 and #options-row overflow-x:auto, so the
+// row scrolls horizontally instead of clipping vertically. Assert every
+// visible toggle label stays within the row's own height at each of the 3
+// viewports the reviewer's own screenshots demonstrated the clipping at.
+for (const vp of [{ w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
+  const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check(`portrait ${vp.w}x${vp.h}: single-page fixture loaded`, loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(150);
+
+  const geometry = await page.evaluate(() => {
+    const row = document.getElementById('options-row');
+    const rowRect = row.getBoundingClientRect();
+    const labels = [...row.querySelectorAll('.toggle-label')].map((l) => {
+      const cs = getComputedStyle(l);
+      return { id: l.id, height: l.getBoundingClientRect().height, visible: cs.display !== 'none' };
+    });
+    return { rowHeight: rowRect.height, labels };
+  });
+  const visibleLabels = geometry.labels.filter((l) => l.visible);
+  check(`portrait ${vp.w}x${vp.h}: at least the 3 edit-mode toggle labels are visible`,
+    visibleLabels.length >= 3, JSON.stringify(geometry.labels));
+  const clipped = visibleLabels.filter((l) => l.height > geometry.rowHeight + 1); // +1px rounding slack
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- no toggle label is taller than #options-row itself (clipped)`,
+    clipped.length === 0, JSON.stringify(geometry));
+
+  check(`portrait ${vp.w}x${vp.h}: zero page errors`, errors.length === 0, errors.join('; '));
   await ctx.close();
 }
 
