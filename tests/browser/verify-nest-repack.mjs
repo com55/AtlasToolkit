@@ -188,13 +188,27 @@ window.runCase = async (name) => {
       smallPixel[0] > 200 && smallPixel[1] > 200 && smallPixel[2] < 50, 'rgba=' + smallPixel.join(','));
   } else if (name === 't-shape-wing-never-bleeds') {
     // The exact scenario from spec §1: host mesh is a T, mod paints only
-    // the I portion (leaving the T's wings unpainted-but-still-sampled). A
-    // second small region, with no mesh, must not get nested into the
-    // wing area.
+    // the I portion (leaving the T's wings unpainted-but-still-sampled).
+    // "Wing" here means spec §1's sense: the crossbar's outer portions,
+    // INSIDE the T mesh, which stay unpainted-but-still-reserved by the
+    // geometry footprint. A second small region, with no mesh, must not get
+    // nested into those reserved wings (it may only nest into the concave
+    // free areas OUTSIDE the T mesh -- a different "wing" sense, clarified
+    // at the footprint rects below).
     const ATLAS_TEXT = 'page1.png\\nsize: 60,60\\nhost\\nbounds: 0, 0, 30, 30\\nfiller\\nbounds: 30, 0, 8, 8\\n';
     const proc = new AtlasProcessor(ATLAS_TEXT);
     const blank = document.createElement('canvas');
     blank.width = 60; blank.height = 60;
+    // Paint the host's full 30x30 box opaque (red) and the filler's 8x8 box
+    // opaque (green). After packing with the host's T mesh, the host's
+    // concave (non-T) corners must be REMOVED (alpha 0) while the T stays
+    // opaque, and the filler's real pixels must land at its REPORTED packed
+    // bounds -- spec §1's claim that the occupied footprint is
+    // geometry-derived, not alpha-derived. A blank host/filler would let the
+    // geometry assertions pass on regionBounds arithmetic alone.
+    const bctx = blank.getContext('2d');
+    bctx.fillStyle = 'rgb(255,0,0)'; bctx.fillRect(0, 0, 30, 30);   // host box
+    bctx.fillStyle = 'rgb(0,255,0)'; bctx.fillRect(30, 0, 8, 8);    // filler box
     await proc.loadImages({ 'page1.png': blank.toDataURL() });
     // T shape in UV space: top bar (v in [0,0.3]) + stem (u in [0.35,0.65]).
     const T_TOP = { uvs: [0, 0, 1, 0, 1, 0.3, 0, 0.3], triangles: [0, 1, 2, 0, 2, 3] };
@@ -235,6 +249,39 @@ window.runCase = async (name) => {
       fx < rx + rw && fx + fw > rx && fy < ry + rh && fy + fh > ry);
     check('filler (no mesh) does not overlap the T-host\\'s mesh footprint (top bar + stem)',
       !overlapsFootprint, 'filler bounds=' + fillerBounds.join(','));
+
+    // Item 1 (BLOCKER): the !overlapsFootprint check above passes IDENTICALLY
+    // whether meshLookupFn is wired correctly OR silently dropped/null -- in
+    // the null case the solid-mask fallback pushes the filler entirely OUTSIDE
+    // the host's 30x30 bbox, which ALSO satisfies !overlapsFootprint vacuously.
+    // Prove real concave-footprint nesting actually happened: the filler must
+    // land INSIDE the host's original 30x30 bbox.
+    const overlapsHostBox = fx < 30 && fx + fw > 0 && fy < 30 && fy + fh > 0;
+    check('filler IS nested inside the host bbox (proves the geometry footprint, not the solid fallback, reached nestPack)',
+      overlapsHostBox, 'filler bounds=' + fillerBounds.join(','));
+
+    // Item 2: pixel/alpha assertions (spec §1: the occupied footprint is
+    // geometry-derived, not alpha-derived). The filler was painted opaque
+    // green pre-pack; after packing its real pixels must sit at its REPORTED
+    // packed bounds. The host was painted opaque red; its T mesh must have
+    // removed the concave (non-T) corners to alpha 0 while the T stays opaque.
+    const hostBounds = repacked.regionBounds.host;
+    const [hx, hy] = hostBounds;
+    const rc = repacked.canvas.getContext('2d');
+    // Filler center (geometry-derived placement): must be opaque (green).
+    const fcx = Math.round(fx + fw / 2), fcy = Math.round(fy + fh / 2);
+    const fpx = rc.getImageData(fcx, fcy, 1, 1).data;
+    check('filler pixels are opaque at its REPORTED packed bounds (geometry-derived placement, not alpha-derived)',
+      fpx[3] > 0, 'filler center alpha=' + fpx[3] + ' at ' + fcx + ',' + fcy);
+    // Host concave corner (right of stem, below top bar, far from the filler):
+    // must be REMOVED to alpha 0 by the T mesh.
+    const removedPx = rc.getImageData(hx + 25, hy + 25, 1, 1).data;
+    check('host concave corner (outside the T) is removed to alpha 0 by its mesh',
+      removedPx[3] === 0, 'host (25,25) alpha=' + removedPx[3]);
+    // Host top-bar point (inside the T): must stay opaque (red).
+    const keptPx = rc.getImageData(hx + 2, hy + 2, 1, 1).data;
+    check('host T top-bar point stays opaque (mesh reserves the T, not just the painted pixels)',
+      keptPx[3] > 0, 'host (2,2) alpha=' + keptPx[3]);
   } else if (name === 'gap-distance-respected') {
     const ATLAS_TEXT = 'page1.png\\nsize: 40,40\\na\\nbounds: 0, 0, 10, 10\\nb\\nbounds: 10, 0, 10, 10\\n';
     const proc = new AtlasProcessor(ATLAS_TEXT);
@@ -282,10 +329,8 @@ window.runCase = async (name) => {
     const [ax, ay, aw, ah, deg] = repacked.regionBounds.asym;
     // Re-extract via the SAME un-rotation path extraction uses, from the
     // packed canvas, and confirm the red cell is still at local (0,0).
-    const reExtracted = document.createElement('canvas');
     const rw = (deg === 90 || deg === 270) ? ah : aw;
     const rh = (deg === 90 || deg === 270) ? aw : ah;
-    reExtracted.width = rw; reExtracted.height = rh;
     // Use the packed canvas + the SAME cropAndRotate the app uses at
     // extraction time, imported indirectly via AtlasProcessor.cropAndRotate.
     const un = AtlasProcessor.cropAndRotate(repacked.canvas, ax, ay, rw, rh, deg);
@@ -393,6 +438,20 @@ window.runCase = async (name) => {
     const proc = new AtlasProcessor(ATLAS_TEXT);
     const page = document.createElement('canvas');
     page.width = 2400; page.height = 2400;
+    // Paint each region a DISTINCT color before loadImages. _canvasHash dedups
+    // on RGBA bytes only (never width/height), so on a blank page any two
+    // regions sharing the same pixel AREA (w*h) collapse to one canonical
+    // placement -- only 61 of the 150 regions have a unique w*h under this
+    // fixture's size formula. Distinct pixels keep all 150 as distinct pack
+    // items, so the benchmark actually measures the claimed N. (Same technique
+    // as gap-distance-respected.)
+    const pctx = page.getContext('2d');
+    for (let i = 0; i < N; i++) {
+      const w = 20 + (i % 11) * 12, h = 20 + (i % 9) * 12;
+      const x = (i % 15) * 160, y = Math.floor(i / 15) * 160;
+      pctx.fillStyle = 'rgb(' + (i * 37 % 256) + ',' + (i * 71 % 256) + ',' + (i * 113 % 256) + ')';
+      pctx.fillRect(x, y, w, h);
+    }
     await proc.loadImages({ 'page1.png': page.toDataURL() });
     proc.setNestOptions(true, 2);
     const nestOptions = proc.getNestOptions();
@@ -424,6 +483,12 @@ const port = server.address().port;
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
+// Forward page-context console.log to Node's stdout -- without this, the
+// performance-benchmark case's explicit elapsedMs report (meant to satisfy
+// spec §4's "must be explicit, never silent" rule) never reaches the
+// harness's own captured output, since a passing check's detail message is
+// only printed on failure below.
+page.on('console', (msg) => console.log('[page] ' + msg.text()));
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
