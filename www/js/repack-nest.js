@@ -88,3 +88,147 @@ export function normalizeGap(v) {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n >= 1 ? n : 4;
 }
+
+// ─── The packer ───────────────────────────────────────────────────────────────
+
+const SCAN_STEP = 4; // px -- fixed-step raster scan, not per-pixel (performance)
+
+/** Build the 4 rotation variants of one item's footprint, each carrying an
+ *  undilated mask (for fit-testing) and a separately-dilated mask (for
+ *  stamping once placed) -- see the spec §4 for why these must be two
+ *  distinct arrays, not one shared "pre-dilated" mask.
+ *  deg -> helper mapping matches this codebase's existing atlas-rotation
+ *  convention (core-region-ops.js's cropAndRotate): rotate:90 is stored
+ *  90 CCW, rotate:270 is stored 90 CW. */
+function rotationVariants(item, gap) {
+  const variants = [
+    { deg: 0, w: item.w, h: item.h, mask: item.footprint },
+    { deg: 90, w: item.h, h: item.w, mask: rotate90CCW(item.footprint, item.w, item.h) },
+    { deg: 180, w: item.w, h: item.h, mask: rotate180(item.footprint, item.w, item.h) },
+    { deg: 270, w: item.h, h: item.w, mask: rotate90CW(item.footprint, item.w, item.h) },
+  ];
+  for (const v of variants) v.dilatedMask = dilate(v.mask, v.w, v.h, gap);
+  return variants;
+}
+
+/** Does rotation `rot` fit at canvas-relative origin (x, y) without
+ *  exceeding canvas bounds or overlapping the (already-dilated) occupied
+ *  grid? `occupied` is a (canvasW+2*gap) x (canvasH+2*gap) grid, logical
+ *  position (lx, ly) at physical index (ly+gap)*(canvasW+2*gap)+(lx+gap). */
+function fits(occupied, canvasW, canvasH, gap, rot, x, y) {
+  if (x + rot.w > canvasW || y + rot.h > canvasH) return false;
+  const paddedW = canvasW + 2 * gap;
+  for (let my = 0; my < rot.h; my++) {
+    for (let mx = 0; mx < rot.w; mx++) {
+      if (!rot.mask[my * rot.w + mx]) continue;
+      const py = y + my + gap, px = x + mx + gap;
+      if (occupied[py * paddedW + px]) return false;
+    }
+  }
+  return true;
+}
+
+/** First-fit scan: for each candidate origin (row-major, step SCAN_STEP),
+ *  try every rotation in order; the first that fits wins. Position is the
+ *  primary axis (not rotation) so the result stays close to a natural
+ *  top-to-bottom, left-to-right fill. */
+function findFirstFit(variants, occupied, canvasW, canvasH, gap) {
+  for (let y = 0; y <= canvasH - 1; y += SCAN_STEP) {
+    for (let x = 0; x <= canvasW - 1; x += SCAN_STEP) {
+      for (const rot of variants) {
+        if (fits(occupied, canvasW, canvasH, gap, rot, x, y)) return { rot, x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/** Grow the canvas in whichever direction (right or down) keeps the result
+ *  closer to square, sized to at least fit `seedRot`'s own unrotated
+ *  dimensions -- adapts _shelfPack's own squareness tie-break (aspect,
+ *  then area, then width) to Jake Gordon's incremental-growth heuristic.
+ *  At canvasW===0 both candidates come out identical, so the stable sort
+ *  naturally keeps "grow right" (listed first) without a special case. */
+function growCanvas(canvasW, canvasH, occupied, seedRot, gap) {
+  const candidates = [
+    { goRight: true, w: canvasW + seedRot.w, h: Math.max(canvasH, seedRot.h) },
+    { goRight: false, w: Math.max(canvasW, seedRot.w), h: canvasH + seedRot.h },
+  ];
+  for (const c of candidates) {
+    c.aspect = Math.max(c.w, c.h) / Math.min(c.w, c.h);
+    c.area = c.w * c.h;
+  }
+  candidates.sort((a, b) => (a.aspect - b.aspect) || (a.area - b.area) || (a.w - b.w));
+  const { w: newW, h: newH } = candidates[0];
+
+  const newPaddedW = newW + 2 * gap, newPaddedH = newH + 2 * gap;
+  const next = new Uint8Array(newPaddedW * newPaddedH);
+  if (canvasW > 0 || canvasH > 0) {
+    const oldPaddedW = canvasW + 2 * gap;
+    for (let y = 0; y < canvasH + 2 * gap; y++) {
+      for (let x = 0; x < oldPaddedW; x++) {
+        next[y * newPaddedW + x] = occupied[y * oldPaddedW + x];
+      }
+    }
+  }
+  return { canvasW: newW, canvasH: newH, occupied: next };
+}
+
+/** OR a placed item's dilated (rotated + grown) mask into `occupied` at its
+ *  chosen canvas-relative origin (x, y). Physical-index derivation: the
+ *  dilated mask's own (0,0) corresponds to logical (x-gap, y-gap), and
+ *  logical-to-physical always adds +gap -- the two cancel, so this is
+ *  simply occupied[(y+dy)*paddedW + (x+dx)] for the dilated mask's own
+ *  (dx, dy). */
+function stampOccupied(occupied, canvasW, gap, rot, x, y) {
+  const paddedW = canvasW + 2 * gap;
+  const { mask: dm, w: dw, h: dh } = rot.dilatedMask;
+  for (let dy = 0; dy < dh; dy++) {
+    for (let dx = 0; dx < dw; dx++) {
+      if (!dm[dy * dw + dx]) continue;
+      occupied[(y + dy) * paddedW + (x + dx)] = 1;
+    }
+  }
+}
+
+/**
+ * The packer. Sorts items largest-first, places each one greedily against
+ * a single shared occupied-pixel-grid mask (growing the canvas when
+ * nothing fits), trying all 4 rotations per item.
+ * @param {Array<{name, w, h, footprint: Uint8Array}>} items  footprint is
+ *   UNDILATED, w*h, row-major, 1 = occupied / 0 = free, in this item's own
+ *   unrotated orientation. Built per-item by footprintForCanonical (Task 3)
+ *   -- nestPack itself never touches mesh/sprite data.
+ * @param {{gapDistance?: number}} opts
+ * @returns {{canvasW, canvasH, placements}}  same shape as _shelfPack's
+ *   return, except placements[i].rotate is 0/90/180/270 (never a boolean).
+ */
+export function nestPack(items, { gapDistance = 4 } = {}) {
+  const gap = normalizeGap(gapDistance);
+  if (items.length === 0) return { canvasW: 0, canvasH: 0, placements: [] };
+
+  const sorted = [...items].sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
+
+  let canvasW = 0, canvasH = 0, occupied = new Uint8Array(0);
+  const placements = [];
+
+  for (const item of sorted) {
+    const variants = rotationVariants(item, gap);
+    let spot = canvasW > 0 ? findFirstFit(variants, occupied, canvasW, canvasH, gap) : null;
+    // Growth is monotonic (each call strictly increases canvasW or canvasH
+    // by at least the unrotated variant's own dimension), so this loop
+    // always terminates -- worst case, the canvas eventually becomes large
+    // enough that a completely untouched region exists far from every
+    // previously-placed item's dilated footprint.
+    while (!spot) {
+      ({ canvasW, canvasH, occupied } = growCanvas(canvasW, canvasH, occupied, variants[0], gap));
+      spot = findFirstFit(variants, occupied, canvasW, canvasH, gap);
+    }
+    stampOccupied(occupied, canvasW, gap, spot.rot, spot.x, spot.y);
+    placements.push({
+      name: item.name, x: spot.x, y: spot.y,
+      pw: spot.rot.w, ph: spot.rot.h, rotate: spot.rot.deg,
+    });
+  }
+  return { canvasW, canvasH, placements };
+}
