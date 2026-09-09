@@ -95,3 +95,10 @@ Nest Regions (mesh-silhouette-nesting spec), when its own toggle is on, is a fur
 deviation from any Python parity concept -- packing shape and canvas dimensions are not
 expected to match `repacker.py` at all once enabled, same spirit as the squareness-bias note
 above.
+
+Nest Regions is also the first place AtlasToolkit ever emits `rotate: 180` or `rotate: 270`
+in a saved `.atlas` file -- every prior packer (this engine's `_shelfPack` and the retired
+Python `repacker.py`) only ever produced `rotate: true`/`false` (0 or 90). This is a
+deliberate, confirmed decision (not an oversight): the target Spine runtimes are confirmed to
+accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
+(`repack-nest.js`'s `rotationVariants`) is kept as-is rather than restricted to `[0, 90]`.
