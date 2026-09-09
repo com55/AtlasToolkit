@@ -54,6 +54,8 @@ export class AtlasProcessor {
     this._pageMap = {};      // pageName → AtlasPage
     this._meshLookup = null;   // Map<regionName, {uvs, triangles}> | null
     this._maskEnabled = false;
+    this._nestEnabled = false;
+    this._nestGapDistance = 4;
     this._parse();
   }
 
@@ -167,6 +169,28 @@ export class AtlasProcessor {
   getRepackMeshGeometry(name) {
     if (!this._repackMaskEnabled) return null;
     return this._meshAvailableFor(name);
+  }
+
+  /** Wired from atlas-api.js whenever the Nest Regions toggle or its
+   *  gap-distance changes. Independent of setMeshMaskData -- Nest Regions
+   *  is not gated by either mesh toggle (design spec's Context section,
+   *  "Toggle independence": reusing getRepackMeshGeometry inside
+   *  footprintForCanonical is what makes Gap B silently disappear when
+   *  Mesh-Aware Repack is off, with zero extra gating code needed here). */
+  setNestOptions(enabled, gapDistance) {
+    this._nestEnabled = !!enabled;
+    this._nestGapDistance = gapDistance;
+  }
+
+  /** { enabled, gapDistance } for AtlasSession's repack call sites. Falls
+   *  back to the class defaults (off, 4px) if gapDistance is somehow not a
+   *  finite number -- nestPack's own normalizeGap is the final backstop,
+   *  this is belt-and-suspenders at the source. */
+  getNestOptions() {
+    return {
+      enabled: !!this._nestEnabled,
+      gapDistance: Number.isFinite(this._nestGapDistance) ? this._nestGapDistance : 4,
+    };
   }
 
   /** Extract a single region as a canvas (includes offset padding). */
