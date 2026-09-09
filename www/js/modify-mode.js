@@ -442,13 +442,28 @@ document.getElementById('chk-nest-regions').addEventListener('change', async (e)
 let nestGapDebounceTimer = null;
 
 document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
-  const px = Number(e.target.value);
   if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
+  // Don't even schedule an apply for an empty/invalid value -- Number('')
+  // is 0, which normalizeGap (repack-nest.js) silently substitutes 4 for,
+  // with nothing in the UI showing that happened. The blur listener below
+  // resyncs the field to the true applied value once the user leaves it,
+  // whatever state they left it in.
+  if (e.target.value === '' || !e.target.checkValidity()) return;
+  const px = Number(e.target.value);
   nestGapDebounceTimer = setTimeout(async () => {
-    if (structuralOpInFlight) return; // a structural op is mid-flight -- skip this cycle rather than queue behind it
+    if (structuralOpInFlight) {
+      // A structural op is mid-flight -- skip this cycle rather than queue
+      // behind it, but resync the field (it may still be showing the typed
+      // value even though nothing was applied) and tell the user, matching
+      // the checkbox handlers' revert+toast pattern above.
+      updateNestRegionsUI();
+      showToast('Please wait for the current operation to finish.', 'error');
+      return;
+    }
     structuralOpInFlight = true;
     try {
       const result = await AtlasAPI.set_nest_gap_distance(px);
+      updateNestRegionsUI(); // resync the field to the actually-applied (normalized) value
       if (result) await onModPreviewReceived(result);
     } catch (err) {
       console.error(err);
@@ -457,6 +472,16 @@ document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
       structuralOpInFlight = false;
     }
   }, 400);
+});
+
+// Catch-all: whatever the field is left showing when the user leaves it
+// (cleared, out-of-range, or simply never triggered a debounced apply
+// because the input event above bailed out) must not silently diverge from
+// what the packer is actually using -- resync on blur. updateNestRegionsUI's
+// own activeElement guard means this only takes effect once the field has
+// genuinely lost focus, never mid-edit.
+document.getElementById('nest-gap-distance').addEventListener('blur', () => {
+  updateNestRegionsUI();
 });
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {

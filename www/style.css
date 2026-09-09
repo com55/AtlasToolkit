@@ -258,6 +258,15 @@ body.mode-modify.advance-mode-on #sidebar-head {
   min-height: 35px;
   padding: 0 10px;
   gap: 6px;
+  /* Task 7 scrutinize finding: this row is fixed-height with no wrap, and
+     3 toggle rows + the gap-distance input no longer reliably fit at
+     narrow/portrait widths -- without this, .toggle-label text wraps to
+     2-3 lines and gets clipped inside the fixed 35px box. overflow-x:auto
+     turns "doesn't fit" into "scrolls horizontally" instead of "clips
+     vertically" -- same escape hatch .skel-picker-btn already has via its
+     own ellipsis/flex-shrink, just for the row as a whole. */
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 body.mode-extract #advance-mode-row,
@@ -484,6 +493,13 @@ button {
   font-size: 12px;
   color: #bbb;
   user-select: none;
+  /* Task 7 scrutinize finding: without these, a flex-shrunk label at
+     narrow widths wraps its text to 2-3 lines and gets clipped by
+     #options-row's fixed 35px height. nowrap + flex-shrink:0 keeps each
+     label at its natural single-line width; #options-row's own
+     overflow-x:auto (above) is what absorbs the resulting extra width. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .toggle-label input[type="checkbox"] {
@@ -577,6 +593,15 @@ button {
   background-color: #2f2f2f;
   color: #ddd;
   box-sizing: border-box;
+}
+/* Task 7 scrutinize finding: every other interactive control in this file
+   has a :disabled rule; this one didn't -- Nest Regions defaults OFF, so
+   the first thing an Edit-mode user saw was a field that LOOKED editable
+   but silently swallowed input. Matches .toggle-label input:disabled +
+   .toggle-switch's own dimming (line ~526) in spirit. */
+.nest-gap-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Preview Area */
