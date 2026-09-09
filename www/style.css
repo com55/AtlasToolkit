@@ -593,6 +593,17 @@ button {
   background-color: #2f2f2f;
   color: #ddd;
   box-sizing: border-box;
+  /* Round-2 scrutinize finding: without this, .toggle-label's own
+     flex-shrink:0 (above) concentrates ALL of #options-row's shrink
+     pressure onto this, the one remaining shrinkable non-ellipsis
+     control -- collapses to 10px (padding+border only, zero content
+     width, the value renders invisibly) at exactly the narrow widths
+     this fix round exists to fix. Verified empirically at 7 widths
+     before landing: with this, width stays 42px everywhere and
+     #options-row's own overflow-x:auto genuinely absorbs the overflow
+     (scrollWidth grows instead), matching what the CSS comment above
+     already claimed was happening. */
+  flex-shrink: 0;
 }
 /* Task 7 scrutinize finding: every other interactive control in this file
    has a :disabled rule; this one didn't -- Nest Regions defaults OFF, so
