@@ -16,3 +16,11 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["atlas_toolkit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
