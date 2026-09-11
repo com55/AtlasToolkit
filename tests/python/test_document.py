@@ -217,6 +217,27 @@ def test_malformed_guarded_page_key_filter_silently_dropped():
     assert page.extra_pairs == []
 
 
+def test_short_xy_size_lines_degrade_to_zero_instead_of_crashing():
+    # Regression test -- Task 4's scrutinize review found that a
+    # single-value "xy:"/"size:" line (no comma, so only 1 element after
+    # split(",")) crashed with IndexError in an earlier draft that
+    # indexed values[1] directly. JS's equivalent unguarded array index
+    # yields `undefined` -> parseInt(undefined,10) -> NaN, never a crash
+    # -- this port must not crash either, even though it substitutes 0
+    # rather than reproducing NaN (see _parse_int's own docstring on that
+    # separate, deliberately-accepted divergence).
+    doc = AtlasDocument.parse("page1.png\nsize: 100\n")
+    assert doc.pages[0].size == [100, 0]
+
+    doc2 = AtlasDocument.parse("page1.png\nsize: 100,100\nleg\nxy: 5\n")
+    leg = doc2.pages[0].regions[0]
+    assert (leg.x, leg.y) == (5, 0)
+
+    doc3 = AtlasDocument.parse("page1.png\nsize: 100,100\nleg\nsize: 20\n")
+    leg3 = doc3.pages[0].regions[0]
+    assert (leg3.w, leg3.h) == (20, 0)
+
+
 def test_fixture_opaque_transparent_matches_live_js_oracle_output():
     text = (FIXTURES_DIR / "opaque-transparent" / "fixture-opaque.atlas").read_text()
     got = AtlasDocument.parse(text).serialize()
