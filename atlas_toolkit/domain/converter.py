@@ -8,15 +8,35 @@ This project's JS `dev` branch is the migration oracle; do not "fix" this
 back to the broader legacy behavior."""
 from __future__ import annotations
 
+import re
+
 _PAGE_KEYS = {"size", "format", "filter", "repeat", "pma"}
 _REGION_CORE_KEYS = {
     "index", "rotate", "bounds", "xy", "size", "offsets", "orig", "offset",
     "split", "pad",
 }
+# Mirrors JS's /^.+\.png$/i.test(line.trim()): JS regex `.` excludes line
+# terminator characters, and `^...$` (no /m flag) requires the WHOLE
+# trimmed string to match, with at least 1 char before the literal ".png".
+# A naive `line.strip().lower().endswith(".png")` is NOT equivalent: it
+# wrongly accepts a bare ".png" (no ".+" requirement) and wrongly accepts
+# an embedded "\r" (Python's `.` matches \r by default, unlike JS's `.`)
+# -- found and fixed after Task 3's scrutinize review caught it
+# empirically (".png" alone, and "foo\rbar.png", both diverged from the
+# real JS module; a whole region's parse outcome flipped on the
+# ".png"-bare-line case, not just the boolean). This pattern excludes
+# \n/\r (the two line-terminator characters that can actually appear in
+# this tool's input); JS's `.` also excludes U+2028/U+2029, which this
+# pattern does NOT exclude -- accepted gap, not fixed: those two code
+# points cannot occur in atlas text as produced by any real Spine
+# exporter or this tool's own writers, so the divergence is unreachable
+# in practice. Use fullmatch(), not match()+separate end-anchor, to
+# avoid `$`'s matches-before-trailing-newline quirk.
+_PAGE_LINE_RE = re.compile(r"[^\n\r]+\.png", re.IGNORECASE)
 
 
 def _is_page_line(line: str) -> bool:
-    return line.strip().lower().endswith(".png")
+    return bool(_PAGE_LINE_RE.fullmatch(line.strip()))
 
 
 def _parse_kv(line: str) -> tuple[str, list[str]] | None:
