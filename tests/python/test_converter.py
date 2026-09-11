@@ -129,3 +129,29 @@ def test_is_page_line_is_png_only_case_insensitive_not_other_image_extensions():
     lines_jpg = out_jpg.split("\n")
     assert "photo.jpg" in lines_jpg
     assert "  bounds: 0, 0, 1, 1" in lines_jpg
+
+
+def test_is_page_line_requires_a_leading_char_and_excludes_embedded_cr():
+    # Regression test -- Task 3's scrutinize review found a real divergence
+    # in an earlier draft's naive `line.strip().lower().endswith(".png")`:
+    # it wrongly accepted a bare ".png" (JS's /^.+\.png$/i requires 1+ chars
+    # before the extension) and wrongly accepted an embedded "\r" (Python's
+    # `.` matches \r by default; JS's regex `.` does not). Both cases below
+    # diverged from the real JS module before the fix; both must NOT be
+    # treated as a page line.
+    out_bare = convert_atlas_to_new_format(".png\nsize: 10,10\nregion\nxy: 0, 0\nsize: 5, 5\n")
+    lines_bare = out_bare.split("\n")
+    # ".png" alone falls through to "no colon -> region name" instead of
+    # opening a page, so "size: 10,10" attaches to IT as a region (its own
+    # xy/size default to 0,0/10,10), not to a page context.
+    assert ".png" in lines_bare
+    assert "  bounds: 0, 0, 10, 10" in lines_bare
+    assert "region" in lines_bare
+    assert "  bounds: 0, 0, 5, 5" in lines_bare
+
+    out_cr = convert_atlas_to_new_format("foo\rbar.png\nxy: 0, 0\nsize: 1, 1\n")
+    lines_cr = out_cr.split("\n")
+    # Same shape: the embedded \r excludes this from being a page line, so
+    # it falls through to "no colon -> region name" too.
+    assert "foo\rbar.png" in lines_cr
+    assert "  bounds: 0, 0, 1, 1" in lines_cr
