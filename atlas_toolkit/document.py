@@ -122,7 +122,17 @@ def _parse_int(s: str, default: int = 0) -> int:
     type consistency across this whole module for a case with zero
     practical benefit. Revisit if a future caller needs true
     byte-identical parity on adversarial/corrupted input (e.g. a
-    fuzzer)."""
+    fuzzer).
+
+    This substitution's reach is wider than one printed token (found
+    during re-review of the fix above): `size`'s `current_region.w == 0`
+    overwrite guard and `_is_default_offsets`'s zero-check both branch on
+    the substituted 0 rather than a real NaN, so a malformed input can
+    silently flip which of TWO conflicting `size:`/`offsets:` lines wins,
+    or whether an `offsets:` line gets omitted on serialize -- not just
+    which number appears. Still unreachable via any real atlas file, same
+    reasoning as above; noted here so a future reader doesn't assume the
+    divergence is confined to a single value."""
     m = re.match(r"\s*([+-]?\d+)", s)
     return int(m.group(1)) if m else default
 
