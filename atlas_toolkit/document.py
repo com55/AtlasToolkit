@@ -333,7 +333,11 @@ class AtlasDocument:
         rotate). Unmatched regions/pages are reused by reference rather
         than deep-cloned -- safe because callers treat the result as a
         fresh snapshot to serialize, not as something to mutate further.
-        Mirrors atlas-document.js's withUpdates."""
+        Mirrors atlas-document.js's withUpdates. ASSUMES each tuple is
+        well-formed (bounds has exactly 4 elements) -- same ruling as
+        `from_rebuild_args` below, see that docstring for the full
+        reachability argument; the only current producer of these tuples
+        is always well-formed."""
         new_pages = []
         for page in self.pages:
             new_size = page_size if page_size is not None else page.size
@@ -378,17 +382,42 @@ class AtlasDocument:
     ) -> "AtlasDocument":
         """Build a full fresh single-page AtlasDocument from scratch
         (used after a complete repack). `page_info` may contain
-        'page'/'format'/'filter'/'repeat'/'pma' keys; any missing/falsy
+        'page'/'format'/'filter'/'repeat'/'pma' keys; any ABSENT or None
         key falls back to the same default atlas-document.js's
-        fromRebuildArgs uses. `region_data` maps region name ->
-        (bounds[4], offsets|None, rotate, meta?) where meta may carry
-        {atlasName, index, split, pad, extraPairs}."""
+        fromRebuildArgs uses -- a PRESENT-but-falsy value (e.g. "") is
+        used as-is, matching JS's getOr(obj,key,def) exactly (only
+        undefined triggers the fallback), not Python's `or` idiom (falls
+        back on any falsy value) -- see `_get_or` below, added after
+        Task 5's scrutinize review found `page_info.get(k) or default`
+        diverges from JS on a present-but-empty string, reachable via
+        real (if malformed) atlas text: a bare "format:" line with
+        nothing after the colon parses to Page.format == "", and
+        AtlasDocument.first_page_info() forwards that shape straight
+        into this function's input contract.
+
+        `region_data` maps region name -> (bounds[4], offsets|None,
+        rotate, meta?) where meta may carry {atlasName, index, split,
+        pad, extraPairs}. ASSUMES each entry is well-formed (bounds has
+        exactly 4 elements, meta -- when present -- is a dict whose
+        extraPairs entries are 2-tuples) -- this port does not
+        independently guard against a malformed region_data shape (a
+        short tuple, a non-dict meta) the way parse() must guard against
+        malformed raw atlas TEXT (see Task 4's `_at` helper). Ruled on,
+        not fixed, during Task 5's scrutinize review: the only current
+        producer of this shape, Region.to_meta_dict(), always emits a
+        well-formed dict (int index from _parse_int, always-2-tuple
+        extra_pairs, from `parse()`'s own always->=1-element split
+        result); the only wired JS caller similarly always builds
+        4-element bounds. Revisit this assumption when a real Python
+        caller of from_rebuild_args exists in a later stage, if that
+        caller's own well-formedness guarantee is weaker than
+        to_meta_dict()'s."""
         page = Page(
-            filename=str(page_info.get("page") or "atlas.png"),
+            filename=str(_get_or(page_info, "page", "atlas.png")),
             size=new_size,
-            format=str(page_info.get("format") or "RGBA8888"),
+            format=str(_get_or(page_info, "format", "RGBA8888")),
             filter=_parse_filter(page_info.get("filter")),
-            repeat=str(page_info.get("repeat") or "none"),
+            repeat=str(_get_or(page_info, "repeat", "none")),
             pma=bool(page_info.get("pma")),
         )
 
@@ -402,7 +431,8 @@ class AtlasDocument:
             rotate_val = entry[2]
             meta = entry[3] if len(entry) > 3 and entry[3] else {}
 
-            index = meta.get("index") if isinstance(meta.get("index"), int) else -1
+            raw_index = meta.get("index")
+            index = int(raw_index) if _js_is_integer(raw_index) else -1
             split = list(meta["split"]) if isinstance(meta.get("split"), list) else None
             pad = list(meta["pad"]) if isinstance(meta.get("pad"), list) else None
             raw_extra = meta.get("extraPairs")
@@ -478,6 +508,42 @@ def _serialize_region(region: Region) -> list[str]:
     for key, values in region.extra_pairs:
         lines.append(f"  {key}: {', '.join(values)}")
     return lines
+
+
+def _get_or(d: dict, key: str, default):
+    """Mirrors JS's getOr(obj, key, def) (atlas-document.js:437-442)
+    exactly: returns d[key] only when the key is present AND its value
+    is not None (JS: not undefined) -- NOT Python's `d.get(key) or
+    default` idiom, which also falls back on a present-but-falsy value
+    (empty string, 0, False). Added after Task 5's scrutinize review
+    found the `or`-based version diverges from JS on a present empty
+    string, reachable via real (if malformed) atlas text -- see
+    from_rebuild_args's docstring for the exact repro."""
+    if key in d and d[key] is not None:
+        return d[key]
+    return default
+
+
+def _js_is_integer(value) -> bool:
+    """Mirrors JS's Number.isInteger(value): true for a real integer OR
+    a float with no fractional part (e.g. 2.0), false for anything else
+    -- CRITICALLY, false for a bool, unlike Python's own `isinstance(x,
+    int)` (bool is an int subclass in Python, so `isinstance(True, int)`
+    is True; JS has no such conflation, `Number.isInteger(true)` is
+    False). Added after Task 5's scrutinize review found the original
+    `isinstance(meta.get("index"), int)` check silently accepted a bool
+    `index` value and serialized it as the literal text "True"/"False"
+    -- not valid Spine atlas syntax, real output corruption, not just a
+    reachability-gated edge case. Callers must still `int(value)` the
+    result themselves when this returns True, to coerce e.g. `2.0` to
+    `2` rather than leaving a stray float in an int-typed field."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    if isinstance(value, float):
+        return value.is_integer()
+    return False
 
 
 def _parse_filter(value) -> list[str]:

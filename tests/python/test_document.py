@@ -336,6 +336,38 @@ def test_from_rebuild_args_builds_fresh_document_matching_hand_computed_expectat
     assert doc.serialize() == expected
 
 
+def test_from_rebuild_args_rejects_bool_as_integer_index():
+    # Regression test -- Task 5's scrutinize review found bool accepted
+    # as a valid `index` (Python's bool is an int subclass), serializing
+    # the literal text "True"/"False" -- not valid Spine atlas syntax.
+    # Real JS's Number.isInteger(true) is false, so real JS falls back
+    # to -1 (index line omitted). Also covers Number.isInteger's
+    # float-with-no-fraction acceptance (2.0 -> emits "2", not the
+    # default, matching JS exactly).
+    region_data = {"foo": ([0, 0, 10, 10], None, 0, {"index": True})}
+    doc = AtlasDocument.from_rebuild_args({}, [10, 10], ["foo"], region_data)
+    assert "index:" not in doc.serialize()
+
+    region_data2 = {"foo": ([0, 0, 10, 10], None, 0, {"index": 2.0})}
+    doc2 = AtlasDocument.from_rebuild_args({}, [10, 10], ["foo"], region_data2)
+    assert "  index: 2" in doc2.serialize()
+
+
+def test_from_rebuild_args_page_info_present_empty_string_not_treated_as_absent():
+    # Regression test -- Task 5's scrutinize review found
+    # `page_info.get(k) or default` falls back on ANY falsy value, but
+    # real JS's getOr only falls back when the key is absent or None
+    # (undefined) -- a present empty string must be used as-is, not
+    # replaced by the default. Reachable via real malformed atlas text
+    # (a bare "format:" line parses to Page.format == "").
+    page_info = {"page": "", "format": "", "repeat": ""}
+    doc = AtlasDocument.from_rebuild_args(page_info, [10, 10], [], {})
+    text = doc.serialize()
+    assert text.startswith("\nsize: 10,10")  # empty filename is still a real (blank) page line
+    assert "format: " in text
+    assert "repeat: " in text
+
+
 def test_png_names_for_save_uses_atlas_page_lines_not_the_stem():
     text = "hero_spr.png\nsize: 10,10\nr\nbounds: 0,0,1,1\n"
     assert png_names_for_save(text, 1, "hero.atlas") == ["hero_spr.png"]
