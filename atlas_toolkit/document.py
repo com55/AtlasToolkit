@@ -100,15 +100,51 @@ class Page:
 
 
 def _parse_int(s: str, default: int = 0) -> int:
-    """Lenient integer parse matching JS's parseInt(s, 10): consumes a
-    leading optional sign + digit run and ignores anything after it;
-    returns `default` when no leading digits are found at all (JS:
-    NaN -- Python has no int NaN, so `default` is the deliberate,
-    closest-available parity choice for the call sites below that have
-    no explicit NaN guard of their own, matching how the JS `rotate`
-    branch is the only one that DOES guard against NaN explicitly)."""
+    """Lenient integer parse matching JS's parseInt(s, 10) for the COMMON
+    case: consumes a leading optional sign + digit run and ignores
+    anything after it. Returns `default` when no leading digits are
+    found at all.
+
+    KNOWN, ACCEPTED DIVERGENCE from JS (found by Task 4's scrutinize
+    review, ruled on rather than "fixed" -- see revision note below):
+    for genuinely non-numeric field text, JS's parseInt returns NaN,
+    which then propagates unguarded into serialize() for every call site
+    except `rotate` (the only branch with its own explicit
+    `Number.isNaN(n) ? 0 : n` guard in the JS source) -- e.g.
+    `bounds: abc, 0, 10, 10` serializes as `bounds: NaN, 0, 10, 10` in
+    JS. This port substitutes `default` (0) instead, for every call
+    site, not just rotate -- NOT byte-identical to JS on that specific
+    malformed-input shape. Deliberately accepted, not fixed, because:
+    (a) no real Spine/TexturePacker-exported or this-tool-written atlas
+    file ever contains non-numeric field text, so the divergence is
+    unreachable via any real caller; (b) reproducing NaN would require
+    every Region/Page numeric field to accept int-or-float-NaN, breaking
+    type consistency across this whole module for a case with zero
+    practical benefit. Revisit if a future caller needs true
+    byte-identical parity on adversarial/corrupted input (e.g. a
+    fuzzer)."""
     m = re.match(r"\s*([+-]?\d+)", s)
     return int(m.group(1)) if m else default
+
+
+def _at(values: list[str], index: int) -> str:
+    """Safe list index -- returns "" (which _parse_int's regex simply
+    fails to match, so it falls through to `default`) instead of raising
+    IndexError when a malformed atlas line has fewer values than a
+    2-value field expects (e.g. "xy: 5" with no comma, or a bare
+    "size: 100"). Found by Task 4's scrutinize review: the JS source's
+    equivalent unguarded array index (`values[1]` on too-short an array)
+    yields `undefined`, and `parseInt(undefined, 10)` is `NaN` -- JS
+    never throws here. The original Python draft called `values[1]`
+    directly and crashed with IndexError on exactly this malformed
+    input, a genuinely NEW failure mode JS never had (not a faithfully-
+    ported JS bug, a real Python-only regression) -- fixed by routing
+    every 2-value field's second index through this helper. Only the
+    SECOND index of a comma-split 2-value field needs this: `line[colon+1:]
+    .split(",")` on any string, even one with no comma at all, always
+    yields at least a 1-element list, so `values[0]` can never be out of
+    range for these branches -- only `values[1]` can."""
+    return values[index] if index < len(values) else ""
 
 
 class AtlasDocument:
@@ -164,10 +200,10 @@ class AtlasDocument:
                         current_region.h = _parse_int(values[3])
                     elif key == "xy":
                         current_region.x = _parse_int(values[0])
-                        current_region.y = _parse_int(values[1])
+                        current_region.y = _parse_int(_at(values, 1))
                     elif key == "size" and current_region.w == 0:
                         current_region.w = _parse_int(values[0])
-                        current_region.h = _parse_int(values[1])
+                        current_region.h = _parse_int(_at(values, 1))
                     elif key == "rotate":
                         val = (values[0] or "").lower()
                         if val == "true":
@@ -188,7 +224,7 @@ class AtlasDocument:
                         current_region.extra_pairs.append((key, values))
                 elif current_page is not None:
                     if key == "size":
-                        current_page.size = [_parse_int(values[0]), _parse_int(values[1])]
+                        current_page.size = [_parse_int(values[0]), _parse_int(_at(values, 1))]
                     elif key == "format":
                         current_page.format = values[0]
                     elif key == "filter" and len(values) >= 2:
