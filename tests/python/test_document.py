@@ -268,3 +268,78 @@ def test_fixture_tie_rounding_matches_live_js_oracle_output():
         "  offsets: 0, 0, 7, 7",
     ])
     assert got == expected
+
+
+from atlas_toolkit.document import png_names_for_save
+
+
+def test_with_updates_replaces_bounds_offsets_rotate_and_applies_page_size():
+    text = "page1.png\nsize: 100,100\narmR\nbounds: 0, 0, 10, 10\n"
+    doc = AtlasDocument.parse(text)
+    updated = doc.with_updates(
+        {"armR": ([5, 5, 20, 20], [1, 1, 25, 25], 90)},
+        page_size=[200, 200],
+    )
+
+    expected = "\n".join([
+        "page1.png",
+        "size: 200,200",
+        "armR",
+        "  rotate: true",
+        "  bounds: 5, 5, 20, 20",
+        "  offsets: 1, 1, 25, 25",
+    ])
+    assert updated.serialize() == expected
+
+    # Original document must be unaffected (with_updates returns a new doc).
+    assert doc.pages[0].size[0] == 100
+    assert doc.pages[0].regions[0].x == 0
+
+
+def test_from_rebuild_args_builds_fresh_document_matching_hand_computed_expectation():
+    page_info = {
+        "page": "atlas2.png",
+        "format": "RGBA8888",
+        "filter": "Nearest, Nearest",
+        "repeat": "none",
+        "pma": False,
+    }
+    region_data = {
+        "foo": (
+            [0, 0, 10, 10],
+            None,
+            0,
+            {
+                "index": 2,
+                "split": [1, 2, 3, 4],
+                "pad": [0, 0, 0, 0],
+                "extraPairs": [("origin", ["5", "5"])],
+                "atlasName": "foo",
+            },
+        ),
+        "bar": ([10, 0, 15, 15], [0, 0, 15, 15], 0),
+    }
+    doc = AtlasDocument.from_rebuild_args(page_info, [300, 300], ["foo", "bar"], region_data)
+
+    expected = "\n".join([
+        "atlas2.png",
+        "size: 300,300",
+        "foo",
+        "  index: 2",
+        "  bounds: 0, 0, 10, 10",
+        "  split: 1, 2, 3, 4",
+        "  pad: 0, 0, 0, 0",
+        "  origin: 5, 5",
+        "bar",
+        "  bounds: 10, 0, 15, 15",
+    ])
+    assert doc.serialize() == expected
+
+
+def test_png_names_for_save_uses_atlas_page_lines_not_the_stem():
+    text = "hero_spr.png\nsize: 10,10\nr\nbounds: 0,0,1,1\n"
+    assert png_names_for_save(text, 1, "hero.atlas") == ["hero_spr.png"]
+
+
+def test_png_names_for_save_keeps_multi_page_names_in_order():
+    assert png_names_for_save(FIXTURE, 2, "pack.atlas") == ["page1.png", "page2.png"]

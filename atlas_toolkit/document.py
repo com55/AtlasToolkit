@@ -321,6 +321,112 @@ class AtlasDocument:
                 lines.extend(_serialize_region(region))
         return "\n".join(lines)
 
+    def with_updates(
+        self,
+        updated_regions: dict[str, tuple[list[int], Optional[list[int]], int]],
+        page_size: Optional[list[int]] = None,
+    ) -> "AtlasDocument":
+        """Return a new AtlasDocument with the given regions'
+        bounds/offsets/rotate replaced (and optionally every page's
+        declared size replaced), leaving everything else preserved.
+        `updated_regions` maps region name -> (bounds[4], offsets|None,
+        rotate). Unmatched regions/pages are reused by reference rather
+        than deep-cloned -- safe because callers treat the result as a
+        fresh snapshot to serialize, not as something to mutate further.
+        Mirrors atlas-document.js's withUpdates."""
+        new_pages = []
+        for page in self.pages:
+            new_size = page_size if page_size is not None else page.size
+            new_regions = []
+            for region in page.regions:
+                if region.name in updated_regions:
+                    bounds, offsets, rotate_val = updated_regions[region.name]
+                    new_regions.append(Region(
+                        name=region.name,
+                        atlas_name=region.atlas_name,
+                        page_filename=region.page_filename,
+                        x=bounds[0], y=bounds[1], w=bounds[2], h=bounds[3],
+                        index=region.index,
+                        offsets=offsets,
+                        rotate=rotate_val,
+                        split=region.split,
+                        pad=region.pad,
+                        extra_pairs=region.extra_pairs,
+                    ))
+                else:
+                    new_regions.append(region)
+            new_pages.append(Page(
+                filename=page.filename,
+                size=new_size,
+                format=page.format,
+                filter=page.filter,
+                repeat=page.repeat,
+                pma=page.pma,
+                scale_x=page.scale_x,
+                scale_y=page.scale_y,
+                extra_pairs=page.extra_pairs,
+                regions=new_regions,
+            ))
+        return AtlasDocument(new_pages)
+
+    @staticmethod
+    def from_rebuild_args(
+        page_info: dict,
+        new_size: list[int],
+        region_names: list[str],
+        region_data: dict[str, tuple],
+    ) -> "AtlasDocument":
+        """Build a full fresh single-page AtlasDocument from scratch
+        (used after a complete repack). `page_info` may contain
+        'page'/'format'/'filter'/'repeat'/'pma' keys; any missing/falsy
+        key falls back to the same default atlas-document.js's
+        fromRebuildArgs uses. `region_data` maps region name ->
+        (bounds[4], offsets|None, rotate, meta?) where meta may carry
+        {atlasName, index, split, pad, extraPairs}."""
+        page = Page(
+            filename=str(page_info.get("page") or "atlas.png"),
+            size=new_size,
+            format=str(page_info.get("format") or "RGBA8888"),
+            filter=_parse_filter(page_info.get("filter")),
+            repeat=str(page_info.get("repeat") or "none"),
+            pma=bool(page_info.get("pma")),
+        )
+
+        regions = []
+        for name in region_names:
+            if name not in region_data:
+                continue
+            entry = region_data[name]
+            bounds = entry[0]
+            offsets = entry[1]
+            rotate_val = entry[2]
+            meta = entry[3] if len(entry) > 3 and entry[3] else {}
+
+            index = meta.get("index") if isinstance(meta.get("index"), int) else -1
+            split = list(meta["split"]) if isinstance(meta.get("split"), list) else None
+            pad = list(meta["pad"]) if isinstance(meta.get("pad"), list) else None
+            raw_extra = meta.get("extraPairs")
+            extra_pairs = (
+                [(str(p[0]), [str(v) for v in (p[1] or [])]) for p in raw_extra if p and p[0]]
+                if isinstance(raw_extra, list)
+                else []
+            )
+
+            regions.append(Region(
+                name=name,
+                atlas_name=str(meta.get("atlasName") or meta.get("name") or name),
+                page_filename=page.filename,
+                x=bounds[0], y=bounds[1], w=bounds[2], h=bounds[3],
+                offsets=offsets,
+                rotate=rotate_val,
+                index=index,
+                split=split,
+                pad=pad,
+                extra_pairs=extra_pairs,
+            ))
+        page.regions = regions
+        return AtlasDocument([page])
+
 
 def _is_default_offsets(offsets: Optional[list[int]], bounds: list[int]) -> bool:
     if not offsets:
@@ -372,3 +478,28 @@ def _serialize_region(region: Region) -> list[str]:
     for key, values in region.extra_pairs:
         lines.append(f"  {key}: {', '.join(values)}")
     return lines
+
+
+def _parse_filter(value) -> list[str]:
+    if isinstance(value, list) and len(value) >= 2:
+        return [str(value[0]), str(value[1])]
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",")]
+        if len(parts) >= 2:
+            return [parts[0], parts[1]]
+    return ["Nearest", "Nearest"]
+
+
+def png_names_for_save(
+    atlas_text: str, page_count: int, atlas_filename: str = "atlas.atlas"
+) -> list[str]:
+    """PNG filenames to write next to a saved atlas. Always taken from
+    the atlas text's page lines -- not the .atlas stem ("hero.atlas" must
+    not become "hero.png" when the page is "hero_spr.png")."""
+    names = AtlasDocument.parse(atlas_text or "").page_filenames()
+    stem = re.sub(r"\.[^.]+$", "", str(atlas_filename or "atlas")) or "atlas"
+    count = int(page_count) if page_count else 0
+    out = []
+    for i in range(count):
+        out.append(names[i] if i < len(names) else (f"{stem}.png" if count == 1 else f"page{i}.png"))
+    return out
