@@ -20,6 +20,8 @@ CLAUDE.md
 test*
 !/tests/
 !/tests/**
+tests/**/__pycache__/
+tests/**/*.py[cod]
 
 # Superpowers SDD scratch (local only)
 .superpowers

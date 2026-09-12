@@ -561,10 +561,23 @@ def png_names_for_save(
 ) -> list[str]:
     """PNG filenames to write next to a saved atlas. Always taken from
     the atlas text's page lines -- not the .atlas stem ("hero.atlas" must
-    not become "hero.png" when the page is "hero_spr.png")."""
+    not become "hero.png" when the page is "hero_spr.png").
+
+    `page_count` is guarded against non-numeric input (fixed after the
+    final whole-branch review found `int(page_count)` crashes where real
+    JS's `Number(x) || 0` degrades to 0) -- matches this module's
+    established crash-vs-silent-divergence standard (see `_at`/`_get_or`).
+    Does NOT reproduce JS's float-loop-bound quirk exactly (JS's
+    `for(i=0;i<count;i++)` with count=3.7 runs 4 iterations since
+    `3<3.7`; Python's `range(int(3.7))` runs 3) -- no real caller passes
+    a non-integer page_count, so this narrower gap is accepted, same
+    class of acceptance as `_parse_int`'s NaN/0 divergence."""
     names = AtlasDocument.parse(atlas_text or "").page_filenames()
     stem = re.sub(r"\.[^.]+$", "", str(atlas_filename or "atlas")) or "atlas"
-    count = int(page_count) if page_count else 0
+    try:
+        count = int(page_count) if page_count else 0
+    except (TypeError, ValueError):
+        count = 0
     out = []
     for i in range(count):
         out.append(names[i] if i < len(names) else (f"{stem}.png" if count == 1 else f"page{i}.png"))
