@@ -9,7 +9,7 @@
  * points (not just parse/serialize) so this harness can actually reach
  * the functions Task 5's scrutinize review found real bugs in.
  */
-import { AtlasDocument } from '../../www/js/atlas-document.js';
+import { AtlasDocument, pngNamesForSave } from '../../www/js/atlas-document.js';
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -29,6 +29,8 @@ for (const [name, spec] of Object.entries(cases)) {
       spec.page_info, spec.new_size, spec.region_names, spec.region_data
     );
     out[name] = doc.serialize();
+  } else if (spec.fn === 'png_names_for_save') {
+    out[name] = pngNamesForSave(spec.atlas_text, spec.page_count, spec.atlas_filename);
   } else {
     throw new Error(`unknown fn: ${spec.fn}`);
   }

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from atlas_toolkit.document import AtlasDocument
+from atlas_toolkit.document import AtlasDocument, png_names_for_save
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="node not found on PATH"
@@ -79,6 +79,12 @@ rotate: 180
             "bar": [[10, 0, 15, 15], [0, 0, 15, 15], 0],
         },
     },
+    "png_names_for_save_basic": {
+        "fn": "png_names_for_save",
+        "atlas_text": "hero_spr.png\nsize: 10,10\nr\nbounds: 0,0,1,1\n",
+        "page_count": 1,
+        "atlas_filename": "hero.atlas",
+    },
 }
 
 
@@ -109,7 +115,7 @@ def _run_js_reference(cases: dict) -> dict[str, str]:
         )
 
 
-def _run_python_side(spec: dict) -> str:
+def _run_python_side(spec: dict) -> object:
     fn = spec["fn"]
     if fn == "parse_serialize":
         return AtlasDocument.parse(spec["atlas_text"]).serialize()
@@ -122,6 +128,10 @@ def _run_python_side(spec: dict) -> str:
             spec["page_info"], spec["new_size"], spec["region_names"], spec["region_data"]
         )
         return doc.serialize()
+    if fn == "png_names_for_save":
+        return png_names_for_save(
+            spec["atlas_text"], spec["page_count"], spec.get("atlas_filename", "atlas.atlas")
+        )
     raise ValueError(f"unknown fn: {fn}")
 
 
