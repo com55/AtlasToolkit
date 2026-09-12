@@ -85,6 +85,19 @@ rotate: 180
         "page_count": 1,
         "atlas_filename": "hero.atlas",
     },
+    "png_names_for_save_nonnumeric_page_count": {
+        # Discriminates the actual bug the final-review fix closed (a
+        # crashing int(page_count)) -- the "_basic" case above only
+        # covers the happy path and would stay green even if a future
+        # refactor dropped the try/except guard. Both sides degrade to
+        # an empty list for a non-numeric count (real JS: Number("abc")
+        # || 0 -> 0; Python: guarded int() falling back to 0) -- found
+        # missing by the final-review fix's own scoped re-review.
+        "fn": "png_names_for_save",
+        "atlas_text": "hero_spr.png\nsize: 10,10\nr\nbounds: 0,0,1,1\n",
+        "page_count": "abc",
+        "atlas_filename": "hero.atlas",
+    },
 }
 
 
