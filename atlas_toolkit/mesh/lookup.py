@@ -5,10 +5,13 @@ LinkedMesh/Path/Point/Clipping are dropped here -- callers treat a missing
 lookup entry as "no mask data for this region," same as any other
 unavailable case.
 
-`parsed_skeleton`'s shape matches spine_binary's parse_skeleton() output
-(Task 7): {"version": {...}, "attachments": {name: {"type": str,
-"path": str, "uvs": list[float] | None, "triangles": list[int] | None}}}
--- a plain dict keyed by name, not a JS Map (Python dicts already preserve
+`parsed_skeleton`'s shape matches the skel-mesh-parser package's
+parse_skeleton() output (Task 7, a separate sibling repo -- see this
+project's Stage 2 plan for why): {"version": {...}, "attachments":
+{name: {"type": str, "path": str, ...}}}, where non-Mesh entries omit
+"uvs"/"triangles" entirely rather than setting them to None (confirmed
+against the real shipped output during the Stage 2 final review) -- a
+plain dict keyed by name, not a JS Map (Python dicts already preserve
 insertion order, so no ordering behavior is lost in translation)."""
 from __future__ import annotations
 
