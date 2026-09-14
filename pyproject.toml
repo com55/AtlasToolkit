@@ -12,10 +12,14 @@ dependencies = [
     "pillow==12.1.1",
     "pywebview==6.1",
     "requests==2.32.5",
+    "skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@python",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["atlas_toolkit"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [dependency-groups]
 dev = [
