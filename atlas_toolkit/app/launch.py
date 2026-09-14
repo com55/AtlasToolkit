@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -76,9 +77,46 @@ def configure_logging() -> None:
     )
 
 
+def _allow_qtwebengine_file_module_imports() -> None:
+    """Let QtWebEngine load `www/index.html`'s `<script type="module">` chain
+    over a literal `file://` URI (how `launch.py` always loads it -- see
+    `gui_path` below).
+
+    Chromium enforces CORS on ES-module fetches even for same-directory
+    relative imports, and `file://` isn't in the CORS-safelisted schemes --
+    so without this, `www/script.js` (and everything under `www/js/`) never
+    loads at all: every `window.*` handler `index.html`'s inline
+    `onclick="..."` attributes call (`openFile`, etc.) stays undefined, and
+    every button throws `ReferenceError` on click. Confirmed via a live
+    Chrome DevTools Protocol session against the real Qt-backend window
+    (2026-09-14): `typeof window.openFile` was `"undefined"` before this
+    fix, `"function"` after.
+
+    pywebview's own CEF and EdgeChromium (Windows WebView2) backends already
+    work around exactly this by adding `--allow-file-access-from-files` to
+    their browser args (see `.venv/.../webview/platforms/cef.py` and
+    `edgechromium.py`) -- only the Qt backend (`platforms/qt.py`) is missing
+    it, which is why this only surfaced when pywebview picked Qt (this
+    happens whenever no GTK bindings are available, e.g. `PYWEBVIEW_GUI=qt`
+    or a Linux box without GTK webkit installed).
+
+    Must run before ANY pywebview call touches the Qt backend --
+    `webview.screens[0]` below already triggers backend initialization on
+    non-Windows platforms, so this has to be the first thing `run()` does.
+    `QTWEBENGINE_CHROMIUM_FLAGS` is specific to Qt's bundled Chromium and is
+    simply ignored by every other backend (GTK, CEF, EdgeChromium), so
+    setting it unconditionally here is a no-op everywhere except Qt.
+    """
+    existing = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    flag = "--allow-file-access-from-files"
+    if flag not in existing.split():
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{existing} {flag}".strip()
+
+
 def run() -> None:
     configure_stdio()
     configure_logging()
+    _allow_qtwebengine_file_module_imports()
 
     clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
