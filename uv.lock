@@ -503,8 +503,8 @@ wheels = [
 
 [[package]]
 name = "skel-mesh-parser"
-version = "0.1.0"
-source = { git = "https://github.com/com55/skel-mesh-parser.git?rev=python#9bb59d30864d5003848abc7c2a7aef3327c11aec" }
+version = "0.2.0"
+source = { git = "https://github.com/com55/skel-mesh-parser.git?rev=python#1b0dd79193adfaae0eb6a7595045012595c3355d" }
 
 [[package]]
 name = "typing-extensions"
