@@ -137,6 +137,36 @@ const oracle = await page.evaluate(async (dataUrl) => {
   cases['rotate_image_270'] = canvasToRGBA(rotate90CCW); // degrees=270 -> crop_rotate(...,270)
   cases['rotate_image_180'] = canvasToRGBA(rotate180);
 
+  // paste_partial_over_partial: real Canvas Porter-Duff "source-over"
+  // compositing (ctx.drawImage's default globalCompositeOperation) for the
+  // ONE alpha regime Task 3's scrutinize review found completely
+  // uncovered -- BOTH dest and src alpha strictly between 0 and 255,
+  // the only case where the unpremultiply division in "over" actually
+  // executes and a Pillow-vs-Canvas fixed-point rounding difference could
+  // surface. Uses putImageData (not fillStyle, which parses through a
+  // CSS color string and could round differently) to set EXACT straight-
+  // alpha pixel values, matching Pillow's own straight-alpha
+  // representation bit-for-bit on the input side -- so any difference in
+  // the OUTPUT is attributable only to the compositing math itself, not
+  // to input rounding. dest=(255,0,0,128) (opaque-ish red),
+  // src=(0,0,255,128) (opaque-ish blue) -- the exact values scrutinize's
+  // own hand-derivation used.
+  function makeSolidCanvas(w, h, r, g, b, a) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    const imgData = ctx.createImageData(w, h);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+      imgData.data[i] = r; imgData.data[i + 1] = g; imgData.data[i + 2] = b; imgData.data[i + 3] = a;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return c;
+  }
+  const pasteDest = makeSolidCanvas(1, 1, 255, 0, 0, 128);
+  const pasteSrc = makeSolidCanvas(1, 1, 0, 0, 255, 128);
+  pasteDest.getContext('2d').drawImage(pasteSrc, 0, 0); // default source-over
+  cases['paste_partial_over_partial'] = canvasToRGBA(pasteDest);
+
   return cases;
 }, `data:image/png;base64,${fixtureB64}`);
 
