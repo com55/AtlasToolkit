@@ -1,4 +1,16 @@
+import json
+from pathlib import Path
+
+import pytest
+
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+
+FIXTURES = Path(__file__).parent / "fixtures"
+ORACLE_PATH = FIXTURES / "raster_js_oracle.json"
+
+
+def _load_oracle():
+    return json.loads(ORACLE_PATH.read_text())
 
 
 def test_paste_alpha_composites_overlapping_semi_transparent_regions():
@@ -91,6 +103,37 @@ def test_paste_clips_when_box_extends_past_dest_bounds():
     assert backend.size(dest) == (2, 2)  # dest itself never resizes
 
 
+@pytest.mark.skipif(
+    not ORACLE_PATH.exists(),
+    reason="raster_js_oracle.json not generated -- run tests/python/gen_js_reference_raster.mjs",
+)
+def test_paste_partial_over_partial_matches_js_oracle():
+    """The one alpha-compositing regime scrutinize round 1 (Task 3) found
+    completely uncovered: BOTH dest and src alpha strictly between 0 and
+    255 -- the only case where the unpremultiply division in Porter-Duff
+    "over" actually executes, and where a Pillow-vs-Canvas fixed-point
+    rounding difference could silently surface (every other test in this
+    file has at least one side fully opaque or fully transparent, where
+    that division either doesn't run or is trivial). dest=(255,0,0,128),
+    src=(0,0,255,128) -- composited for real in Chromium via putImageData
+    (exact straight-alpha input, bypassing any fillStyle-parsing rounding)
+    + ctx.drawImage's default source-over, recorded in
+    raster_js_oracle.json's paste_partial_over_partial case. Empirically:
+    Pillow and real Canvas agree bit-for-bit here, (85, 0, 170, 192) both
+    sides -- this test pins that confirmed value, it does not re-derive
+    it from theory."""
+    oracle = _load_oracle()["paste_partial_over_partial"]
+    backend = PillowRasterBackend()
+    dest = backend.create(1, 1)
+    backend._images[dest].putpixel((0, 0), (255, 0, 0, 128))
+    src = backend.create(1, 1)
+    backend._images[src].putpixel((0, 0), (0, 0, 255, 128))
+
+    backend.paste(dest, src, 0, 0)
+
+    assert list(backend._images[dest].getpixel((0, 0))) == oracle["rgba"]
+
+
 def test_get_pixels_returns_row_major_rgba_bytes():
     backend = PillowRasterBackend()
     handle = backend.create(2, 1)
@@ -100,6 +143,36 @@ def test_get_pixels_returns_row_major_rgba_bytes():
     data = backend.get_pixels(handle)
 
     assert data == bytes([1, 2, 3, 4, 5, 6, 7, 8])
+
+
+def test_get_pixels_and_read_alpha_mask_agree_on_row_major_layout():
+    """The existing get_pixels/read_alpha_mask tests are both single-ROW
+    images (2x1, 3x1) -- row-major and column-major byte order are
+    indistinguishable for a single row, so neither test could actually
+    catch a transposed layout. read_alpha_mask's real consumer
+    (domain/packing.py, a later stage, per base.py's docstring) indexes
+    it as mask[y*w+x] -- a transposed mask would silently misplace
+    sprites in packing, not crash. This 2x2, four-distinct-value case is
+    the smallest one that can actually discriminate row-major from
+    column-major, and additionally cross-checks that get_pixels's 4-byte
+    stride and read_alpha_mask's 1-byte stride stay index-aligned
+    (alpha[i] corresponds to the same pixel as pixels[i*4:i*4+4])."""
+    backend = PillowRasterBackend()
+    handle = backend.create(2, 2)
+    # Row 0: (10,y),(20,y)=20  Row 1: (30,y),(40,y)=40 -- each pixel's alpha
+    # is a distinct multiple of 10 so a transposed read is unambiguous.
+    backend._images[handle].putpixel((0, 0), (1, 1, 1, 10))
+    backend._images[handle].putpixel((1, 0), (2, 2, 2, 20))
+    backend._images[handle].putpixel((0, 1), (3, 3, 3, 30))
+    backend._images[handle].putpixel((1, 1), (4, 4, 4, 40))
+
+    pixels = backend.get_pixels(handle)
+    mask = backend.read_alpha_mask(handle)
+
+    assert pixels == bytes([1, 1, 1, 10, 2, 2, 2, 20, 3, 3, 3, 30, 4, 4, 4, 40])
+    assert mask == [True, True, True, True]  # all four alphas are nonzero
+    for i in range(4):
+        assert mask[i] == (pixels[i * 4 + 3] != 0)
 
 
 def test_read_alpha_mask_thresholds_at_zero():
