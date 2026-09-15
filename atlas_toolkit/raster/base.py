@@ -1,0 +1,127 @@
+"""RasterBackend -- the pixel-execution seam for the Python-canonical port.
+
+Port of the abstract contract defined in the architecture spec
+(docs/superpowers/specs/2026-09-10-python-canonical-architecture-design.md,
+rev 7, §3). This module defines the FULL Protocol -- every method the whole
+Phase-3 migration will eventually need, not just what atlas_toolkit's
+"basic raster" stage (this one) implements. `PillowRasterBackend`
+(pillow_backend.py) is the only concrete backend Phase 3 ships; no
+CanvasRasterBackend exists or is planned -- per the architecture decision,
+JS stops being a raster implementation entirely once the port lands.
+
+Binding invariants for every concrete backend (not just PillowRasterBackend,
+should another ever exist):
+
+- Every `ImageHandle` a backend hands back refers to an RGBA image, for the
+  handle's entire lifetime. `decode_png` converts non-RGBA source PNGs
+  (Pillow opens PNGs as P/RGB/L/LA/RGBA depending on the file) to RGBA on
+  load; every other allocating method (`create`, `crop_rotate`,
+  `rotate_image`, `clone`) only ever produces RGBA images by construction.
+  Without this, `paste`'s alpha-compositing math and `get_pixels`'s
+  4-bytes-per-pixel contract would silently misbehave on non-RGBA input.
+- `create(width, height)`'s initial fill is transparent (RGBA
+  `(0, 0, 0, 0)`), matching a DOM canvas's implicit default -- pinned
+  explicitly since Pillow's `Image.new` has no implicit default to rely on.
+- A handle is valid from its allocation until its `dispose()` call. Using a
+  disposed or never-allocated handle is a caller bug; `PillowRasterBackend`
+  surfaces this as the natural `KeyError` from its internal registry dict
+  lookup -- no dedicated exception type, since nothing in this spec or its
+  real callers needs to distinguish "disposed" from "never existed."
+  Ownership/lifetime beyond that (which `AtlasSession` disposes when) is a
+  later stage's concern (spec §3's "ImageHandle lifecycle" paragraph) --
+  not designed here.
+- Never assert byte-identity of `encode_png`'s OUTPUT against another
+  runtime's PNG encoder (a browser's `canvas.toBlob`, another Pillow
+  build). Encoders differ byte-for-byte even for pixel-identical images.
+  Cross-language parity is a DECODED-PIXEL property, checked by decoding
+  both sides before comparing -- see tests/python/gen_js_reference_raster.mjs
+  and its comparison tests for how this plan does it.
+"""
+from __future__ import annotations
+
+from typing import NewType, Protocol
+
+ImageHandle = NewType("ImageHandle", int)
+
+
+class RasterBackend(Protocol):
+    def decode_png(self, data: bytes) -> ImageHandle: ...
+    def encode_png(self, handle: ImageHandle) -> bytes: ...
+    def create(self, width: int, height: int) -> ImageHandle: ...
+    def size(self, handle: ImageHandle) -> tuple[int, int]: ...
+
+    def crop_rotate(
+        self, handle: ImageHandle, x: int, y: int, w: int, h: int, rotate: int
+    ) -> ImageHandle:
+        """Mirrors core-region-ops.js's cropAndRotate exactly: crop then
+        place into a canvas sized (w, h) as stored in the atlas.
+        rotate in {0, 90, 180, 270} -- the STORED atlas rotation to undo,
+        not an arbitrary rotation angle (core-region-ops.js:1-18's header
+        comment documents the PIL-rotation-direction mapping this is
+        derived from: rotate==90 -> PIL ROTATE_270 (undo via 90 CW),
+        rotate==270 -> PIL ROTATE_90 (undo via 90 CCW), rotate==180 ->
+        PIL ROTATE_180)."""
+
+    def rotate_image(self, handle: ImageHandle, degrees: int) -> ImageHandle:
+        """Rotate the WHOLE image, using the exact same `degrees` convention
+        as crop_rotate's `rotate` parameter above (not a general/arbitrary
+        rotation angle) -- this is a convenience wrapper for the common
+        "whole canvas, no real crop" case atlas-modifier.js's
+        _rotate90CCW/_rotate90CW/_rotate180 helpers cover (atlas-modifier.js:
+        1002-1023), each of which is itself implemented purely via
+        cropAndRotate(src, 0, 0, <swapped-or-not dims>, <rotate value>) --
+        there is no separate whole-canvas rotation algorithm in the real
+        JS to port independently. degrees=0 is an identity crop of the
+        whole image (equivalent to clone())."""
+
+    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
+        """Mutates dest in place -- same contract as ctx.drawImage(src, x, y):
+        a Porter-Duff "source-over" alpha composite of src onto dest at
+        (x, y), NOT a raw overwrite. See this plan's Global Constraints for
+        why a naive Image.paste(src, box) is wrong here (it overwrites
+        dest's alpha channel via memcpy instead of blending) and the
+        overlay + alpha_composite construction this backend uses instead."""
+
+    def rasterize_mesh_mask(
+        self, uvs: list[float], triangles: list[int], width: int, height: int,
+    ) -> ImageHandle:
+        """Standalone opaque-white-inside mask, nonzero-winding-rule compound-
+        path fill -- matches region-mesh-mask.js's rasterizeMeshMask exactly.
+        NOT IMPLEMENTED in this stage -- lands in the separate, later "mesh"
+        stage per the architecture spec's §7 migration ordering (basic raster
+        -> modifier -> repack -> mesh). PillowRasterBackend.rasterize_mesh_mask
+        raises NotImplementedError until that stage. Real implementation
+        needs a from-scratch vectorized (numpy) rasterizer -- Pillow's
+        ImageDraw has no native winding-rule compound-path fill primitive --
+        which is exactly the kind of dependency/design decision this stage
+        deliberately defers rather than folding in silently."""
+
+    def composite_destination_in(
+        self, dest: ImageHandle, mask: ImageHandle,
+        src_rect: tuple[int, int, int, int] | None = None,
+    ) -> None:
+        """Mutates dest, keeping only pixels where mask is opaque (Porter-Duff
+        destination-in). NOT IMPLEMENTED in this stage -- same "mesh" stage
+        deferral as rasterize_mesh_mask above; this primitive has no caller
+        until mesh masking ports, since every real call site composites a
+        mesh-rasterized mask specifically."""
+
+    def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
+        """One bool per pixel, row-major, True where alpha > 0 -- matches
+        repack-nest.js's thresholdAlpha exactly (`data[i*4+3] > 0 ? 1 : 0`,
+        repack-nest.js:258). Feeds domain/packing.py's silhouette-based
+        placement decisions, a later stage -- this stage only provides the
+        primitive itself."""
+
+    def get_pixels(self, handle: ImageHandle) -> bytes:
+        """Raw RGBA bytes, row-major (4 bytes/pixel). Feeds
+        engine/modifier.py's _canvasHash dedup (atlas-modifier.js:359-387,
+        a later stage), which needs full color data, not just alpha --
+        read_alpha_mask alone would silently collide sprites that differ in
+        color but share a silhouette. That JS function's double-getImageData
+        "priming read" is a workaround for a documented Chromium-specific
+        GPU-readback bug; it does not apply to Pillow and is not ported --
+        a single get_pixels call is sufficient."""
+
+    def clone(self, handle: ImageHandle) -> ImageHandle: ...
+    def dispose(self, handle: ImageHandle) -> None: ...
