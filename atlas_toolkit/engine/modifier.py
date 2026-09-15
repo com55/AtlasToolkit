@@ -306,6 +306,24 @@ def scale_document_to_page_image(
     return scaled
 
 
+@dataclass(frozen=True)
+class PreparedMod:
+    """prepare_mod_image's result. `image` is always a handle distinct
+    from the input mod (see prepare_mod_image). Two distinct flags, never
+    to be conflated:
+    - shared_canvas_mod: several selected regions share this one image, so
+      placement must never rotate it (would break their shared coordinate
+      space); implies more than one selected region.
+    - is_full_canvas: the image needs no offset/trim, however many regions
+      are selected -- feeds the session's full-canvas-region set, so repack
+      resets those regions' offsets instead of preserving stale ones."""
+    image: ImageHandle
+    mod_w: int
+    mod_h: int
+    shared_canvas_mod: bool
+    is_full_canvas: bool
+
+
 class AtlasModifier:
     """Port of atlas-modifier.js's AtlasModifier, production-live surface
     only (see the module docstring). One instance per (document, page
@@ -340,3 +358,45 @@ class AtlasModifier:
         ]
         self.region_names: list[str] = [region.name for region in scoped]
         self.regions: dict[str, Region] = {region.name: region for region in scoped}
+
+    def _selected_offsets(self, selected_regions: list[str]) -> list[Optional[list[int]]]:
+        """Per selected name, in selection order: its offsets, or None when
+        the name is outside this modifier's page scope or has no offsets."""
+        return [
+            self.regions[name].offsets if name in self.regions else None
+            for name in selected_regions
+        ]
+
+    def prepare_mod_image(self, mod_image: ImageHandle, selected_regions: list[str]) -> PreparedMod:
+        """Resolve the selection's logical canvas and, unless the mod is
+        full-canvas, pad it onto that canvas at the Spine offset position
+        (left, orig_h - bottom - sprite_h), scaled from the base canvas to
+        the resolved canvas. Resolves against this modifier's (scaled)
+        regions -- the session runs it on a fresh modifier. Port of
+        AtlasModifier._prepareModImage.
+
+        Always returns a handle distinct from `mod_image`: a fresh padded
+        image, or raster.clone(mod_image) when no padding is needed. JS
+        gets that property from _toCanvas drawing each loaded Image into a
+        fresh canvas; group_names_by_sprite_identity depends on it. The
+        input handle is never modified or disposed."""
+        mod_w, mod_h = self.raster.size(mod_image)
+        selected_offsets = self._selected_offsets(selected_regions)
+        canvas = resolve_mod_canvas(selected_offsets, mod_w, mod_h)
+
+        needs_padding = not canvas.is_full_canvas and (
+            mod_w != canvas.orig_canvas_w or mod_h != canvas.orig_canvas_h
+        )
+        if needs_padding:
+            scale_x = canvas.orig_canvas_w / canvas.base_orig_w if canvas.base_orig_w > 0 else 1
+            scale_y = canvas.orig_canvas_h / canvas.base_orig_h if canvas.base_orig_h > 0 else 1
+            paste_x = round_half_even(canvas.off_x * scale_x)
+            paste_y = canvas.orig_canvas_h - mod_h - round_half_even(canvas.off_y * scale_y)
+            image = self.raster.create(canvas.orig_canvas_w, canvas.orig_canvas_h)
+            self.raster.paste(image, mod_image, paste_x, paste_y)
+            mod_w, mod_h = canvas.orig_canvas_w, canvas.orig_canvas_h
+        else:
+            image = self.raster.clone(mod_image)
+
+        shared_canvas_mod = canvas.is_full_canvas and selected_share_canvas(selected_offsets)
+        return PreparedMod(image, mod_w, mod_h, shared_canvas_mod, canvas.is_full_canvas)
