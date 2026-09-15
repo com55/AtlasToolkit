@@ -69,7 +69,7 @@ def _python_result(op: str, args: list):
 @pytest.fixture(scope="module")
 def js_results(run_modifier_oracle):
     case_ids = list(CASES)
-    return dict(zip(case_ids, run_modifier_oracle([CASES[c] for c in case_ids])))
+    return dict(zip(case_ids, run_modifier_oracle([CASES[c] for c in case_ids]), strict=True))
 
 
 @pytest.mark.parametrize("case_id", list(CASES))
