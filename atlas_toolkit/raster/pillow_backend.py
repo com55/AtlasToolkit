@@ -83,3 +83,22 @@ class PillowRasterBackend:
     def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
         alpha_channel = self._images[handle].getchannel("A")
         return [byte != 0 for byte in alpha_channel.tobytes()]
+
+    def rasterize_mesh_mask(
+        self, uvs: list[float], triangles: list[int], width: int, height: int,
+    ) -> "ImageHandle":
+        raise NotImplementedError(
+            "rasterize_mesh_mask lands in the separate 'mesh' stage (spec "
+            "§7 ordering: basic raster -> modifier -> repack -> mesh), not "
+            "this one -- see atlas_toolkit/raster/base.py's docstring."
+        )
+
+    def composite_destination_in(
+        self, dest: ImageHandle, mask: ImageHandle,
+        src_rect: tuple[int, int, int, int] | None = None,
+    ) -> None:
+        raise NotImplementedError(
+            "composite_destination_in lands in the separate 'mesh' stage "
+            "(spec §7 ordering), not this one -- see "
+            "atlas_toolkit/raster/base.py's docstring."
+        )
