@@ -29,8 +29,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
+from atlas_toolkit.document import AtlasDocument, Region
 from atlas_toolkit.domain.region_ops import round_half_even
-from atlas_toolkit.raster.base import ImageHandle
+from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
 def canvas_size_match(
@@ -232,3 +233,110 @@ def group_names_by_sprite_identity(
             continue
         groups.setdefault(handle, []).append(name)
     return list(groups.values())
+
+
+def scale_document_to_page_image(
+    document: AtlasDocument, target_page: str, real_w: int, real_h: int,
+) -> AtlasDocument:
+    """Reconcile `target_page`'s declared `size:` with its real loaded
+    image size (real_w x real_h). When they differ, every region on that
+    page gets x/y/w/h and offsets rescaled by (real_w/declared_w,
+    real_h/declared_h) with banker's rounding, and that page's size becomes
+    [real_w, real_h]; other pages are untouched. Port of
+    AtlasModifier._scaleAtlasText, taking a pre-parsed document instead of
+    text (spec §1 rev 7). Spec §2 names `rebuild()` as this step's home;
+    `rebuild()` itself belongs to the repack stage and will call this
+    function (via AtlasModifier) rather than contain the logic -- it is a
+    standalone function now because AtlasModifier's constructor already
+    needs it, exactly as JS runs _scaleAtlasText inside its constructor.
+
+    Returns `document` itself (the same object, unmodified) when no
+    rescale applies: target page absent, declared size has a zero
+    dimension, or sizes already match. Otherwise returns a new document;
+    the input is never mutated.
+
+    JS round-trip fidelity: the JS scaled branch serializes the updated
+    text and AtlasModifier re-parses it, so two canonicalizing-serializer
+    effects reach every region on the target page -- offsets equal to the
+    default (0, 0, w, h) come back as null, and a rotate outside
+    {90, 180, 270} comes back as 0 (confirmed by Node probe, 2026-09-15).
+    Both are reproduced explicitly below rather than by re-parsing text.
+    The no-op branches keep explicit default offsets, as JS does by
+    returning its original text. (The JS round-trip also nulls default
+    offsets on OTHER pages; AtlasModifier scopes everything to the target
+    page, so that difference is not observable through this module.)"""
+    target_pages = [page for page in document.pages if page.filename == target_page]
+    if not target_pages:
+        return document
+    declared_w, declared_h = target_pages[0].size
+    if declared_w == 0 or declared_h == 0:
+        return document
+    if real_w == declared_w and real_h == declared_h:
+        return document
+
+    sx = real_w / declared_w
+    sy = real_h / declared_h
+    updated: dict[str, tuple[list[int], Optional[list[int]], int]] = {}
+    for page in target_pages:
+        for region in page.regions:
+            bounds = [
+                round_half_even(region.x * sx),
+                round_half_even(region.y * sy),
+                round_half_even(region.w * sx),
+                round_half_even(region.h * sy),
+            ]
+            offsets = None
+            if region.offsets is not None:
+                off_x, off_y, orig_w, orig_h = region.offsets
+                offsets = [
+                    round_half_even(off_x * sx),
+                    round_half_even(off_y * sy),
+                    round_half_even(orig_w * sx),
+                    round_half_even(orig_h * sy),
+                ]
+                if offsets[0] == 0 and offsets[1] == 0 and offsets[2] == bounds[2] and offsets[3] == bounds[3]:
+                    offsets = None
+            rotate = region.rotate if region.rotate in (90, 180, 270) else 0
+            updated[region.name] = (bounds, offsets, rotate)
+
+    scaled = document.with_updates(updated)
+    for page in scaled.pages:
+        if page.filename == target_page:
+            page.size = [real_w, real_h]
+    return scaled
+
+
+class AtlasModifier:
+    """Port of atlas-modifier.js's AtlasModifier, production-live surface
+    only (see the module docstring). One instance per (document, page
+    image) pair, the way atlas-session.js constructs one per page per
+    operation.
+
+    Deliberate departures from the JS constructor
+    (atlasText, atlasFilename, baseImage, targetPage = null):
+    - takes a pre-parsed AtlasDocument, never text (spec §1 rev 7);
+    - no atlas_filename: JS stores it but never reads it;
+    - target_page is required: every production construction passes a
+      page filename, and JS's targetPage = null branch is production-dead;
+    - raster: the RasterBackend that owns base_image and every handle this
+      object creates.
+
+    `regions` values may be the very Region objects of the caller's
+    document (no-op scale) -- treat them as read-only."""
+
+    def __init__(
+        self, document: AtlasDocument, base_image: ImageHandle, raster: RasterBackend, target_page: str,
+    ) -> None:
+        self.raster = raster
+        self.base_image = base_image
+        self.target_page = target_page
+        real_w, real_h = raster.size(base_image)
+        self.document = scale_document_to_page_image(document, target_page, real_w, real_h)
+        scoped = [
+            region
+            for page in self.document.pages
+            if page.filename == target_page
+            for region in page.regions
+        ]
+        self.region_names: list[str] = [region.name for region in scoped]
+        self.regions: dict[str, Region] = {region.name: region for region in scoped}
