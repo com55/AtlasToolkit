@@ -86,7 +86,7 @@ class PillowRasterBackend:
 
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
-    ) -> "ImageHandle":
+    ) -> ImageHandle:
         raise NotImplementedError(
             "rasterize_mesh_mask lands in the separate 'mesh' stage (spec "
             "§7 ordering: basic raster -> modifier -> repack -> mesh), not "
