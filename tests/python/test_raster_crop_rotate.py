@@ -10,10 +10,21 @@ FIXTURES = Path(__file__).parent / "fixtures"
 TIE_PNG = Path(__file__).parent.parent / "browser" / "fixtures" / "tie-rounding" / "fixture-tie.png"
 ORACLE_PATH = FIXTURES / "raster_js_oracle.json"
 
-pytestmark = pytest.mark.skipif(
+_needs_oracle = pytest.mark.skipif(
     not ORACLE_PATH.exists(),
     reason="raster_js_oracle.json not generated -- run tests/python/gen_js_reference_raster.mjs",
 )
+# Applied per-test below (final whole-branch review finding), not as a
+# module-level pytestmark -- a module-level skip drops ALL tests in this
+# file, including test_rotate_image_zero_degrees_is_identity_sized and
+# test_rotate_image_swaps_dimensions_on_non_square_input, neither of which
+# reads the oracle fixture at all. Losing the committed fixture (a bad
+# merge, a worktree copy-in mistake -- this project's own CLAUDE.md
+# documents exactly this class of gotcha for gitignored/untracked assets)
+# would otherwise silently skip those two with exit code 0 instead of
+# running them, directly contradicting this plan's own claim that "the
+# dimension-swap check needs no oracle, so it always runs." Mirrors the
+# per-test pattern test_raster_paste_and_pixels.py already uses correctly.
 
 
 def _load_oracle():
@@ -33,6 +44,7 @@ def _decoded_rgba(backend, handle):
     return w, h, flat
 
 
+@_needs_oracle
 @pytest.mark.parametrize("rotate", [0, 90, 180, 270])
 def test_crop_rotate_matches_js_oracle(rotate):
     oracle = _load_oracle()[f"crop_rotate_{rotate}"]
@@ -44,6 +56,7 @@ def test_crop_rotate_matches_js_oracle(rotate):
     assert flat == oracle["rgba"]
 
 
+@_needs_oracle
 @pytest.mark.parametrize("rotate", [0, 90, 180, 270])
 def test_crop_rotate_subrect_matches_js_oracle(rotate):
     """Non-square crop box (w=10, h=15) -- the whole-image cases above are
@@ -61,6 +74,7 @@ def test_crop_rotate_subrect_matches_js_oracle(rotate):
     assert flat == oracle["rgba"]
 
 
+@_needs_oracle
 @pytest.mark.parametrize(
     "degrees,oracle_key",
     [(90, "rotate_image_90"), (270, "rotate_image_270"), (180, "rotate_image_180")],
