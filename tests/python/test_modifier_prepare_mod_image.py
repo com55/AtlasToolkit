@@ -22,8 +22,17 @@ THREE_REGION_TEXT = (
     "c\n  bounds: 0, 40, 10, 10"
 )
 ONE_REGION_TEXT = "p.png\nsize: 100,100\na\n  bounds: 0, 0, 40, 40"
+# Non-square offsets canvas (20x119): the resolved canvas is 10x62, so
+# scale_x = 0.5 and scale_y = 62/119 differ -- a swapped scale_x/scale_y
+# pastes at (2, -5) instead of the real JS's (2, -6). Every other case uses
+# a square offsets canvas, where the two scales are equal and a swap is
+# invisible (Task 4 scrutinize finding).
+NON_SQUARE_TEXT = "p.png\nsize: 20,119\nhero\n  bounds: 0, 0, 10, 65\n  offsets: 3, 5, 20, 119"
+NEGATIVE_X_TEXT = "p.png\nsize: 200,200\nhero\n  bounds: 0, 0, 100, 108\n  offsets: -10, 20, 200, 200"
 
 CASES = {
+    "pmi_padding_non_square_scales": ("prepareModImage", [NON_SQUARE_TEXT, 20, 119, "p.png", 10, 65, ["hero"]]),
+    "pmi_padding_negative_x_and_y": ("prepareModImage", [NEGATIVE_X_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
     "pmi_padding_negative_y": ("prepareModImage", [PAD_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
     "pmi_padding_after_page_rescale": ("prepareModImage", [HALF_DECLARED_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
     "pmi_full_canvas_single": ("prepareModImage", [PAD_TEXT, 200, 200, "p.png", 200, 200, ["hero"]]),
@@ -143,3 +152,18 @@ def test_each_call_yields_a_distinct_handle():
     first = modifier.prepare_mod_image(mod, ["hero"])
     second = modifier.prepare_mod_image(mod, ["hero"])
     assert first.image != second.image
+
+
+def test_padding_clips_negative_x_with_transparent_fill():
+    # Offsets (-10, 20) -> paste at (-5, -14) (value confirmed against the
+    # real JS): the mod's first 5 columns and top 14 rows fall outside the
+    # 104x104 canvas, and the mod ends at column 94.
+    raster = PillowRasterBackend()
+    modifier = AtlasModifier(AtlasDocument.parse(NEGATIVE_X_TEXT), raster.create(200, 200), raster, "p.png")
+    prepared = modifier.prepare_mod_image(_patterned(raster, 100, 108), ["hero"])
+    assert raster.size(prepared.image) == (104, 104)
+    assert _pixel(raster, prepared.image, 0, 0) == (5, 14, 200, 255)
+    assert _pixel(raster, prepared.image, 94, 93) == (99, 107, 200, 255)
+    # Transparent: right of the mod's last column, and below its last row.
+    assert _pixel(raster, prepared.image, 95, 50) == (0, 0, 0, 0)
+    assert _pixel(raster, prepared.image, 50, 94) == (0, 0, 0, 0)
