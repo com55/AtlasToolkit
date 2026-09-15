@@ -41,6 +41,29 @@ class PillowRasterBackend:
     def size(self, handle: ImageHandle) -> tuple[int, int]:
         return self._images[handle].size
 
+    def crop_rotate(
+        self, handle: ImageHandle, x: int, y: int, w: int, h: int, rotate: int
+    ) -> ImageHandle:
+        img = self._images[handle]
+        is_swapped = rotate in (90, 270)
+        crop_w, crop_h = (h, w) if is_swapped else (w, h)
+        cropped = img.crop((x, y, x + crop_w, y + crop_h))
+        if rotate == 90:
+            result = cropped.transpose(Image.Transpose.ROTATE_270)
+        elif rotate == 270:
+            result = cropped.transpose(Image.Transpose.ROTATE_90)
+        elif rotate == 180:
+            result = cropped.transpose(Image.Transpose.ROTATE_180)
+        else:
+            result = cropped
+        return self._store(result)
+
+    def rotate_image(self, handle: ImageHandle, degrees: int) -> ImageHandle:
+        w, h = self.size(handle)
+        if degrees in (90, 270):
+            return self.crop_rotate(handle, 0, 0, h, w, degrees)
+        return self.crop_rotate(handle, 0, 0, w, h, degrees)
+
     def clone(self, handle: ImageHandle) -> ImageHandle:
         return self._store(self._images[handle].copy())
 
