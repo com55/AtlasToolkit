@@ -25,10 +25,12 @@ geometry, or region means `is None`, never Python falsiness -- an empty JS
 array/object is truthy, its Python equivalent is falsy."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
 from atlas_toolkit.domain.region_ops import round_half_even
+from atlas_toolkit.raster.base import ImageHandle
 
 
 def canvas_size_match(
@@ -152,3 +154,81 @@ def repack_offsets_for_region(
     if full_canvas_regions is not None and name in full_canvas_regions:
         return [0, 0, packed_w, packed_h]
     return pristine_offsets
+
+
+def mask_crop_rect_for_offsets(offsets: list[int], sprite_w: int, sprite_h: int) -> dict[str, int]:
+    """The sub-rect, within a full-size (orig_w x orig_h) mesh mask, that a
+    raw trimmed (sprite_w x sprite_h) crop corresponds to, given the
+    region's offsets [off_x, off_y, orig_w, orig_h]. Exact inverse of
+    extraction's paste position (paste_y = orig_h - off_y - h). Returns a
+    dict shaped like the JS object ({x, y, w, h}) because the repack stage
+    injects this function into domain/packing.py, which reads those keys.
+    Port of maskCropRectForOffsets."""
+    off_x, off_y, _orig_w, orig_h = offsets
+    return {"x": off_x, "y": orig_h - off_y - sprite_h, "w": sprite_w, "h": sprite_h}
+
+
+def _triangle_signed_area(uvs: list[float], ia: int, ib: int, ic: int) -> float:
+    """Signed area (UV space) of one triangle, given the uvs-array indices
+    of its three u components: positive = CCW in u/v, negative = reversed.
+    Port of _triangleSignedArea."""
+    ax, ay = uvs[ia], uvs[ia + 1]
+    bx, by = uvs[ib], uvs[ib + 1]
+    cx, cy = uvs[ic], uvs[ic + 1]
+    return (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+
+
+def combine_mesh_geometry(
+    names: list[str], mesh_lookup_fn: Callable[[str], Optional[dict]],
+) -> Optional[dict]:
+    """Union the mesh geometry of every name into one
+    {"uvs": [...], "triangles": [...]}, or None if ANY name lacks mesh
+    data (the whole group bails -- masking a mesh-less region to a
+    neighbour's silhouette would silently clip it) or if `names` is empty.
+    Each triangle's winding is normalized to positive signed area before
+    appending, so a nonzero-winding fill unions overlapping,
+    independently-authored meshes instead of cancelling them. Never mutates
+    the looked-up geometry. Port of _combineMeshGeometry."""
+    uvs: list[float] = []
+    triangles: list[int] = []
+    for name in names:
+        geometry = mesh_lookup_fn(name)
+        if geometry is None:
+            return None
+        base = len(uvs) // 2
+        geometry_uvs = geometry["uvs"]
+        geometry_triangles = geometry["triangles"]
+        uvs.extend(geometry_uvs)
+        for i in range(0, len(geometry_triangles), 3):
+            ia = geometry_triangles[i]
+            ib = geometry_triangles[i + 1]
+            ic = geometry_triangles[i + 2]
+            if _triangle_signed_area(geometry_uvs, ia * 2, ib * 2, ic * 2) < 0:
+                ib, ic = ic, ib
+            triangles.extend((ia + base, ib + base, ic + base))
+    return {"uvs": uvs, "triangles": triangles} if names else None
+
+
+def group_names_by_sprite_identity(
+    sprites: dict[str, ImageHandle], modded_sprites: Optional[dict[str, ImageHandle]],
+) -> list[list[str]]:
+    """Group the names in `modded_sprites` (skipping any absent from
+    `sprites`) by which ones hold the SAME image handle, in first-seen
+    order; a name with no counterpart is its own group of one. Port of
+    _groupNamesBySpriteIdentity.
+
+    Identity translation: JS groups by canvas OBJECT identity (a
+    shared-canvas mod batch stores the literal same canvas under every one
+    of its names). Here that is ImageHandle VALUE equality, which is
+    equivalent because a RasterBackend never hands out one handle value for
+    two live images. INVARIANT carried over from the JS comment: two
+    logically independent mod registrations must never produce the same
+    handle, or their regions get wrongly unioned into one mask group.
+    AtlasModifier.prepare_mod_image upholds this by always returning a
+    fresh handle."""
+    groups: dict[ImageHandle, list[str]] = {}
+    for name, handle in (modded_sprites or {}).items():
+        if name not in sprites:
+            continue
+        groups.setdefault(handle, []).append(name)
+    return list(groups.values())
