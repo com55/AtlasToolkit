@@ -69,3 +69,17 @@ class PillowRasterBackend:
 
     def dispose(self, handle: ImageHandle) -> None:
         del self._images[handle]
+
+    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
+        dest_img = self._images[dest]
+        src_img = self._images[src]
+        overlay = Image.new("RGBA", dest_img.size, (0, 0, 0, 0))
+        overlay.paste(src_img, (x, y))  # safe: overlay starts fully transparent, nothing to blend yet
+        self._images[dest] = Image.alpha_composite(dest_img, overlay)
+
+    def get_pixels(self, handle: ImageHandle) -> bytes:
+        return self._images[handle].tobytes()
+
+    def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
+        alpha_channel = self._images[handle].getchannel("A")
+        return [byte != 0 for byte in alpha_channel.tobytes()]
