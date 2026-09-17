@@ -588,7 +588,18 @@ class AtlasModifier:
         Departures from the JS signature: `page_info` is derived from this
         modifier's own target page rather than passed in (JS passes it
         only because _parseScoped had just produced it), and the result
-        carries a document instead of atlas text."""
+        carries a document instead of atlas text.
+
+        CALLER PRECONDITION -- `region_names` MUST ALREADY BE IN JS
+        OBJECT-KEY ORDER. This function does not re-derive it. Real JS gets
+        that ordering for free because its region list comes from
+        Object.keys() (atlas-modifier.js:26), which puts canonical
+        array-index keys first in ascending order; Python dicts and
+        AtlasDocument.parse preserve text order instead. Pass names through
+        js_object_key_order() first -- `_scoped_region_meta()` does exactly
+        that. Skip it and a region literally named "2" packs after one named
+        "10", silently, and every test that avoids integer-like names still
+        passes."""
         # 1. Deduplicate by pixel hash (single-page repack keeps dedup ON).
         hash_to_canonical: dict[str, str] = {}
         canonical_map: dict[str, str] = {}
@@ -734,7 +745,19 @@ class AtlasModifier:
 
         A modded sprite handle is used as-is, never cloned: JS's _toCanvas
         deliberately preserves canvas identity here, and
-        group_names_by_sprite_identity groups by handle value."""
+        group_names_by_sprite_identity groups by handle value.
+
+        CALLER PRECONDITION -- PASS `mesh_lookup_fn=None` UNLESS MESH
+        MASKING IS GENUINELY WANTED, and note that it is not implemented
+        yet (see _require_no_mesh). Do NOT transcribe the JS call sites'
+        shape: all three (atlas-session.js:299, 319, 366) construct
+        `meshLookupFn` unconditionally, and getRepackMeshGeometry
+        (atlas-extracter.js:169-172) returns null PER NAME when the
+        Mesh-Aware Repack toggle is off. So JS always hands over a truthy
+        function that answers null for every name. Porting that shape
+        literally would make this method raise NotImplementedError on every
+        repack, forever, with no mesh feature engaged. Port the intent:
+        pass None when mesh is not usable."""
         self._require_no_mesh(mesh_lookup_fn)
         region_names, regions = self._scoped_region_meta()
         sprites = {
@@ -770,7 +793,23 @@ class AtlasModifier:
         domain/effective_model.py's output (camelCase). A pristine region
         absent from it was dropped by a RemoveBatch; a key present only in
         `added_sprites` is an AddBatch source that never existed in the
-        pristine parse."""
+        pristine parse.
+
+        TWO CALLER PRECONDITIONS, both silent when violated:
+
+        1. `effective_region_names` MUST ALREADY BE IN JS OBJECT-KEY ORDER.
+           Unlike repack_with_modded_sprites, this method does NOT order its
+           own names -- it forwards the caller's list straight to
+           _pack_and_emit, which trusts it. Order it with
+           js_object_key_order() before calling. Note that
+           domain/effective_model.py's derive_effective_model takes its
+           order from `list(region_meta.keys())`, which is free in JS (object
+           keys are always canonically ordered) but not in Python -- so the
+           mapping fed to THAT function must be ordered too.
+        2. Pass `mesh_lookup_fn=None` unless mesh masking is genuinely
+           wanted -- it is not implemented yet. Do not transcribe the JS call
+           sites' shape; see repack_with_modded_sprites' docstring for why
+           doing so would make every repack raise."""
         self._require_no_mesh(mesh_lookup_fn)
         _pristine_names, pristine_regions = self._scoped_region_meta()
         sprites: dict[str, ImageHandle] = {}
