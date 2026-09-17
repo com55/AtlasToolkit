@@ -42,6 +42,35 @@ export function isPortrait() {
   return window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
 }
 
+export const PREVIEW_TOP_PAD_PX = 10;
+
+/**
+ * Portrait pan-Y: vertically center the scaled image in the current
+ * container, but never let its top edge sit above `PREVIEW_TOP_PAD_PX`.
+ * Tall images therefore pin 10px from the top and overflow the bottom.
+ */
+export function previewTopAnchoredY(containerH, displayedH, padTop = PREVIEW_TOP_PAD_PX) {
+  return Math.max(padTop, (containerH - displayedH) / 2);
+}
+
+/**
+ * Image top-left in preview-container coordinates.
+ * Portrait/mobile is top-anchored (`top: 0`, y is an offset from the top),
+ * so a splitter height change does not by itself move the image; y is
+ * recomputed separately from the current container height. Landscape stays
+ * center-anchored (`top: 50%`, y is an offset from the vertical center).
+ */
+export function previewImageTopLeft(containerW, containerH, imgW, imgH, scale, x, y, topAnchored) {
+  const topLeftX = containerW / 2 + x - imgW * scale / 2;
+  const topLeftY = topAnchored ? y : containerH / 2 + y - imgH * scale / 2;
+  return { x: topLeftX, y: topLeftY };
+}
+
+/** Zoom-to-cursor origin Y: container top when top-anchored, else vertical center. */
+export function previewZoomOriginY(containerH, topAnchored) {
+  return topAnchored ? 0 : containerH / 2;
+}
+
 /**
  * Base64-encode a Blob/string/binary payload — pywebview's `js_api` bridge
  * only accepts JSON-serializable arguments, so file bytes have to cross as

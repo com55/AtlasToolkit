@@ -2,11 +2,11 @@ import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';
 import { validateRegionName } from './region-name-validation.js';
 import {
-  previewImg, previewContainer,
-  resetPreview, applyTransform,
+  previewImg,
+  resetPreview,
   drawRegionOverlay, clearOverlay,
   updatePreview, updateModifyPreview, updateSaveMergedButton, setPreviewSrc,
-  fitScaleIfOversized,
+  applyAutoFit,
 } from './preview.js';
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher, setAdvanceMode } from './app-bar.js';
@@ -76,16 +76,7 @@ function applyModifyView(data, statusMsg) {
   setPreviewSrc(data.image);
   previewImg.style.display = 'block';
   previewImg.onload = function () {
-    resetPreview();
-    const containerW = previewContainer.clientWidth - 40;
-    const containerH = previewContainer.clientHeight - 40;
-    const imgW = previewImg.naturalWidth;
-    const imgH = previewImg.naturalHeight;
-    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-    if (fitScale !== null) {
-      state.viewState.scale = fitScale;
-      applyTransform();
-    }
+    applyAutoFit();
     previewImg.onload = null;
   };
 }
@@ -235,19 +226,12 @@ export async function onModPreviewReceived(data) {
   updateModifyActionButtons();
   refreshModifiedHighlight();
   previewImg.onload = function () {
-    resetPreview();
-    const containerW = previewContainer.clientWidth - 40;
-    const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
     // Always the WxH form, regardless of page count — matches old Python
     // engine's ui/js/modify.js exactly (parity fix, 2026-08-23).
     setStatus(`Merged preview (${imgW}x${imgH}). Ready to save.`);
-    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-    if (fitScale !== null) {
-      state.viewState.scale = fitScale;
-    }
-    applyTransform();
+    applyAutoFit();
     previewImg.onload = null;
   };
 }

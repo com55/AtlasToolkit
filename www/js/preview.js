@@ -1,6 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
-import { isPortrait } from './platform.js';
+import { isPortrait, previewImageTopLeft, previewTopAnchoredY, previewZoomOriginY } from './platform.js';
 
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
@@ -42,9 +42,43 @@ export function fitScaleIfOversized(containerW, containerH, imgW, imgH) {
   return (imgW > containerW || imgH > containerH) ? Math.min(containerW / imgW, containerH / imgH) : null;
 }
 
+/** Reset pan/zoom, shrink if oversized, and on portrait place the image. */
+export function applyAutoFit() {
+  resetPreview();
+  const containerW = previewContainer.clientWidth - 40;
+  const containerH = previewContainer.clientHeight - 40;
+  const imgW = previewImg.naturalWidth;
+  const imgH = previewImg.naturalHeight;
+  if (!imgW || !imgH) {
+    applyTransform();
+    return;
+  }
+  const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+  if (fitScale !== null) state.viewState.scale = fitScale;
+  applyPortraitVerticalAlign();
+  applyTransform();
+}
+
+/** Portrait: center if the scaled image fits, otherwise pin 10px from the top. */
+export function applyPortraitVerticalAlign() {
+  if (!isPortrait()) return;
+  const imgH = previewImg.naturalHeight;
+  if (!imgH) return;
+  void previewContainer.offsetHeight;
+  state.viewState.y = previewTopAnchoredY(
+    previewContainer.clientHeight,
+    imgH * state.viewState.scale,
+  );
+}
+
 export function applyTransform() {
   const { x, y, scale } = state.viewState;
-  previewImg.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
+  const topAnchored = isPortrait();
+  previewImg.style.top = topAnchored ? '0' : '50%';
+  previewImg.style.transformOrigin = topAnchored ? 'top center' : 'center center';
+  previewImg.style.transform = topAnchored
+    ? `translate(calc(-50% + ${x}px), ${y}px) scale(${scale})`
+    : `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
   if (state.currentMode === 'modify') drawRegionOverlay();
 }
 
@@ -68,10 +102,9 @@ export function drawRegionOverlay() {
   if (!imgW || !imgH) return;
 
   const { scale, x, y } = state.viewState;
-  const centerX  = containerW / 2 + x;
-  const centerY  = containerH / 2 + y;
-  const topLeftX = centerX - imgW * scale / 2;
-  const topLeftY = centerY - imgH * scale / 2;
+  const { x: topLeftX, y: topLeftY } = previewImageTopLeft(
+    containerW, containerH, imgW, imgH, scale, x, y, isPortrait(),
+  );
   const lineWidth = 3;
 
   const multiPage = state.modifyPages.length > 1;
@@ -132,18 +165,11 @@ export async function updatePreview(regions) {
     previewImg.style.display = 'block';
     status.innerText = labels.length === 1 ? `Previewing: ${labels[0]}` : `Previewing: ${labels.length} regions`;
     previewImg.onload = function () {
-      resetPreview();
-      const containerW = previewContainer.clientWidth - 40;
-      const containerH = previewContainer.clientHeight - 40;
+      applyAutoFit();
       const imgW = previewImg.naturalWidth, imgH = previewImg.naturalHeight;
       status.innerText = labels.length === 1
         ? `Previewing: ${labels[0]} (${imgW}x${imgH})`
         : `Previewing: ${labels.length} regions (${imgW}x${imgH})`;
-      const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-      if (fitScale !== null) {
-        state.viewState.scale = fitScale;
-        applyTransform();
-      }
       updateSaveMergedButton();
       previewImg.onload = null;
     };
@@ -189,7 +215,7 @@ function onPreviewWheel(e) {
   const newScale = state.viewState.scale + direction * 0.1 * state.viewState.scale;
   if (newScale > 0.1 && newScale < 50) {
     const rect = previewContainer.getBoundingClientRect();
-    const cx = rect.width / 2, cy = rect.height / 2;
+    const cx = rect.width / 2, cy = previewZoomOriginY(rect.height, isPortrait());
     const mx = e.clientX - rect.left - cx, my = e.clientY - rect.top - cy;
     state.viewState.x     = mx - (mx - state.viewState.x) * (newScale / state.viewState.scale);
     state.viewState.y     = my - (my - state.viewState.y) * (newScale / state.viewState.scale);
@@ -254,7 +280,7 @@ previewContainer.addEventListener('touchmove', (e) => {
         x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
         y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
       };
-      const cx = rect.width / 2, cy = rect.height / 2;
+      const cx = rect.width / 2, cy = previewZoomOriginY(rect.height, isPortrait());
       const mx = mid.x - rect.left - cx, my = mid.y - rect.top - cy;
       state.viewState.x     = mx - (mx - state.viewState.x) * (newScale / state.viewState.scale);
       state.viewState.y     = my - (my - state.viewState.y) * (newScale / state.viewState.scale);
