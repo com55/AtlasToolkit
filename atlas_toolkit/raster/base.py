@@ -77,10 +77,20 @@ class RasterBackend(Protocol):
     def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
         """Mutates dest in place -- same contract as ctx.drawImage(src, x, y):
         a Porter-Duff "source-over" alpha composite of src onto dest at
-        (x, y), NOT a raw overwrite. See this plan's Global Constraints for
-        why a naive Image.paste(src, box) is wrong here (it overwrites
-        dest's alpha channel via memcpy instead of blending) and the
-        overlay + alpha_composite construction this backend uses instead."""
+        (x, y), NOT a raw overwrite. A naive Image.paste(src, box) is wrong
+        here: with no mask it is a memcpy that overwrites dest's alpha
+        channel instead of blending into it.
+
+        Anything outside dest's bounds is clipped, and a paste landing
+        entirely outside is a no-op -- matching drawImage. Clipping is
+        per-axis, so a source may overhang one edge while being clipped on
+        another.
+
+        This says nothing about HOW a backend achieves it: PillowRasterBackend
+        originally built a full-size transparent overlay and composited the
+        whole canvas, and now composites only the overlapping rectangle. Both
+        satisfy this contract identically -- no caller can distinguish them,
+        since every caller reaches images only through handles."""
 
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
