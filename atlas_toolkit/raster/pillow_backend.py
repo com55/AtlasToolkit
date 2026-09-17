@@ -128,7 +128,7 @@ class PillowRasterBackend:
         # (hard edges) -- Canvas's fill is antialiased; that difference is
         # confined to polygon edges, not the interior, and is expected
         # (see this method's docstring in raster/base.py).
-        edges: list[tuple[float, float, float, float]] = []
+        edges: list[tuple[float, float, float, float, int]] = []
         for i in range(0, len(triangles), 3):
             ia, ib, ic = triangles[i] * 2, triangles[i + 1] * 2, triangles[i + 2] * 2
             pts = [
@@ -139,47 +139,32 @@ class PillowRasterBackend:
             for k in range(3):
                 x0, y0 = pts[k]
                 x1, y1 = pts[(k + 1) % 3]
-                if y0 != y1:
-                    edges.append((x0, y0, x1, y1))
+                if y0 == y1:
+                    continue
+                direction = 1 if y1 > y0 else -1
+                # Canonicalize storage order to (low-y point, high-y point)
+                # BEFORE appending -- two edges that represent the same
+                # physical segment but arrive with opposite winding (e.g.
+                # from a triangle and its exact index-reversed twin) then
+                # compute an identical floating-point cross_x, so nonzero-
+                # winding cancellation is exact rather than depending on
+                # two different orders of float operations agreeing by
+                # chance. direction still carries the edge's TRUE original
+                # direction, independent of storage order.
+                if y0 > y1:
+                    x0, y0, x1, y1 = x1, y1, x0, y0
+                edges.append((x0, y0, x1, y1, direction))
 
         winding = np.zeros((height, width), dtype=np.int32)
         if edges:
-            # Pixel centers, scaled by 2 to use integer arithmetic and avoid
-            # floating-point precision issues with opposite-direction edges
-            # (winding cancellation). Pixel (px,py) has center at (px+0.5, py+0.5),
-            # which becomes (2*px+1, 2*py+1) in scaled coordinates.
-            cy_scaled = (np.arange(height, dtype=np.int64) * 2 + 1)[:, np.newaxis]
-            cx_scaled = (np.arange(width, dtype=np.int64) * 2 + 1)[np.newaxis, :]
-
-            for x0, y0, x1, y1 in edges:
-                # Scale edge endpoints by 2
-                x0_s, y0_s = int(x0 * 2), int(y0 * 2)
-                x1_s, y1_s = int(x1 * 2), int(y1 * 2)
-
-                if y1_s > y0_s:
-                    crosses = (cy_scaled >= y0_s) & (cy_scaled < y1_s)
-                    direction = 1
-                else:
-                    crosses = (cy_scaled >= y1_s) & (cy_scaled < y0_s)
-                    direction = -1
-
-                # Compute cross_x in scaled coordinates using integer arithmetic
-                # cross_x_s = x0_s + (cy_scaled - y0_s) * (x1_s - x0_s) / (y1_s - y0_s)
-                # Rearranged to avoid division: cross_x_s * (y1_s - y0_s) = ...
-                # We test: cross_x_s * dy_s > cx_scaled * dy_s
-                # Which is: (x0_s + t * dx_s) * dy_s > cx_scaled * dy_s
-                # where t = (cy_scaled - y0_s) / (y1_s - y0_s)
-                # This avoids floating-point division entirely.
-                dy_s = y1_s - y0_s
-                dx_s = x1_s - x0_s
-                numerator = (cy_scaled - y0_s) * dx_s + x0_s * dy_s  # (cy - y0) * dx + x0 * dy
-                threshold = cx_scaled * dy_s                          # cx * dy
-
-                if dy_s > 0:
-                    contributes = crosses & (numerator > threshold)
-                else:
-                    contributes = crosses & (numerator < threshold)
-
+            cy = (np.arange(height, dtype=np.float64) + 0.5)[:, np.newaxis]  # (H,1)
+            cx = (np.arange(width, dtype=np.float64) + 0.5)[np.newaxis, :]   # (1,W)
+            for x0, y0, x1, y1, direction in edges:
+                # Canonical order guarantees y1 > y0 always now.
+                crosses = (cy >= y0) & (cy < y1)
+                t = (cy - y0) / (y1 - y0)
+                cross_x = x0 + t * (x1 - x0)
+                contributes = crosses & (cross_x > cx)
                 winding += np.where(contributes, direction, 0).astype(np.int32)
 
         alpha = np.where(winding != 0, 255, 0).astype(np.uint8)
