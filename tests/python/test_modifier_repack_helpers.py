@@ -136,11 +136,28 @@ def test_rotate_sprite_for_pack_matches_real_js_dimensions(run_packing_oracle):
 
 
 def test_region_meta_carries_the_js_shape():
-    text = "p.png\nsize: 40,40\narm\n  index: 3\n  bounds: 1, 2, 8, 5\n  offsets: 1, 1, 10, 10\n  split: 1, 2, 3, 4"
+    # The WHOLE key set is pinned, not a subset. `page` is the load-bearing
+    # one -- JS _parseScoped filters by it (atlas-modifier.js:701), so a
+    # dropped or renamed `page` silently changes which regions a page-scoped
+    # repack includes, and a partial assertion would still pass (Task 3
+    # scrutinize finding). Values below were read off the real function, not
+    # predicted: `rotate: true` parses to 90, and an absent `pad` is None.
+    text = (
+        "p.png\nsize: 40,40\narm\n  rotate: true\n  index: 3\n"
+        "  bounds: 1, 2, 8, 5\n  offsets: 1, 1, 10, 10\n  split: 1, 2, 3, 4"
+    )
     meta = region_meta(AtlasDocument.parse(text).pages[0].regions[0])
+    assert set(meta) == {
+        "name", "atlasName", "page", "index", "bounds",
+        "offsets", "rotate", "split", "pad", "extraPairs",
+    }
+    assert meta["name"] == "arm"
     assert meta["atlasName"] == "arm"
+    assert meta["page"] == "p.png"
+    assert meta["index"] == 3
     assert meta["bounds"] == [1, 2, 8, 5]
     assert meta["offsets"] == [1, 1, 10, 10]
-    assert meta["index"] == 3
+    assert meta["rotate"] == 90
     assert meta["split"] == [1, 2, 3, 4]
+    assert meta["pad"] is None
     assert meta["extraPairs"] == []
