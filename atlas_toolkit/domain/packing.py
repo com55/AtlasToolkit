@@ -429,18 +429,29 @@ def footprint_for_canonical(dedup_names: list[str], ctx: dict) -> bytearray:
     `combine_mesh_geometry`, `group_names_by_sprite_identity`,
     `mask_crop_rect_for_offsets`.
 
-    MESH STAGE: only the no-mesh path is implemented here. That path is
-    NOT a fallback -- it is the live production path whenever Smart
-    Packing is on and no usable `.skel` is loaded, and it is exactly what
-    the JS does at repack-nest.js:323 (`if (!meshLookupFn) return
-    solidMask(w, h)`). Every mesh-derived branch needs
-    RasterBackend.rasterize_mesh_mask, which is still a NotImplementedError
-    stub until the mesh stage (spec §7 ordering: basic raster -> modifier
-    -> repack -> mesh), so it raises here in one place rather than being
-    silently omitted. What the mesh stage must add: the
-    dimension-compatibility filter over the dedup group, the
-    shared-canvas-mod group union via combine_mesh_geometry, and the
-    offsets crop-back path via mask_crop_rect_for_offsets."""
+    MESH STAGE: only the no-mesh path is implemented here, and its
+    reachability is NARROWER than an earlier version of this docstring
+    claimed (corrected after Task 5's review, verified against the JS
+    source). `mesh_lookup_fn is None` is not the shape production takes:
+    all three real repack call sites (atlas-session.js:299, 319, 366)
+    build `meshLookupFn` UNCONDITIONALLY, and getRepackMeshGeometry
+    (atlas-extracter.js:169-172) returns null PER NAME when the
+    Mesh-Aware Repack toggle is off. So JS passes a truthy function that
+    answers null for every name, and repack-nest.js:323's
+    `if (!meshLookupFn) return solidMask(w, h)` is unreachable from
+    production; JS's real no-mesh fallback is the per-name `if (!geom)`
+    at repack-nest.js:362, inside logic this port still stubs.
+
+    Every mesh-derived branch needs RasterBackend.rasterize_mesh_mask,
+    still a NotImplementedError stub until the mesh stage (spec §7
+    ordering: basic raster -> modifier -> repack -> mesh), so it raises
+    here in one place rather than being silently omitted. What the mesh
+    stage must add: the dimension-compatibility filter over the dedup
+    group, the shared-canvas-mod group union via combine_mesh_geometry,
+    the offsets crop-back path via mask_crop_rect_for_offsets -- and a
+    decision on how the Python session stage expresses "mesh not usable",
+    since transcribing JS's always-construct-the-lambda convention would
+    make engine/modifier.py's _require_no_mesh raise on every repack."""
     sprites = ctx["sprites"]
     raster = ctx["raster"]
     canonical_w, canonical_h = raster.size(sprites[dedup_names[0]])
