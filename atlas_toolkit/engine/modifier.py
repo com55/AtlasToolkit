@@ -695,3 +695,95 @@ class AtlasModifier:
             self._page_info(), [canvas_w, canvas_h], region_names, region_data
         )
         return PackResult(canvas, document, region_bounds)
+
+    def _scoped_region_meta(self) -> tuple[list[str], dict[str, dict]]:
+        """This page's region names in JS key order, with their metadata in
+        region_meta()'s shape."""
+        names = js_object_key_order(self.region_names)
+        return names, {name: region_meta(self.regions[name]) for name in names}
+
+    def _require_no_mesh(self, mesh_lookup_fn) -> None:
+        """Mesh masking of extracted/modded sprites (maskRawSprite,
+        _maskModdedSprites) needs RasterBackend.rasterize_mesh_mask and
+        composite_destination_in, both still NotImplementedError stubs
+        until the mesh stage (spec §7 ordering). Raising in one place keeps
+        the parameter in the signature -- it is part of the real call shape
+        every production repack site binds -- without pretending the
+        masking happened."""
+        if mesh_lookup_fn is not None:
+            raise NotImplementedError(
+                "mesh-aware repack (maskRawSprite / _maskModdedSprites) lands "
+                "in the separate 'mesh' stage (spec §7 ordering), together "
+                "with RasterBackend.rasterize_mesh_mask -- pass "
+                "mesh_lookup_fn=None until then."
+            )
+
+    def repack_with_modded_sprites(
+        self,
+        modded_sprites: Optional[dict[str, ImageHandle]],
+        full_canvas_regions: Optional[set[str]] = None,
+        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
+        nest_options: Optional[dict] = None,
+    ) -> PackResult:
+        """Repack from this modifier's pristine base image, overlaid with
+        modded sprites. Non-modded regions carry their pristine offsets
+        into the output; regions in `full_canvas_regions` get default
+        offsets -- the offsets-preserved-on-repack asymmetry that merge
+        (which resets every touched region) cannot express. Port of
+        repackWithModdedSprites.
+
+        A modded sprite handle is used as-is, never cloned: JS's _toCanvas
+        deliberately preserves canvas identity here, and
+        group_names_by_sprite_identity groups by handle value."""
+        self._require_no_mesh(mesh_lookup_fn)
+        region_names, regions = self._scoped_region_meta()
+        sprites = {
+            name: extract_raw_sprite(self.raster, self.base_image, regions[name])
+            for name in region_names
+        }
+        for name, sprite in (modded_sprites or {}).items():
+            if name in sprites:
+                sprites[name] = sprite
+        return self._pack_and_emit(
+            sprites, region_names, regions, full_canvas_regions,
+            nest_options, modded_sprites, None, mesh_lookup_fn,
+        )
+
+    def repack_with_effective_model(
+        self,
+        effective_region_names: list[str],
+        effective_regions: dict[str, dict],
+        added_sprites: Optional[dict[str, ImageHandle]],
+        modded_sprites: Optional[dict[str, ImageHandle]],
+        full_canvas_regions: Optional[set[str]] = None,
+        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
+        nest_options: Optional[dict] = None,
+    ) -> PackResult:
+        """Repack from the effective (pristine union structural-batch)
+        region model -- the Add/Remove/Rename path. Mirrors
+        repack_with_modded_sprites's own extraction rather than making the
+        caller pre-extract, so no caller needs to know about scaling,
+        extract_raw_sprite, or base_image. Port of
+        repackWithEffectiveModel.
+
+        `effective_regions` is keyed by internal key and shaped exactly as
+        domain/effective_model.py's output (camelCase). A pristine region
+        absent from it was dropped by a RemoveBatch; a key present only in
+        `added_sprites` is an AddBatch source that never existed in the
+        pristine parse."""
+        self._require_no_mesh(mesh_lookup_fn)
+        _pristine_names, pristine_regions = self._scoped_region_meta()
+        sprites: dict[str, ImageHandle] = {}
+        for name, meta in pristine_regions.items():
+            if name not in effective_regions:
+                continue  # dropped by a RemoveBatch
+            sprites[name] = extract_raw_sprite(self.raster, self.base_image, meta)
+        for name, sprite in (modded_sprites or {}).items():
+            if name in sprites:
+                sprites[name] = sprite
+        for key, sprite in (added_sprites or {}).items():
+            sprites[key] = sprite  # AddBatch -- a new key, never in the pristine parse
+        return self._pack_and_emit(
+            sprites, effective_region_names, effective_regions, full_canvas_regions,
+            nest_options, modded_sprites, added_sprites, mesh_lookup_fn,
+        )
