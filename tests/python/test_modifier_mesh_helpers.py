@@ -20,6 +20,13 @@ TRI_REVERSED = {"uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 2, 1]}
 TRI_FLOAT_CLOCKWISE = {"uvs": [0.5, 0.25, 0.25, 0.75, 0.75, 0.75], "triangles": [0, 1, 2]}
 
 CASES = {
+    "cmg_zero_area_triangle": (
+        "combineMeshGeometry",
+        [
+            ["flat"],
+            {"flat": {"uvs": [0.0, 0.0, 1.0, 1.0, 0.5, 0.5], "triangles": [0, 1, 2]}},
+        ],
+    ),
     "mcr_zero_offsets": ("maskCropRectForOffsets", [[0, 0, 100, 100], 40, 30]),
     "mcr_nonzero_offsets": ("maskCropRectForOffsets", [[20, 10, 200, 150], 50, 40]),
     "mcr_full_height_sprite": ("maskCropRectForOffsets", [[5, 0, 80, 60], 80, 60]),
