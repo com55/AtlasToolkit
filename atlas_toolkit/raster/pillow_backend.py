@@ -20,6 +20,15 @@ class PillowRasterBackend:
         self._next_handle = 1
 
     def _store(self, img: Image.Image) -> ImageHandle:
+        # INVARIANT: never store an Image object that is already reachable
+        # from another handle. Every caller here passes a freshly-created
+        # object (Image.open/new, .crop, .transpose, .copy), so this holds
+        # today -- but `paste` now mutates its destination IN PLACE rather
+        # than replacing the registry entry, so two handles sharing one
+        # object would mean a paste into one silently corrupting the other.
+        # The invariant was inert before that change and is load-bearing
+        # after it; a future allocation site that returns an existing
+        # object (an alias/view helper, a cache) must clone first.
         handle = ImageHandle(self._next_handle)
         self._next_handle += 1
         self._images[handle] = img
