@@ -71,11 +71,33 @@ class PillowRasterBackend:
         del self._images[handle]
 
     def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
+        # Composites only the overlapping rectangle, not the whole
+        # destination. The previous whole-canvas version was O(destination
+        # area) per call, which was harmless while the only caller pasted
+        # once per mod image but is the hot path in _pack_and_emit (one
+        # paste per unique sprite onto the full packed sheet).
+        #
+        # Image.alpha_composite needs both operands the same size, and the
+        # clipped source region is exactly the clipped destination region,
+        # so no transparent overlay is needed here at all. The final
+        # Image.paste writes back a region that was already composited, so
+        # its raw-overwrite semantics (see this module's alpha gotcha) are
+        # correct rather than dangerous.
         dest_img = self._images[dest]
         src_img = self._images[src]
-        overlay = Image.new("RGBA", dest_img.size, (0, 0, 0, 0))
-        overlay.paste(src_img, (x, y))  # safe: overlay starts fully transparent, nothing to blend yet
-        self._images[dest] = Image.alpha_composite(dest_img, overlay)
+        dest_w, dest_h = dest_img.size
+        src_w, src_h = src_img.size
+
+        left = max(0, x)
+        top = max(0, y)
+        right = min(dest_w, x + src_w)
+        bottom = min(dest_h, y + src_h)
+        if left >= right or top >= bottom:
+            return  # entirely outside the destination -- drawImage no-ops too
+
+        region = dest_img.crop((left, top, right, bottom))
+        clipped_src = src_img.crop((left - x, top - y, right - x, bottom - y))
+        dest_img.paste(Image.alpha_composite(region, clipped_src), (left, top))
 
     def get_pixels(self, handle: ImageHandle) -> bytes:
         return self._images[handle].tobytes()

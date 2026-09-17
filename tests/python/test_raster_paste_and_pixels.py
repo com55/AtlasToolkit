@@ -1,7 +1,9 @@
+import io
 import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
@@ -188,3 +190,75 @@ def test_read_alpha_mask_thresholds_at_zero():
     mask = backend.read_alpha_mask(handle)
 
     assert mask == [False, True, True]
+
+
+def test_paste_entirely_outside_the_destination_is_a_no_op():
+    raster = PillowRasterBackend()
+    dest = raster.create(8, 8)
+    before = raster.get_pixels(dest)
+    src = raster.create(4, 4)
+    raster.paste(dest, src, 20, 20)
+    raster.paste(dest, src, -10, 0)
+    raster.paste(dest, src, 0, -10)
+    assert raster.get_pixels(dest) == before
+
+
+def test_paste_clipped_on_two_edges_composites_only_the_overlap():
+    # The source must be PATTERNED, not solid. With a solid source every
+    # pixel is identical, so computing the clipped source origin as (0, 0)
+    # instead of (left - x, top - y) produces identical output and the test
+    # passes on broken code -- confirmed by mutation during planning. This
+    # is the same blindness a square-only corpus caused in Stage 4.
+    raster = PillowRasterBackend()
+    dest = raster.create(6, 6)
+    src = _patterned_src(raster, 4, 4)
+    # Top-left corner clipped: only src's bottom-right 2x2 lands, at (0, 0),
+    # so dest (0, 0) must carry src's pixel (2, 2) -- never src's (0, 0).
+    raster.paste(dest, src, -2, -2)
+    assert _pixel(raster, dest, 0, 0) == (80, 80, 200, 255)
+    assert _pixel(raster, dest, 1, 1) == (120, 120, 200, 255)
+    assert _pixel(raster, dest, 2, 2) == (0, 0, 0, 0)
+
+
+def test_paste_still_blends_rather_than_overwriting_alpha():
+    # The regression this backend's alpha gotcha exists for: a raw memcpy
+    # would clobber the destination's opaque pixel with the source's
+    # half-transparent one instead of blending toward it.
+    raster = PillowRasterBackend()
+    dest = _solid(raster, 4, 4, (0, 0, 255, 255))
+    src = _solid(raster, 2, 2, (255, 0, 0, 128))
+    raster.paste(dest, src, 0, 0)
+    r, g, b, a = _pixel(raster, dest, 0, 0)
+    assert a == 255
+    assert r > 0 and b > 0  # blended, not replaced
+    assert _pixel(raster, dest, 3, 3) == (0, 0, 255, 255)  # untouched
+
+
+def test_paste_mutates_the_destination_handle_in_place():
+    raster = PillowRasterBackend()
+    dest = raster.create(4, 4)
+    src = _solid(raster, 2, 2, (0, 255, 0, 255))
+    raster.paste(dest, src, 1, 1)
+    assert _pixel(raster, dest, 1, 1) == (0, 255, 0, 255)
+
+
+def _solid(raster: PillowRasterBackend, w: int, h: int, colour: tuple[int, int, int, int]):
+    buf = io.BytesIO()
+    Image.new("RGBA", (w, h), colour).save(buf, format="PNG")
+    return raster.decode_png(buf.getvalue())
+
+
+def _patterned_src(raster: PillowRasterBackend, w: int, h: int):
+    """Source whose pixel (x, y) is (x*40, y*40, 200, 255), so every pixel
+    identifies its own position. A solid source cannot discriminate a wrong
+    clipped-source origin."""
+    data = bytes(v for y in range(h) for x in range(w) for v in (x * 40, y * 40, 200, 255))
+    buf = io.BytesIO()
+    Image.frombytes("RGBA", (w, h), data).save(buf, format="PNG")
+    return raster.decode_png(buf.getvalue())
+
+
+def _pixel(raster: PillowRasterBackend, handle, x: int, y: int) -> tuple[int, int, int, int]:
+    w, _h = raster.size(handle)
+    i = (y * w + x) * 4
+    return tuple(raster.get_pixels(handle)[i:i + 4])
