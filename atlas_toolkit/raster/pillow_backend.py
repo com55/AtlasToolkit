@@ -1,16 +1,15 @@
 """PillowRasterBackend -- the only concrete RasterBackend Phase 3 ships.
 
-Implements atlas_toolkit.raster.base.RasterBackend's full non-mesh surface.
-rasterize_mesh_mask and composite_destination_in raise NotImplementedError
--- see base.py's docstrings on those two methods for why (a separate,
-later "mesh" stage per the architecture spec's §7 ordering).
+Implements atlas_toolkit.raster.base.RasterBackend's full surface,
+including the mesh-masking primitives (rasterize_mesh_mask,
+composite_destination_in) added in the "mesh" stage.
 """
 from __future__ import annotations
 
 import io
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageChops
 
 from atlas_toolkit.raster.base import ImageHandle
 
@@ -178,8 +177,30 @@ class PillowRasterBackend:
         self, dest: ImageHandle, mask: ImageHandle,
         src_rect: tuple[int, int, int, int] | None = None,
     ) -> None:
-        raise NotImplementedError(
-            "composite_destination_in lands in the separate 'mesh' stage "
-            "(spec §7 ordering), not this one -- see "
-            "atlas_toolkit/raster/base.py's docstring."
-        )
+        # Porter-Duff destination-in for straight (non-premultiplied)
+        # alpha: new_alpha = dest_alpha * mask_alpha (over [0,1]), RGB
+        # unchanged. ImageChops.multiply on two "L" (single-channel)
+        # images computes exactly (a*b)//255 per pixel, which is this
+        # formula in 0-255 space -- but it does NOT itself enforce equal
+        # sizes (it silently truncates to the smaller operand's extent on
+        # a mismatch, verified directly). The actual guard is the
+        # putalpha() call below: Image.putalpha raises ValueError on a
+        # size mismatch between dest_img and new_alpha, which is what
+        # turns a caller bug (mask, cropped by src_rect when given, not
+        # sized to match dest -- see maskRawSprite's own crop-back
+        # derivation in engine/modifier.py, which always produces a match
+        # in production) into a hard error instead of a silently
+        # truncated composite.
+        #
+        # src_rect's crop uses Image.crop(), which zero-pads (transparent)
+        # any out-of-bounds region rather than raising or clamping --
+        # unreachable today because mask_crop_rect_for_offsets's rect is
+        # always within the full mesh mask's own bounds by construction,
+        # but worth knowing if that invariant is ever loosened.
+        mask_img = self._images[mask]
+        if src_rect is not None:
+            x, y, w, h = src_rect
+            mask_img = mask_img.crop((x, y, x + w, y + h))
+        dest_img = self._images[dest]
+        new_alpha = ImageChops.multiply(dest_img.getchannel("A"), mask_img.getchannel("A"))
+        dest_img.putalpha(new_alpha)
