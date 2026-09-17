@@ -67,6 +67,10 @@ export function toastDurationMs(message) {
 }
 
 export function showToast(message, type = 'info') {
+  if (type === 'error' || type === 'warning') {
+    const title = type === 'warning' ? 'Warning' : 'Error';
+    return showAlert(String(message ?? ''), title);
+  }
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');

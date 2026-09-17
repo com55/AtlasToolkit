@@ -1,5 +1,4 @@
-import { state } from './state.js';
-import { drawRegionOverlay } from './preview.js';
+import { applyPortraitVerticalAlign, applyTransform } from './preview.js';
 import { isPortrait } from './platform.js';
 
 let _applyStoredSplit = null;
@@ -82,7 +81,8 @@ export function initPanelResizer() {
       leftPanel.style.removeProperty('flex');
     }
 
-    if (state.currentMode === 'modify') drawRegionOverlay();
+    applyPortraitVerticalAlign();
+    applyTransform();
   };
 
   splitter.addEventListener('pointerdown', (e) => {
@@ -102,7 +102,8 @@ export function initPanelResizer() {
     const maxH  = maxRightHeight();
     rightPanel.style.flex   = 'none';
     rightPanel.style.height = `${clamp(startSize + delta, minH, maxH)}px`;
-    if (state.currentMode === 'modify') drawRegionOverlay();
+    applyPortraitVerticalAlign();
+    applyTransform();
   });
 
   const stopDragging = (e) => {
