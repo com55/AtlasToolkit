@@ -8,7 +8,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state } from './state.js';
 import { enterEditMode, exitEditMode } from './modify-mode.js';
-import { previewImg, previewContainer, resetPreview, applyTransform, fitScaleIfOversized, setPreviewSrc } from './preview.js';
+import { previewImg, setPreviewSrc, applyAutoFit } from './preview.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 
 /** Reflect the current mode on the toggle, and gate Edit on regions loaded. */
@@ -60,16 +60,7 @@ export function updatePageSwitcher() {
 /** Fit the preview image into the container after its source changes. */
 function fitPreviewOnLoad() {
   previewImg.onload = function () {
-    resetPreview();
-    const containerW = previewContainer.clientWidth - 40;
-    const containerH = previewContainer.clientHeight - 40;
-    const imgW = previewImg.naturalWidth;
-    const imgH = previewImg.naturalHeight;
-    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-    if (fitScale !== null) {
-      state.viewState.scale = fitScale;
-    }
-    applyTransform(); // also redraws the overlay (filtered to the active page)
+    applyAutoFit(); // also redraws the overlay (filtered to the active page)
     previewImg.onload = null;
   };
 }

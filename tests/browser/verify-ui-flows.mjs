@@ -201,6 +201,16 @@ const readUi = (page) => page.evaluate(() => ({
   nestGapPanelOpen: !document.getElementById('nest-gap-overlay').classList.contains('hidden'),
 }));
 
+const readPreviewGeom = (page) => page.evaluate(() => {
+  const c = document.getElementById('preview-container').getBoundingClientRect();
+  const img = document.getElementById('preview-img').getBoundingClientRect();
+  return {
+    visible: getComputedStyle(document.getElementById('preview-img')).display !== 'none' && img.width > 0,
+    gapTop: img.top - c.top,
+    midDelta: (img.top + img.height / 2) - (c.top + c.height / 2),
+  };
+});
+
 // ─── Desktop pass ─────────────────────────────────────────────────────────────
 const browser = await chromium.launch({ headless: true });
 {
@@ -231,6 +241,30 @@ const browser = await chromium.launch({ headless: true });
 
   let ui = await readUi(page);
   check('desktop: .skel picker hidden before atlas load', !ui.pickSkelVisible);
+
+  await page.evaluate(() => window.showToast('Failed to load atlas file.', 'error'));
+  const errNotice = await page.evaluate(() => ({
+    modalHidden: document.getElementById('modal-overlay').classList.contains('hidden'),
+    title: document.getElementById('modal-title').innerText,
+    message: document.getElementById('modal-message').innerText,
+    confirm: document.getElementById('btn-modal-confirm').innerText,
+    cancelHidden: document.getElementById('btn-modal-cancel').classList.contains('hidden'),
+    toasts: document.querySelectorAll('#toast-container .toast').length,
+  }));
+  check('desktop: error notice uses dialog not toast',
+    !errNotice.modalHidden && errNotice.title === 'Error' && errNotice.confirm === 'OK'
+    && errNotice.cancelHidden && errNotice.toasts === 0 && /Failed to load/.test(errNotice.message),
+    JSON.stringify(errNotice));
+  await page.click('#btn-modal-confirm');
+  await page.evaluate(() => window.showToast('Image saved.', 'success'));
+  const okNotice = await page.evaluate(() => ({
+    modalHidden: document.getElementById('modal-overlay').classList.contains('hidden'),
+    toasts: [...document.querySelectorAll('#toast-container .toast')].map((el) => el.innerText),
+  }));
+  check('desktop: success notice stays a toast',
+    okNotice.modalHidden && okNotice.toasts.some((t) => /Image saved/.test(t)),
+    JSON.stringify(okNotice));
+  await page.evaluate(() => document.getElementById('toast-container').replaceChildren());
   const titleBefore = await page.title();
   check('desktop: tab title includes version before load',
     titleBefore === `Atlas Toolkit v${APP_VERSION}`, titleBefore);
@@ -296,6 +330,10 @@ const browser = await chromium.launch({ headless: true });
   check('desktop: shift-click range selects 3', ui.selected.length === 3, ui.selected.join(','));
   check('desktop: composite preview rendered', ui.previewSrcLen > 100);
   check('desktop: Save Image enabled with a live preview', ui.saveMergedEnabled);
+  const deskGeom = await readPreviewGeom(page);
+  check('desktop: auto-fit keeps the preview vertically centered',
+    deskGeom.visible && Math.abs(deskGeom.midDelta) < 8,
+    JSON.stringify(deskGeom));
   await items.nth(1).click({ modifiers: ['Control'] });
   await page.waitForTimeout(120);
   ui = await readUi(page);
@@ -528,6 +566,10 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(350); // tap-vs-longpress settle + preview debounce
   let ui = await readUi(page);
   check('touch: tap selects a region', ui.selected.length === 1, ui.selected.join(','));
+  const touchGeom = await readPreviewGeom(page);
+  check('touch: auto-fit pins the preview to the top',
+    touchGeom.visible && touchGeom.gapTop < 8,
+    JSON.stringify(touchGeom));
 
   await page.locator('#mode-modify').tap();
   await page.waitForTimeout(250);
