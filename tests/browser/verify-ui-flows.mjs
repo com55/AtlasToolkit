@@ -27,6 +27,19 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WWW  = path.resolve(HERE, '..', '..', 'www');
+const PYPROJECT = path.resolve(HERE, '..', '..', 'pyproject.toml');
+const APP_VERSION = (fs.readFileSync(PYPROJECT, 'utf8').match(/^version\s*=\s*"([^"]+)"/m) || [])[1] || '';
+
+function stampIndexHtml(html, version) {
+  const v = String(version || '').replace(/^v/i, '');
+  const title = `<title>Atlas Toolkit v${v}</title>`;
+  const meta = `<meta name="app-version" content="${v}" />`;
+  let out = html.replace(/<title>[^<]*<\/title>/, title);
+  if (/<meta\s+name="app-version"/i.test(out)) {
+    return out.replace(/<meta\s+name="app-version"\s+content="[^"]*"\s*\/?>/i, meta);
+  }
+  return out.replace(title, `${meta}\n    ${title}`);
+}
 
 async function loadChromium() {
   const candidates = [
@@ -61,7 +74,9 @@ const server = http.createServer((req, res) => {
   const filePath = path.join(WWW, p);
   if (!filePath.startsWith(WWW) || !fs.existsSync(filePath)) { res.statusCode = 404; return res.end('nf'); }
   res.setHeader('content-type', MIME[path.extname(filePath)] || 'text/plain');
-  res.end(fs.readFileSync(filePath));
+  let body = fs.readFileSync(filePath);
+  if (p === '/index.html') body = Buffer.from(stampIndexHtml(body.toString('utf8'), APP_VERSION), 'utf8');
+  res.end(body);
 });
 await new Promise((r) => server.listen(0, r));
 const URL_ROOT = `http://127.0.0.1:${server.address().port}/`;
@@ -181,8 +196,9 @@ const readUi = (page) => page.evaluate(() => ({
   missingDialog: !!document.querySelector('.missing-images-overlay'),
   pickSkelVisible: !document.getElementById('btn-pick-skel').classList.contains('hidden')
     && getComputedStyle(document.getElementById('btn-pick-skel')).display !== 'none',
-  nestGapVisible: !document.getElementById('nest-gap-distance').classList.contains('hidden')
-    && getComputedStyle(document.getElementById('nest-gap-distance')).display !== 'none',
+  nestSettingsVisible: getComputedStyle(document.getElementById('options-group-pack')).display !== 'none'
+    && document.getElementById('btn-nest-settings').getBoundingClientRect().width > 0,
+  nestGapPanelOpen: !document.getElementById('nest-gap-overlay').classList.contains('hidden'),
 }));
 
 // ─── Desktop pass ─────────────────────────────────────────────────────────────
@@ -215,14 +231,42 @@ const browser = await chromium.launch({ headless: true });
 
   let ui = await readUi(page);
   check('desktop: .skel picker hidden before atlas load', !ui.pickSkelVisible);
+  const titleBefore = await page.title();
+  check('desktop: tab title includes version before load',
+    titleBefore === `Atlas Toolkit v${APP_VERSION}`, titleBefore);
 
   // 1. Load
   const loaded = await loadFixtureAtlas(page);
   check('desktop: atlas loads through real load path', loaded.ok && loaded.names.length === 5, `names=${loaded.names?.length}`);
+  const titleAfter = await page.title();
+  check('desktop: tab title appends atlas filename after load',
+    titleAfter === `Atlas Toolkit v${APP_VERSION} - flows.atlas`, titleAfter);
   ui = await readUi(page);
   check('desktop: region list rendered + count badge', ui.items === 5 && ui.count === '5', `items=${ui.items} count=${ui.count}`);
   check('desktop: Edit toggle + Extract All enabled after load', ui.editEnabled && ui.extractAllEnabled);
   check('desktop: .skel picker visible after atlas load in view mode', ui.pickSkelVisible);
+  check('desktop: gap settings gear hidden in view mode', !ui.nestSettingsVisible);
+  const toggleHelp = await page.evaluate(() => ({
+    title: document.getElementById('mesh-mask-toggle-row').getAttribute('title'),
+    help: document.getElementById('mesh-mask-toggle-row').getAttribute('data-help'),
+  }));
+  check('desktop: Mesh Cropping uses data-help instead of title', !toggleHelp.title && !!toggleHelp.help);
+  await page.hover('#mesh-mask-toggle-row');
+  await page.waitForTimeout(600);
+  const helpGeom = await page.evaluate(() => {
+    const pop = document.getElementById('opt-help-popover').getBoundingClientRect();
+    const row = document.getElementById('options-row').getBoundingClientRect();
+    return {
+      shown: !document.getElementById('opt-help-popover').classList.contains('hidden'),
+      popHeight: pop.height,
+      popBottom: pop.bottom,
+      rowBottom: row.bottom,
+    };
+  });
+  check('desktop: hover delay shows help popover below the toggle, not clipped by #options-row',
+    helpGeom.shown && helpGeom.popHeight > 8 && helpGeom.popBottom > helpGeom.rowBottom,
+    JSON.stringify(helpGeom));
+  await page.mouse.move(0, 0);
   const pickerSize = await page.evaluate(() => {
     const row = document.getElementById('options-row').getBoundingClientRect();
     const btn = document.getElementById('btn-pick-skel').getBoundingClientRect();
@@ -233,6 +277,15 @@ const browser = await chromium.launch({ headless: true });
     pickerSize.btnH > 0 && pickerSize.btnH < pickerSize.rowH,
     `btn=${pickerSize.btnH} row=${pickerSize.rowH}`,
   );
+  const collapseAtDesktop = await page.evaluate(() => {
+    const btn = document.getElementById('btn-options-collapse');
+    return {
+      hidden: btn.classList.contains('hidden') || getComputedStyle(btn).display === 'none',
+      overflowing: document.getElementById('options-row').classList.contains('is-overflowing'),
+    };
+  });
+  check('desktop: collapse chevron hidden when the row fits',
+    collapseAtDesktop.hidden && !collapseAtDesktop.overflowing, JSON.stringify(collapseAtDesktop));
 
   // 2. Multi-select: click, shift-click, ctrl-click
   const items = page.locator('.region-item');
@@ -256,9 +309,9 @@ const browser = await chromium.launch({ headless: true });
   const download1 = await dl1;
   check('desktop: Extract Selected downloads a PNG', download1.suggestedFilename().endsWith('.png'), download1.suggestedFilename());
 
-  // View mode: gap-distance input must not be visible yet (Task 7 scrutinize
-  // finding -- the CSS rule hiding it in view mode had no test either way).
-  check('desktop: gap-distance input hidden in view mode', !ui.nestGapVisible);
+  // View mode: Smart Packing + gear live in .only-edit-mode, so the gear
+  // must not be visible until Edit is entered.
+  check('desktop: gap settings gear still hidden in view mode after load', !ui.nestSettingsVisible);
 
   // 4. Enter edit mode via the toggle
   await page.click('#mode-modify');
@@ -266,32 +319,63 @@ const browser = await chromium.launch({ headless: true });
   ui = await readUi(page);
   check('desktop: mode toggle enters edit mode', ui.mode === 'modify' && ui.modifyControlsVisible);
   check('desktop: repack row + Save As appear in edit mode', ui.repackRowVisible && ui.saveVisible);
-  check('desktop: gap-distance input visible in edit mode', ui.nestGapVisible);
+  check('desktop: gap settings gear visible in edit mode', ui.nestSettingsVisible);
+  const editGroupOrder = await page.evaluate(() =>
+    [...document.querySelectorAll('#options-row > li')]
+      .filter((li) => getComputedStyle(li).display !== 'none')
+      .map((li) => li.id),
+  );
+  check('desktop: edit-mode group order is mesh, pack, then Advance Mode last',
+    editGroupOrder.join(',') === 'options-group-mesh,options-group-pack,options-group-advance',
+    editGroupOrder.join(','));
+  check('desktop: gap panel stays closed until the gear is clicked', !ui.nestGapPanelOpen);
+  check('desktop: gap settings gear disabled while Smart Packing is off',
+    await page.locator('#btn-nest-settings').isDisabled());
   // #chk-nest-regions is display:none (styled as a .toggle-switch); the real
   // user control is the wrapping label. Clicking it toggles the checkbox and
   // fires the change handler that enables the gap-distance input.
   await page.click('#nest-regions-toggle-row');
   await page.waitForTimeout(500); // clear the 400ms toggle debounce/rerun window
+  check('desktop: gap settings gear enabled once Smart Packing is checked',
+    !(await page.locator('#btn-nest-settings').isDisabled()));
+  await page.click('#btn-nest-settings');
+  await page.waitForTimeout(80);
+  ui = await readUi(page);
+  check('desktop: gear opens the gap panel', ui.nestGapPanelOpen);
   const gapInput = page.locator('#nest-gap-distance');
   check('desktop: gap-distance input enabled once Nest Regions is checked', !(await gapInput.isDisabled()));
+  const popoverBtns = await page.evaluate(() => {
+    const closeBtn = document.getElementById('nest-gap-close');
+    const confirmBtn = document.getElementById('nest-gap-confirm');
+    return {
+      closeDisplay: getComputedStyle(closeBtn).display,
+      confirmH: confirmBtn.getBoundingClientRect().height,
+      confirmText: confirmBtn.innerText,
+    };
+  });
+  check('desktop: popover shows a small Confirm and no Close',
+    popoverBtns.closeDisplay === 'none' && popoverBtns.confirmText === 'Confirm' && popoverBtns.confirmH > 0 && popoverBtns.confirmH <= 26,
+    JSON.stringify(popoverBtns));
   await page.evaluate(() => { window.__nestGapWriteCount = 0; }); // clean baseline before the burst
   await gapInput.fill('2');
-  await gapInput.type('7'); // rapid sequential edits -- should collapse to one rerun via debounce
+  await gapInput.type('7'); // draft only -- must not write until Confirm
   await gapInput.dispatchEvent('input');
+  await page.waitForTimeout(200);
+  check('desktop: no page errors after rapid gap-distance edits', errors.length === 0, errors.join('; '));
+  const writeCountBeforeConfirm = await page.evaluate(() => window.__nestGapWriteCount);
+  check('desktop: gap-distance edits do not write until Confirm',
+    writeCountBeforeConfirm === 0, `writeCount=${writeCountBeforeConfirm}`);
+  await page.click('#nest-gap-confirm');
   await page.waitForTimeout(600);
-  check('desktop: no page errors after rapid gap-distance edits (debounce did not crash/queue)', errors.length === 0, errors.join('; '));
-  // Task 7 scrutinize finding: the check above never actually verified
-  // debouncing -- it passes identically whether N keystrokes collapse to 1
-  // rerun or fire N reruns. This counts real writes to the persisted pref
-  // key (set_nest_gap_distance's own externally-observable side effect) --
-  // a genuine burst of edits (fill '2', type '7') must still produce
-  // exactly ONE write after the debounce window, not one per keystroke.
   const writeCount = await page.evaluate(() => window.__nestGapWriteCount);
-  check('desktop: rapid gap-distance edits collapse to exactly one debounced write, not one per keystroke',
+  check('desktop: Confirm writes the drafted gap distance once',
     writeCount === 1, `writeCount=${writeCount}`);
+  await page.keyboard.press('Escape');
   await page.click('#nest-regions-toggle-row');
   await page.waitForTimeout(200);
   check('desktop: gap-distance input disabled again once Nest Regions is unchecked', await gapInput.isDisabled());
+  check('desktop: gap settings gear disabled again once Smart Packing is unchecked',
+    await page.locator('#btn-nest-settings').isDisabled());
   check('desktop: Save As chevron is visible', await page.locator('#btn-save-menu').isVisible());
   await page.click('#btn-save-menu');
   await page.waitForTimeout(80);
@@ -944,18 +1028,10 @@ const browser = await chromium.launch({ headless: true });
   await ctx.close();
 }
 
-// ─── #options-row overflow at narrow/portrait widths (Task 7 fix round) ───────
-// Scrutinize finding: #options-row is fixed-height (35px) and flex-nowrap --
-// adding the Nest Regions toggle + gap-distance input pushed it over capacity
-// at narrow widths, and without white-space:nowrap the labels wrapped to 2-3
-// lines and got clipped INSIDE the fixed-height box (not just cut off at an
-// edge -- text rendered outside the visible row, unreadable). The fix gives
-// .toggle-label nowrap+flex-shrink:0 and #options-row overflow-x:auto, so the
-// row scrolls horizontally instead of clipping vertically. Assert every
-// visible toggle label stays within the row's own height at each of the
-// viewports the reviewer's own screenshots demonstrated the clipping at
-// (430 added per the final whole-branch review, which found the same bug
-// class recurring there too -- see the #btn-pick-skel check below).
+// ─── #options-row overflow: wrap + collapse instead of horizontal scroll ───
+// Groups wrap as whole <li> units. Collapsed height stays 35px; extra lines
+// clip until the chevron expands the row. Labels must still be single-line
+// (nowrap) so they are not clipped vertically inside a 35px flex line.
 for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { w: 320, h: 800 }]) {
   const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
@@ -968,37 +1044,34 @@ for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { 
   await page.click('#mode-modify');
   await page.waitForTimeout(150);
 
+  await page.evaluate(async () => {
+    const skelBtn = document.getElementById('btn-pick-skel');
+    skelBtn.classList.remove('hidden');
+    skelBtn.textContent = 'very_long_skeleton_filename_to_force_wrap.skel';
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
+
   const geometry = await page.evaluate(() => {
     const row = document.getElementById('options-row');
-    // Round-2 scrutinize finding: getBoundingClientRect().height (35, the
-    // border-box) understates how tall a label can get before it's
-    // actually clipped -- overflow-y:hidden clips against clientHeight
-    // (34, the content-box, since the row has a 1px border-bottom). A
-    // label at 35-36px would pass the old +1px-slack comparison against
-    // the border-box while genuinely being clipped -- not hypothetical,
-    // the coarse-pointer media query puts labels at exactly 34px with
-    // zero margin. Compare against clientHeight instead.
     const rowClientHeight = row.clientHeight;
     const labels = [...row.querySelectorAll('.toggle-label')].map((l) => {
       const cs = getComputedStyle(l);
       return { id: l.id, height: l.getBoundingClientRect().height, visible: cs.display !== 'none' };
     });
-    const gapInput = document.getElementById('nest-gap-distance');
-    // Final whole-branch review finding: #btn-pick-skel (flex-shrink:1,
-    // its own narrow-width answer was text-overflow:ellipsis) became the
-    // LAST remaining shrinkable child once .toggle-label and
-    // .nest-gap-input were both pinned to flex-shrink:0 -- it absorbed
-    // 100% of the row's shrink pressure and collapsed to an 18px
-    // unlabeled sliver, the exact same bug relocated a third time. The
-    // fixture atlas has no real .skel, so the button starts hidden --
-    // force it visible with representative text to measure the same
-    // failure mode the reviewer found.
+    const gearBtn = document.getElementById('btn-nest-settings');
     const skelBtn = document.getElementById('btn-pick-skel');
-    skelBtn.classList.remove('hidden');
-    skelBtn.textContent = 'my_skeleton_name.skel';
+    const collapseBtn = document.getElementById('btn-options-collapse');
+    const collapseCs = getComputedStyle(collapseBtn);
     return {
-      rowClientHeight, labels,
-      gapInputWidth: gapInput.getBoundingClientRect().width,
+      rowClientHeight,
+      rowHeight: row.getBoundingClientRect().height,
+      scrollWidth: row.scrollWidth,
+      clientWidth: row.clientWidth,
+      overflowing: row.classList.contains('is-overflowing'),
+      expanded: row.classList.contains('is-expanded'),
+      collapseVisible: collapseCs.display !== 'none',
+      labels,
+      gearBtnWidth: gearBtn.getBoundingClientRect().width,
       skelBtnWidth: skelBtn.getBoundingClientRect().width,
     };
   });
@@ -1008,22 +1081,120 @@ for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { 
   const clipped = visibleLabels.filter((l) => l.height > geometry.rowClientHeight + 1); // +1px rounding slack
   check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- no toggle label is taller than #options-row's content box (clipped)`,
     clipped.length === 0, JSON.stringify(geometry));
-  // Round-2 scrutinize finding: the FIRST fix round's own CSS change
-  // (.toggle-label flex-shrink:0) concentrated all of #options-row's
-  // shrink pressure onto #nest-gap-distance (which had no flex-shrink
-  // override), collapsing it to 10px -- padding+border only, its value
-  // rendered invisibly -- at exactly these 3 viewports. Assert it stays
-  // at a usable width (its own CSS width is 42px).
-  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- gap-distance input is not collapsed to zero content width`,
-    geometry.gapInputWidth >= 30, `gapInputWidth=${geometry.gapInputWidth}`);
-  // Final whole-branch review finding -- see the comment at this check's
-  // own measurement above. A genuinely collapsed button measures ~18px
-  // (padding+border only); its natural (pre-collapse) width for this
-  // fixture's text is ~136px.
+  check(`portrait ${vp.w}x${vp.h}: options-row stays at its 35px header height while collapsed`,
+    geometry.rowHeight <= 36, `rowHeight=${geometry.rowHeight}`);
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- no horizontal scroll on #options-row`,
+    geometry.scrollWidth <= geometry.clientWidth + 1,
+    `scrollWidth=${geometry.scrollWidth} clientWidth=${geometry.clientWidth}`);
+  check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- gear button is not collapsed to zero content width`,
+    geometry.gearBtnWidth >= 22, `gearBtnWidth=${geometry.gearBtnWidth}`);
   check(`portrait ${vp.w}x${vp.h}: REGRESSION CHECK -- .skel picker button is not collapsed to zero content width`,
     geometry.skelBtnWidth >= 30, `skelBtnWidth=${geometry.skelBtnWidth}`);
+  check(`portrait ${vp.w}x${vp.h}: overflow chevron matches is-overflowing`,
+    geometry.overflowing === geometry.collapseVisible,
+    JSON.stringify({ overflowing: geometry.overflowing, collapseVisible: geometry.collapseVisible }));
+  check(`portrait ${vp.w}x${vp.h}: row starts collapsed`, !geometry.expanded);
+
+  if (geometry.overflowing) {
+    await page.click('#btn-options-collapse');
+    await page.waitForTimeout(50);
+    const expandedGeo = await page.evaluate(() => {
+      const row = document.getElementById('options-row');
+      const groups = [...row.querySelectorAll(':scope > li')].filter((li) => getComputedStyle(li).display !== 'none').map((li) => {
+        const kids = [...li.children].filter((c) => getComputedStyle(c).display !== 'none');
+        const box = li.getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        return {
+          id: li.id,
+          height: Math.round(box.height),
+          sameLine: box.height <= 42,
+          fullyVisible: box.top >= rowBox.top - 1 && box.bottom <= rowBox.bottom + 1,
+          kidCount: kids.length,
+          lineStart: li.classList.contains('is-line-start'),
+          borderLeft: parseFloat(getComputedStyle(li).borderLeftWidth) || 0,
+        };
+      });
+      const btn = document.getElementById('btn-options-collapse');
+      const wrap = document.getElementById('options-row-wrap').getBoundingClientRect();
+      const btnBox = btn.getBoundingClientRect();
+      return {
+        expanded: row.classList.contains('is-expanded'),
+        rowHeight: row.getBoundingClientRect().height,
+        scrollWidth: row.scrollWidth,
+        clientWidth: row.clientWidth,
+        groups,
+        chevronTop: btnBox.top + btnBox.height / 2,
+        firstRowCenter: wrap.top + 17.5,
+        chevronRight: wrap.right - btnBox.right,
+      };
+    });
+    check(`portrait ${vp.w}x${vp.h}: chevron expands the row past 35px`,
+      expandedGeo.expanded && expandedGeo.rowHeight > 36,
+      JSON.stringify({ height: expandedGeo.rowHeight, expanded: expandedGeo.expanded }));
+    check(`portrait ${vp.w}x${vp.h}: expanded row still does not scroll horizontally`,
+      expandedGeo.scrollWidth <= expandedGeo.clientWidth + 1,
+      `scrollWidth=${expandedGeo.scrollWidth} clientWidth=${expandedGeo.clientWidth}`);
+    check(`portrait ${vp.w}x${vp.h}: each visible <li> group stays on one line`,
+      expandedGeo.groups.every((g) => g.sameLine), JSON.stringify(expandedGeo.groups));
+    check(`portrait ${vp.w}x${vp.h}: expanded groups are fully visible in the row`,
+      expandedGeo.groups.every((g) => g.fullyVisible), JSON.stringify(expandedGeo.groups));
+    check(`portrait ${vp.w}x${vp.h}: chevron stays vertically centered on row 1`,
+      Math.abs(expandedGeo.chevronTop - expandedGeo.firstRowCenter) <= 3,
+      JSON.stringify({ chevronTop: expandedGeo.chevronTop, firstRowCenter: expandedGeo.firstRowCenter }));
+    check(`portrait ${vp.w}x${vp.h}: chevron stays flush right`,
+      expandedGeo.chevronRight >= 0 && expandedGeo.chevronRight <= 10,
+      `chevronRight=${expandedGeo.chevronRight}`);
+    check(`portrait ${vp.w}x${vp.h}: Advance Mode is the last visible group`,
+      expandedGeo.groups.at(-1)?.id === 'options-group-advance',
+      JSON.stringify(expandedGeo.groups.map((g) => g.id)));
+    check(`portrait ${vp.w}x${vp.h}: first group on each wrap line has no vertical divider`,
+      expandedGeo.groups.every((g) => g.lineStart === (g.borderLeft === 0)),
+      JSON.stringify(expandedGeo.groups));
+    const lineStarts = expandedGeo.groups.filter((g) => g.lineStart);
+    check(`portrait ${vp.w}x${vp.h}: wrapped lines each have a divider-free start`,
+      lineStarts.length >= 1 && lineStarts.every((g) => g.borderLeft === 0),
+      JSON.stringify(lineStarts));
+  }
 
   check(`portrait ${vp.w}x${vp.h}: zero page errors`, errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
+// ─── Long-press help on options-row toggles must not flip the checkbox ────────
+{
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check('touch long-press: single-page fixture loaded', loaded.ok);
+  const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+  check('touch long-press: viewport reports coarse pointer (long-press path)', coarse === true);
+  const before = await page.isChecked('#chk-mesh-mask');
+  await page.evaluate(() => {
+    const el = document.getElementById('mesh-mask-toggle-row');
+    const t = new Touch({ identifier: 0, target: el, clientX: 20, clientY: 20 });
+    el.dispatchEvent(new TouchEvent('touchstart', {
+      bubbles: true, cancelable: true, touches: [t], targetTouches: [t], changedTouches: [t],
+    }));
+  });
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const el = document.getElementById('mesh-mask-toggle-row');
+    el.dispatchEvent(new TouchEvent('touchend', {
+      bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [],
+    }));
+  });
+  await page.waitForTimeout(80);
+  const after = await page.isChecked('#chk-mesh-mask');
+  const helpShown = await page.evaluate(() => !document.getElementById('opt-help-popover').classList.contains('hidden'));
+  check('touch: long-press does not toggle Mesh Cropping', after === before, `before=${before} after=${after}`);
+  check('touch: long-press shows help popover', helpShown === true);
+  check('touch long-press: zero page errors', errors.length === 0, errors.join('; '));
   await ctx.close();
 }
 
