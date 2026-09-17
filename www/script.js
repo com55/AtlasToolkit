@@ -2,13 +2,32 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, applyNestGapDistance } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
+import { initOptionsPopover } from './js/options-popover.js';
+import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
+import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
+
+let appVersion = '';
+
+async function resolveAppVersion() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.get_current_version) {
+    try {
+      const v = await window.pywebview.api.get_current_version();
+      if (v) return String(v).replace(/^v/i, '').trim();
+    } catch (_) { /* fall through to the stamped PWA meta tag */ }
+  }
+  return versionFromDocument();
+}
+
+function applyAppTitle(atlasFilename) {
+  document.title = formatAppTitle(appVersion, atlasFilename);
+}
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
@@ -45,8 +64,12 @@ function _waitForPywebviewReady() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await _waitForPywebviewReady();
+  appVersion = await resolveAppVersion();
+  applyAppTitle('');
   initPanelResizer();
   initAppBar();
+  initOptionsPopover({ applyGap: applyNestGapDistance, revertGap: updateNestRegionsUI });
+  initOptionsRowCollapse();
   // Stamp the initial body.mode-extract class setMode()'s CSS-gated
   // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called
   // reactively (entering/exiting modify mode, or on a fresh atlas load
@@ -206,6 +229,7 @@ async function _resetUiAfterFreshLoad() {
   updateMeshCroppingUI();
   updateNestRegionsUI();
 
+  applyAppTitle(AtlasAPI.get_current_atlas_filename());
   // Native window title (old Python engine's load_atlas() used to do this;
   // the JS engine has no equivalent hook, so it's centralized here instead
   // — covers all three open paths: Open button, drag-drop, CLI/file

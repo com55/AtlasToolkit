@@ -95,7 +95,7 @@
               <span class="toggle-switch"></span>
               <span>Copy .skel</span>
             </label>
-            <p class="save-menu-hint">Also copy the matching .skel</p>
+            <p class="save-menu-hint">Also copy .skel to output</p>
           </div>
         </div>
       </div>
@@ -126,32 +126,46 @@
       <div id="panel-splitter" role="separator" aria-orientation="vertical" aria-label="Resize panels"></div>
 
       <div id="right-panel">
-        <div id="options-row">
-          <label class="toggle-label" id="advance-mode-row" title="Advance Mode adds Rename / Add / Remove controls for editing regions directly.">
-            <input type="checkbox" id="chk-advance-mode" />
-            <span class="toggle-switch"></span>
-            <span>Advance Mode</span>
-          </label>
-
-          <div class="app-bar-divider options-row-divider"></div>
-
-          <label class="toggle-label" id="mesh-mask-toggle-row" title="Mesh Cropping will crop each region using its real mesh silhouette from the .skel file instead of a plain rectangle, preventing bleed from other regions packed nearby.">
-            <input type="checkbox" id="chk-mesh-mask" />
-            <span class="toggle-switch"></span>
-            <span>Mesh Cropping</span>
-          </label>
-          <label class="toggle-label" id="mesh-aware-repack-toggle-row">
-            <input type="checkbox" id="chk-mesh-aware-repack" />
-            <span class="toggle-switch"></span>
-            <span>Mesh-Aware</span>
-          </label>
-          <label class="toggle-label" id="nest-regions-toggle-row" title="Squeeze smaller regions into gaps in the layout instead of always starting a new row (slower to repack).">
-            <input type="checkbox" id="chk-nest-regions" />
-            <span class="toggle-switch"></span>
-            <span>Smart Packing</span>
-          </label>
-          <input type="number" id="nest-gap-distance" class="nest-gap-input" min="1" max="256" value="4" disabled title="Minimum pixel gap kept between a nested region and its neighbors (1-256)." />
-          <button id="btn-pick-skel" class="skel-picker-btn hidden" type="button"></button>
+        <div id="options-row-wrap">
+          <ul id="options-row">
+          <li id="options-group-mesh">
+            <div class="only-view-mode">
+              <label class="toggle-label" id="mesh-mask-toggle-row" data-help="Mesh Cropping will crop each region using its real mesh silhouette from the .skel file instead of a plain rectangle, preventing bleed from other regions packed nearby.">
+                <input type="checkbox" id="chk-mesh-mask" />
+                <span class="toggle-switch"></span>
+                <span>Mesh Cropping</span>
+              </label>
+            </div>
+            <div class="only-edit-mode">
+              <label class="toggle-label" id="mesh-aware-repack-toggle-row" data-help="Mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.">
+                <input type="checkbox" id="chk-mesh-aware-repack" />
+                <span class="toggle-switch"></span>
+                <span>Mesh-Aware</span>
+              </label>
+            </div>
+            <button id="btn-pick-skel" class="skel-picker-btn hidden" type="button"></button>
+          </li>
+          <li id="options-group-pack" class="only-edit-mode">
+            <label class="toggle-label" id="nest-regions-toggle-row" data-help="Squeeze smaller regions into gaps in the layout instead of always starting a new row (slower to repack).">
+              <input type="checkbox" id="chk-nest-regions" />
+              <span class="toggle-switch"></span>
+              <span>Smart Packing</span>
+            </label>
+            <button id="btn-nest-settings" type="button" disabled aria-label="Smart Packing gap settings" aria-expanded="false" aria-haspopup="dialog" aria-controls="nest-gap-panel">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" aria-hidden="true"><path fill="currentColor" d="m403-96-22-114q-23-9-44.5-21T296-259l-110 37-77-133 87-76q-2-12-3-24t-1-25q0-13 1-25t3-24l-87-76 77-133 110 37q19-16 40.5-28t44.5-21l22-114h154l22 114q23 9 44.5 21t40.5 28l110-37 77 133-87 76q2 12 3 24t1 25q0 13-1 25t-3 24l87 76-77 133-110-37q-19 16-40.5 28T579-210L557-96H403Zm59-72h36l19-99q38-7 71-26t57-48l96 32 18-30-76-67q6-17 9.5-35.5T696-480q0-20-3.5-38.5T683-554l76-67-18-30-96 32q-24-29-57-48t-71-26l-19-99h-36l-19 99q-38 7-71 26t-57 48l-96-32-18 30 76 67q-6 17-9.5-35.5T264-480q0 20 3.5 38.5T277-406l-76 67 18 30 96-32q24 29 57 48t71 26l19 99Zm18-168q60 0 102-42t42-102q0-60-42-102t-102-42q-60 0-102 42t-42 102q0 60 42 102t102 42Zm0-144Z"/></svg>
+            </button>
+          </li>
+          <li id="options-group-advance" class="only-edit-mode">
+            <label class="toggle-label" id="advance-mode-row" data-help="Advance Mode adds Rename / Add / Remove controls for editing regions directly.">
+              <input type="checkbox" id="chk-advance-mode" />
+              <span class="toggle-switch"></span>
+              <span>Advance Mode</span>
+            </label>
+          </li>
+        </ul>
+          <button type="button" id="btn-options-collapse" class="hidden" aria-expanded="false" aria-label="Show more options">
+            <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" aria-hidden="true"><path fill="currentColor" d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
+          </button>
         </div>
         <div id="status-bar">
           <span id="status-text">Ready</span>
@@ -202,6 +216,21 @@
         <div class="modal-buttons">
           <button type="button" class="btn-secondary" id="add-cancel-btn">Cancel</button>
           <button type="button" class="btn-primary" id="add-confirm-btn" disabled>Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="opt-help-popover" class="hidden" role="tooltip"></div>
+    <div id="nest-gap-overlay" class="hidden">
+      <div id="nest-gap-panel" role="dialog" aria-label="Smart Packing gap">
+        <p class="nest-gap-heading">Gap (px)</p>
+        <div class="nest-gap-controls">
+          <input type="range" id="nest-gap-slider" min="1" max="100" value="4" disabled />
+          <input type="number" id="nest-gap-distance" class="nest-gap-input" min="1" max="256" value="4" disabled />
+        </div>
+        <div class="nest-gap-actions">
+          <button type="button" class="btn-secondary" id="nest-gap-close">Close</button>
+          <button type="button" class="btn-primary" id="nest-gap-confirm">Confirm</button>
         </div>
       </div>
     </div>

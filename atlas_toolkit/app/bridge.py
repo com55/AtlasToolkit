@@ -163,6 +163,10 @@ class Api:
     def get_pref(self, key: str, default: Any = None) -> Any:
         return self._config.get(key, default)
 
+    def get_current_version(self) -> str:
+        """App version from pyproject.toml (dev) or the packaged VERSION file."""
+        return get_current_version()
+
     def set_pref(self, key: str, value: Any) -> None:
         self._config.set(key, value)
 
