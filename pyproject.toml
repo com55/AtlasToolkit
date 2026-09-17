@@ -9,6 +9,7 @@ description = "Spine Atlas Toolkit - Extract, modify, and repack atlas sprites."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "numpy>=2.4.6",
     "pillow==12.1.1",
     "pywebview==6.1",
     "requests==2.32.5",

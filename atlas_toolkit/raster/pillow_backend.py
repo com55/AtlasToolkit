@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 
+import numpy as np
 from PIL import Image
 
 from atlas_toolkit.raster.base import ImageHandle
@@ -118,11 +119,75 @@ class PillowRasterBackend:
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
     ) -> ImageHandle:
-        raise NotImplementedError(
-            "rasterize_mesh_mask lands in the separate 'mesh' stage (spec "
-            "§7 ordering: basic raster -> modifier -> repack -> mesh), not "
-            "this one -- see atlas_toolkit/raster/base.py's docstring."
-        )
+        # Pixel-center nonzero-winding-rule polygon fill -- Pillow's
+        # ImageDraw has no compound-path winding-rule fill primitive, so
+        # this is a from-scratch rasterizer, algorithm validated by the
+        # poc/pyodide-pillow feasibility spike (commit 3b30de0) against
+        # real Canvas ctx.fill('nonzero') output: 99.7-99.9% pixel
+        # agreement, full winding-cancellation parity. No antialiasing
+        # (hard edges) -- Canvas's fill is antialiased; that difference is
+        # confined to polygon edges, not the interior, and is expected
+        # (see this method's docstring in raster/base.py).
+        edges: list[tuple[float, float, float, float]] = []
+        for i in range(0, len(triangles), 3):
+            ia, ib, ic = triangles[i] * 2, triangles[i + 1] * 2, triangles[i + 2] * 2
+            pts = [
+                (uvs[ia] * width, uvs[ia + 1] * height),
+                (uvs[ib] * width, uvs[ib + 1] * height),
+                (uvs[ic] * width, uvs[ic + 1] * height),
+            ]
+            for k in range(3):
+                x0, y0 = pts[k]
+                x1, y1 = pts[(k + 1) % 3]
+                if y0 != y1:
+                    edges.append((x0, y0, x1, y1))
+
+        winding = np.zeros((height, width), dtype=np.int32)
+        if edges:
+            # Pixel centers, scaled by 2 to use integer arithmetic and avoid
+            # floating-point precision issues with opposite-direction edges
+            # (winding cancellation). Pixel (px,py) has center at (px+0.5, py+0.5),
+            # which becomes (2*px+1, 2*py+1) in scaled coordinates.
+            cy_scaled = (np.arange(height, dtype=np.int64) * 2 + 1)[:, np.newaxis]
+            cx_scaled = (np.arange(width, dtype=np.int64) * 2 + 1)[np.newaxis, :]
+
+            for x0, y0, x1, y1 in edges:
+                # Scale edge endpoints by 2
+                x0_s, y0_s = int(x0 * 2), int(y0 * 2)
+                x1_s, y1_s = int(x1 * 2), int(y1 * 2)
+
+                if y1_s > y0_s:
+                    crosses = (cy_scaled >= y0_s) & (cy_scaled < y1_s)
+                    direction = 1
+                else:
+                    crosses = (cy_scaled >= y1_s) & (cy_scaled < y0_s)
+                    direction = -1
+
+                # Compute cross_x in scaled coordinates using integer arithmetic
+                # cross_x_s = x0_s + (cy_scaled - y0_s) * (x1_s - x0_s) / (y1_s - y0_s)
+                # Rearranged to avoid division: cross_x_s * (y1_s - y0_s) = ...
+                # We test: cross_x_s * dy_s > cx_scaled * dy_s
+                # Which is: (x0_s + t * dx_s) * dy_s > cx_scaled * dy_s
+                # where t = (cy_scaled - y0_s) / (y1_s - y0_s)
+                # This avoids floating-point division entirely.
+                dy_s = y1_s - y0_s
+                dx_s = x1_s - x0_s
+                numerator = (cy_scaled - y0_s) * dx_s + x0_s * dy_s  # (cy - y0) * dx + x0 * dy
+                threshold = cx_scaled * dy_s                          # cx * dy
+
+                if dy_s > 0:
+                    contributes = crosses & (numerator > threshold)
+                else:
+                    contributes = crosses & (numerator < threshold)
+
+                winding += np.where(contributes, direction, 0).astype(np.int32)
+
+        alpha = np.where(winding != 0, 255, 0).astype(np.uint8)
+        rgba = np.empty((height, width, 4), dtype=np.uint8)
+        rgba[:, :, 0:3] = 255
+        rgba[:, :, 3] = alpha
+        img = Image.fromarray(rgba, mode="RGBA")
+        return self._store(img)
 
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
