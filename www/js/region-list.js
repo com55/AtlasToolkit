@@ -61,9 +61,10 @@ export async function loadRegions() {
   // different atlas loads while modify mode is open) -- this is the one
   // function every load path (script.js, drop.js) already calls, so
   // checking here covers both requirements without duplicating the check
-  // at every load call site.
+  // at every load call site. Hide the whole group so an empty first <li>
+  // cannot keep a divider/gap in the options row.
   const isMultiPage = AtlasAPI.is_multi_page();
-  document.getElementById('advance-mode-row').classList.toggle('hidden', isMultiPage);
+  document.getElementById('options-group-advance').classList.toggle('hidden', isMultiPage);
   if (isMultiPage) {
     setAdvanceMode(false);
   }

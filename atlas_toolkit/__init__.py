@@ -2,4 +2,9 @@
 
 from __future__ import annotations
 
-__version__ = "0.3.5"
+
+def __getattr__(name: str):
+    if name == "__version__":
+        from atlas_toolkit.update.updater import get_current_version
+        return get_current_version()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

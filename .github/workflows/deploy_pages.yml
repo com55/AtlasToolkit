@@ -37,6 +37,9 @@ jobs:
           mkdir -p www/js/vendor/spine-skeleton-binary
           cp "$RUNNER_TEMP"/vendor-src/src/*.js www/js/vendor/spine-skeleton-binary/
 
+      - name: Stamp app version into index.html
+        run: python3 scripts/web_version.py --stamp www/index.html
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 

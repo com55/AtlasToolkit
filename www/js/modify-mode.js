@@ -12,6 +12,8 @@ import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { updateModeToggleUI, updatePageSwitcher, setAdvanceMode } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
+import { syncHelpPopover, hideHelpPopover, closeGapPanel, isGapPanelOpen } from './options-popover.js';
+import { syncOptionsRowOverflow } from './options-row.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -47,21 +49,17 @@ export function setMode(mode) {
   }
   updateModeToggleUI();
   updatePageSwitcher();
-  // #options-row is always-visible now (round-4-reviewed design decision
-  // -- see the mesh-mask design spec's UI section) and its own height is
-  // fixed (--panel-header-h), unaffected by which of its children show per
-  // mode -- so panel-resizer.js's minRightHeight() (options-row height +
-  // statusBar height) no longer actually changes across a mode switch.
-  // Keeping this call anyway: harmless (a no-op re-clamp to the same
-  // floor), and it stays correct if minRightHeight()'s inputs ever change
-  // again (corrected post-review, Fable, 2026-08-31 -- the previous comment
-  // here claimed #options-row's height still changed, which stopped being
-  // true once this task removed its whole-container .hidden toggle).
-  refreshPanelSplit();
+  hideHelpPopover();
+  closeGapPanel();
   // Picker visibility follows the mode-relevant mesh toggle; refresh so a
   // View↔Edit switch doesn't leave the button stuck on the previous mode.
   updateMeshCroppingUI();
   updateNestRegionsUI();
+  // Wrapping extra <li> groups can change #options-row height when expanded,
+  // so re-measure overflow after the mode-gated children settle, then
+  // re-clamp the stacked-layout split (minRightHeight includes #options-row-wrap).
+  syncOptionsRowOverflow();
+  refreshPanelSplit();
 }
 
 /** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
@@ -121,7 +119,7 @@ export async function enterEditMode() {
       // Restore Advance Mode -- persisted across sessions, re-applied on
       // every Edit Mode entry rather than left as transient DOM state.
       // Multi-page atlases never allow it regardless of the saved
-      // preference (loadRegions() already hides #advance-mode-row for
+      // preference (loadRegions() already hides #options-group-advance for
       // them; skip restoring here too so the toolbar can't end up shown
       // for one).
       if (!AtlasAPI.is_multi_page()) {
@@ -327,9 +325,12 @@ export function updateMeshCroppingUI() {
   const repackChk = document.getElementById('chk-mesh-aware-repack');
   repackChk.checked = repackEnabled;
   repackChk.disabled = !available;
-  document.getElementById('mesh-aware-repack-toggle-row').title = repackChk.disabled
+  const meshAwareRow = document.getElementById('mesh-aware-repack-toggle-row');
+  meshAwareRow.dataset.help = repackChk.disabled
     ? 'Requires a usable .skel file.'
-    : 'Mask each region pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.';
+    : "Mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
+  meshAwareRow.removeAttribute('title');
+  syncHelpPopover();
 
   // Shared .skel picker button -- relevant toggle depends on which mode is
   // currently active: View mode shows Mesh Cropping row, Edit mode shows
@@ -368,15 +369,24 @@ export function updateMeshCroppingUI() {
  *  state: the toggle itself, the gap-distance input, or app startup.
  *  Unlike updateMeshCroppingUI(), this is never gated by mesh availability
  *  -- Nest Regions works with no mesh data at all (Gap A space alone). */
-export function updateNestRegionsUI() {
+export function updateNestRegionsUI({ force = false } = {}) {
   const { enabled, gapDistance } = AtlasAPI.get_nest_options();
   document.getElementById('chk-nest-regions').checked = enabled;
   const gapInput = document.getElementById('nest-gap-distance');
+  const slider = document.getElementById('nest-gap-slider');
+  const gear = document.getElementById('btn-nest-settings');
   gapInput.disabled = !enabled;
-  // Don't clobber an in-progress edit if this gets called while the user is
-  // actively typing in the field (e.g. from a toggle elsewhere firing a
-  // broader UI sync).
-  if (document.activeElement !== gapInput) gapInput.value = gapDistance;
+  if (slider) slider.disabled = !enabled;
+  if (gear) gear.disabled = !enabled;
+  if (!enabled && isGapPanelOpen()) closeGapPanel();
+  // Don't clobber a draft while the gap panel is open (Confirm is the
+  // apply point) unless the caller just wrote the applied value.
+  if (isGapPanelOpen() && !force) return;
+  gapInput.value = gapDistance;
+  if (slider) {
+    const n = Number(gapDistance);
+    if (Number.isFinite(n) && n >= 1) slider.value = String(Math.min(100, n));
+  }
 }
 
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
@@ -421,13 +431,6 @@ document.getElementById('chk-mesh-aware-repack').addEventListener('change', asyn
 });
 
 document.getElementById('chk-nest-regions').addEventListener('change', async (e) => {
-  // Final whole-branch review finding: the gap-distance debounce timer
-  // (declared below) was not cleared here -- toggling off within its
-  // 400ms window let it fire afterward (a stale repack for a
-  // now-irrelevant setting) or during this op (an error toast for an
-  // action the user already completed, via the structuralOpInFlight
-  // guard in that other handler).
-  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
   if (structuralOpInFlight) {
     e.target.checked = !e.target.checked;
     showToast('Please wait for the current operation to finish.', 'error');
@@ -461,59 +464,41 @@ document.getElementById('chk-nest-regions').addEventListener('change', async (e)
   }
 });
 
-let nestGapDebounceTimer = null;
-
-document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
-  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
-  // Don't even schedule an apply for an empty/invalid value -- Number('')
-  // is 0, which normalizeGap (repack-nest.js) silently substitutes 4 for,
-  // with nothing in the UI showing that happened. The blur listener below
-  // resyncs the field to the true applied value once the user leaves it,
-  // whatever state they left it in.
-  if (e.target.value === '' || !e.target.checkValidity()) return;
-  const px = Number(e.target.value);
-  nestGapDebounceTimer = setTimeout(async () => {
-    if (structuralOpInFlight) {
-      // A structural op is mid-flight -- skip this cycle rather than queue
-      // behind it, but resync the field (it may still be showing the typed
-      // value even though nothing was applied) and tell the user, matching
-      // the checkbox handlers' revert+toast pattern above.
-      updateNestRegionsUI();
-      showToast('Please wait for the current operation to finish.', 'error');
-      return;
-    }
-    structuralOpInFlight = true;
-    try {
-      // See the same-purpose comment on the Nest Regions checkbox handler
-      // above -- nestPack is synchronous and can run for real seconds.
-      setStatus('Repacking...');
-      await new Promise(requestAnimationFrame);
-      const result = await AtlasAPI.set_nest_gap_distance(px);
-      updateNestRegionsUI(); // resync the field to the actually-applied (normalized) value
-      if (result) {
-        await onModPreviewReceived(result); // resets status itself once done
-      } else {
-        setStatus('Ready'); // _maybeRerunRepack no-op'd (no mods yet) -- don't leave 'Repacking...' stuck
-      }
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to update gap distance.', 'error');
+/** Apply the gap-distance field. Called from the gap panel Confirm
+ *  button -- slider/number edits are drafts until then. Returns false if
+ *  the value was invalid or another structural op is in flight. */
+export async function applyNestGapDistance(raw) {
+  const gapInput = document.getElementById('nest-gap-distance');
+  if (raw === '' || raw == null || (gapInput && !gapInput.checkValidity())) {
+    return false;
+  }
+  const px = Number(raw);
+  if (!Number.isFinite(px) || px < 1) return false;
+  if (structuralOpInFlight) {
+    showToast('Please wait for the current operation to finish.', 'error');
+    return false;
+  }
+  structuralOpInFlight = true;
+  try {
+    setStatus('Repacking...');
+    await new Promise(requestAnimationFrame);
+    const result = await AtlasAPI.set_nest_gap_distance(px);
+    updateNestRegionsUI({ force: true });
+    if (result) {
+      await onModPreviewReceived(result);
+    } else {
       setStatus('Ready');
-    } finally {
-      structuralOpInFlight = false;
     }
-  }, 400);
-});
-
-// Catch-all: whatever the field is left showing when the user leaves it
-// (cleared, out-of-range, or simply never triggered a debounced apply
-// because the input event above bailed out) must not silently diverge from
-// what the packer is actually using -- resync on blur. updateNestRegionsUI's
-// own activeElement guard means this only takes effect once the field has
-// genuinely lost focus, never mid-edit.
-document.getElementById('nest-gap-distance').addEventListener('blur', () => {
-  updateNestRegionsUI();
-});
+    return true;
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update gap distance.', 'error');
+    setStatus('Ready');
+    return false;
+  } finally {
+    structuralOpInFlight = false;
+  }
+}
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();

@@ -222,7 +222,6 @@ body.resizing {
 
 /* Panel header rows (sidebar heading, options row, status bar) */
 #sidebar-head,
-#options-row,
 #status-bar {
   height: var(--panel-header-h);
   min-height: var(--panel-header-h);
@@ -253,29 +252,72 @@ body.mode-modify.advance-mode-on #sidebar-head {
   min-height: 30px;
 }
 
+#options-row-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
 #options-row {
   height: 35px;
   min-height: 35px;
   padding: 0 10px;
   gap: 6px;
-  /* Task 7 scrutinize finding: this row is fixed-height with no wrap, and
-     3 toggle rows + the gap-distance input no longer reliably fit at
-     narrow/portrait widths -- without this, .toggle-label text wraps to
-     2-3 lines and gets clipped inside the fixed 35px box. overflow-x:auto
-     turns "doesn't fit" into "scrolls horizontally" instead of "clips
-     vertically" -- same escape hatch .skel-picker-btn already has via its
-     own ellipsis/flex-shrink, just for the row as a whole. */
-  overflow-x: auto;
+  list-style: none;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  box-sizing: border-box;
+  background-color: #252526;
+  border-bottom: 1px solid #444;
+  /* Whole <li> groups wrap as a unit. Collapsed: extra lines clip behind
+     35px. Expanded: height grows. Never scroll horizontally.
+     Popovers/gap panel MUST NOT be children of this row. */
+  overflow-x: hidden;
   overflow-y: hidden;
 }
 
-body.mode-extract #advance-mode-row,
-body.mode-extract #advance-mode-row + .options-row-divider { display: none; }
+#options-row.is-expanded {
+  height: auto;
+}
 
-body.mode-modify #mesh-mask-toggle-row { display: none; }
-body.mode-extract #mesh-aware-repack-toggle-row,
-body.mode-extract #nest-regions-toggle-row,
-body.mode-extract #nest-gap-distance { display: none; }
+#options-row.is-overflowing {
+  padding-right: 40px;
+}
+
+#options-row > li {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
+  gap: 6px;
+  border-left: 1px solid #444;
+  padding-left: 8px;
+  margin-left: 2px;
+}
+
+#options-row > li:first-child,
+#options-row > li.is-line-start {
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+#options-row .only-view-mode,
+#options-row .only-edit-mode {
+  display: flex;
+  align-items: center;
+}
+
+body.mode-extract #options-row .only-edit-mode,
+body.mode-modify #options-row .only-view-mode {
+  display: none;
+}
 
 #status-bar {
   padding: 0 12px;
@@ -493,11 +535,8 @@ button {
   font-size: 12px;
   color: #bbb;
   user-select: none;
-  /* Task 7 scrutinize finding: without these, a flex-shrunk label at
-     narrow widths wraps its text to 2-3 lines and gets clipped by
-     #options-row's fixed 35px height. nowrap + flex-shrink:0 keeps each
-     label at its natural single-line width; #options-row's own
-     overflow-x:auto (above) is what absorbs the resulting extra width. */
+  /* nowrap + flex-shrink:0 keeps each label one line. Overflow is absorbed
+     by wrapping whole <li> groups, not by shrinking or scrolling labels. */
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -549,22 +588,15 @@ button {
 .skel-picker-btn {
   height: 26px;
   min-height: 22px;
-  min-width: 0;
+  min-width: 48px;
   max-width: 160px;
   padding: 0 8px;
   font-size: 11px;
   align-self: center;
-  /* Final whole-branch review finding: this was flex-shrink:1 (its own
-     text-overflow:ellipsis was its narrow-width escape hatch), which made
-     it the LAST remaining shrinkable child once .toggle-label and
-     .nest-gap-input were both pinned to flex-shrink:0 across 2 earlier
-     fix rounds -- it absorbed 100% of #options-row's shrink pressure and
-     collapsed to an 18px unlabeled sliver in portrait, the exact same bug
-     class relocated a third time. #options-row's own overflow-x:auto
-     (added for the same reason) is the row's real narrow-width answer
-     now; ellipsis-via-shrinking is no longer needed on top of it.
-     max-width:160px above still caps this at its natural width. */
-  flex-shrink: 0;
+  /* The row wraps whole <li> groups instead of shrinking children. This
+     button may still ellipsis when its own group is wider than the row
+     (max-width:100% on the <li>) -- that is the only shrink path. */
+  flex-shrink: 1;
   border-radius: 3px;
   border: 1px solid #555;
   background-color: #2f2f2f;
@@ -623,6 +655,183 @@ button {
 .nest-gap-input:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+#btn-nest-settings {
+  height: 26px;
+  min-height: 22px;
+  width: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 3px;
+  border: 1px solid #555;
+  background-color: #2f2f2f;
+  color: #e3e3e3;
+  cursor: pointer;
+}
+#btn-nest-settings:hover {
+  border-color: #6a6a6a;
+  background-color: #3a3a3a;
+}
+#btn-nest-settings:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+#btn-nest-settings:disabled:hover {
+  border-color: #555;
+  background-color: #2f2f2f;
+}
+#btn-nest-settings[aria-expanded="true"] {
+  border-color: #0e639c;
+}
+
+#btn-options-collapse {
+  position: absolute;
+  right: 6px;
+  top: 17.5px;
+  transform: translateY(-50%);
+  z-index: 1;
+  height: 26px;
+  min-height: 22px;
+  width: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  border: 1px solid #555;
+  background-color: #2f2f2f;
+  color: #e3e3e3;
+  cursor: pointer;
+}
+
+#btn-options-collapse:hover {
+  border-color: #6a6a6a;
+  background-color: #3a3a3a;
+}
+
+#btn-options-collapse svg {
+  display: block;
+  transition: transform 0.15s ease;
+}
+
+#btn-options-collapse[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+#opt-help-popover {
+  position: fixed;
+  z-index: 40;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #ddd;
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 3px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+#nest-gap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+#nest-gap-panel {
+  position: fixed;
+  min-width: 240px;
+  padding: 10px 12px;
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 3px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.nest-gap-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #bbb;
+}
+
+.nest-gap-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#nest-gap-slider {
+  flex: 1;
+  min-width: 80px;
+}
+
+#nest-gap-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nest-gap-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.nest-gap-actions button {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+#nest-gap-close {
+  display: none;
+}
+
+#nest-gap-overlay.is-touch-modal {
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+#nest-gap-overlay.is-touch-modal #nest-gap-panel {
+  position: relative;
+  inset: auto;
+}
+
+#nest-gap-overlay.is-touch-modal .nest-gap-actions {
+  margin-top: 10px;
+}
+
+#nest-gap-overlay.is-touch-modal #nest-gap-close {
+  display: flex;
+  flex: 1;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+#nest-gap-overlay.is-touch-modal #nest-gap-confirm {
+  flex: 1;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 /* Preview Area */
