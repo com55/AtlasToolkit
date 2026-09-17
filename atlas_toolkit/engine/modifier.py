@@ -33,6 +33,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from atlas_toolkit.document import AtlasDocument, Region
+from atlas_toolkit.domain.packing import (
+    footprint_for_canonical,
+    nest_pack,
+    shelf_pack,
+)
 from atlas_toolkit.domain.region_ops import round_half_even
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
@@ -444,6 +449,20 @@ class PreparedMod:
     is_full_canvas: bool
 
 
+@dataclass(frozen=True)
+class PackResult:
+    """_pack_and_emit's result. `document` is a fresh single-page
+    AtlasDocument -- never serialized text (spec §1 rev 7), so a caller
+    that needs text calls .serialize() itself and one that needs the model
+    pays no reparse. `region_bounds` maps every emitted region to
+    [x, y, w, h, rotate], exposing the placement data directly: JS added
+    it because recovering bounds by reparsing the serialized output
+    silently lost identity on Rename."""
+    image: ImageHandle
+    document: AtlasDocument
+    region_bounds: dict[str, list[int]]
+
+
 class AtlasModifier:
     """Port of atlas-modifier.js's AtlasModifier, production-live surface
     only (see the module docstring). One instance per (document, page
@@ -520,3 +539,159 @@ class AtlasModifier:
 
         shared_canvas_mod = canvas.is_full_canvas and selected_share_canvas(selected_offsets)
         return PreparedMod(image, mod_w, mod_h, shared_canvas_mod, canvas.is_full_canvas)
+
+    def _page_info(self) -> dict:
+        """The target page's header fields in from_rebuild_args's input
+        shape. `filter` is a two-element list on Page but a
+        "Linear, Linear" string here, matching JS's _parseScoped.
+
+        DELIBERATE DEVIATION on `pma` (maintainer's ruling): JS's
+        _parseScoped forwards `pma` only when targetPage is falsy -- never
+        in production -- so fromRebuildArgs gets undefined and every
+        repacked page comes out `pma: false`. Verified by Node probe: a
+        `pma: true` page loses the line entirely through
+        repackWithModdedSprites. That is a JS bug, and this port does not
+        reproduce it; the page's real value is carried through. Because of
+        this, no parity case may use a `pma: true` page -- it would fail
+        against the oracle for the right reason. A non-parity test pins the
+        behaviour instead."""
+        page = next(page for page in self.document.pages if page.filename == self.target_page)
+        return {
+            "page": page.filename,
+            "format": page.format,
+            "filter": f"{page.filter[0]}, {page.filter[1]}",
+            "repeat": page.repeat,
+            "pma": page.pma,
+        }
+
+    def _pack_and_emit(
+        self,
+        sprites: dict[str, ImageHandle],
+        region_names: list[str],
+        regions: dict[str, dict],
+        full_canvas_regions: Optional[set[str]],
+        nest_options: Optional[dict] = None,
+        modded_sprites: Optional[dict[str, ImageHandle]] = None,
+        added_sprites: Optional[dict[str, ImageHandle]] = None,
+        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
+    ) -> PackResult:
+        """Deduplicate by pixel hash, bin-pack, paste, and emit a
+        single-page document from an already-built sprite map. Port of
+        AtlasModifier._packAndEmit.
+
+        `regions` values are in region_meta()'s JS shape (camelCase), the
+        same shape domain/effective_model.py emits. `nest_options` is
+        {"enabled": bool, "gap_distance": int} -- snake_case, unlike the
+        JS options bag. A name in `region_names` with no sprite is dropped
+        from the output entirely, as in JS.
+
+        Departures from the JS signature: `page_info` is derived from this
+        modifier's own target page rather than passed in (JS passes it
+        only because _parseScoped had just produced it), and the result
+        carries a document instead of atlas text."""
+        # 1. Deduplicate by pixel hash (single-page repack keeps dedup ON).
+        hash_to_canonical: dict[str, str] = {}
+        canonical_map: dict[str, str] = {}
+        for name in region_names:
+            if name not in sprites:
+                continue
+            digest = canvas_hash(self.raster, sprites[name])
+            if digest in hash_to_canonical:
+                canonical_map[name] = hash_to_canonical[digest]
+            else:
+                hash_to_canonical[digest] = name
+                canonical_map[name] = name
+        unique_names = list(hash_to_canonical.values())
+
+        # 2. Bin-pack the unique sprites. The Smart Packing toggle swaps
+        #    the packer entirely; shelf_pack is never touched, so
+        #    toggle-off output stays identical.
+        using_nest = bool(nest_options and nest_options.get("enabled"))
+        if using_nest:
+            dedup_groups: dict[str, list[str]] = {}
+            for name, canonical in canonical_map.items():
+                dedup_groups.setdefault(canonical, []).append(name)
+            items = []
+            for name in unique_names:
+                width, height = self.raster.size(sprites[name])
+                items.append({
+                    "name": name, "w": width, "h": height,
+                    "footprint": footprint_for_canonical(dedup_groups[name], {
+                        "sprites": sprites,
+                        "raster": self.raster,
+                        "modded_sprites": modded_sprites,
+                        "added_sprites": added_sprites,
+                        "regions": regions,
+                        "mesh_lookup_fn": mesh_lookup_fn,
+                        "combine_mesh_geometry": combine_mesh_geometry,
+                        "group_names_by_sprite_identity": group_names_by_sprite_identity,
+                        "mask_crop_rect_for_offsets": mask_crop_rect_for_offsets,
+                    }),
+                })
+            packed = nest_pack(items, gap_distance=nest_options.get("gap_distance", 4))
+        else:
+            items = []
+            for name in unique_names:
+                width, height = self.raster.size(sprites[name])
+                items.append({"name": name, "w": width, "h": height})
+            packed = shelf_pack(items)
+
+        canvas_w, canvas_h = packed["canvas_w"], packed["canvas_h"]
+        placement_map = {p["name"]: p for p in packed["placements"]}
+
+        def rotate_of(canonical: str) -> int:
+            """Normalizes both packers' placement shape to one
+            0/90/180/270 value -- shelf_pack's `rotated` boolean never
+            reaches downstream code past this point."""
+            placement = placement_map[canonical]
+            if using_nest:
+                return placement["rotate"]
+            return 90 if placement["rotated"] else 0
+
+        # 3. Paste sprites onto the new canvas.
+        canvas = self.raster.create(canvas_w, canvas_h)
+        for name in unique_names:
+            placement = placement_map[name]
+            rotated = rotate_sprite_for_pack(self.raster, sprites[name], rotate_of(name))
+            self.raster.paste(canvas, rotated, placement["x"], placement["y"])
+
+        # 4. Build region data. Offsets: full-canvas regions reset to
+        #    default, everyone else preserves their pristine offsets
+        #    verbatim. bounds always uses the sprite's own PRE-ROTATION
+        #    dimensions, which is rotation-invariant by construction.
+        region_data: dict[str, tuple] = {}
+        region_bounds: dict[str, list[int]] = {}
+        for name in region_names:
+            if name not in canonical_map:
+                continue
+            canonical = canonical_map[name]
+            placement = placement_map[canonical]
+            width, height = self.raster.size(sprites[name])
+            bounds = [placement["x"], placement["y"], width, height]
+            meta = regions[name]
+            offsets = repack_offsets_for_region(
+                name, full_canvas_regions, meta["offsets"], width, height
+            )
+            region_data[name] = (
+                bounds,
+                # Copy rather than alias: from_rebuild_args stores the
+                # offsets list BY REFERENCE (unlike split/pad/extraPairs,
+                # which it copies), so without this the repacked document
+                # would share a mutable list with its input. Values are
+                # unchanged; only the aliasing hazard goes away.
+                list(offsets) if offsets is not None else None,
+                rotate_of(canonical),
+                {
+                    "atlasName": meta.get("atlasName") or meta.get("name"),
+                    "index": meta.get("index"),
+                    "split": meta.get("split"),
+                    "pad": meta.get("pad"),
+                    "extraPairs": meta.get("extraPairs"),
+                },
+            )
+            region_bounds[name] = [*bounds, rotate_of(canonical)]
+
+        document = AtlasDocument.from_rebuild_args(
+            self._page_info(), [canvas_w, canvas_h], region_names, region_data
+        )
+        return PackResult(canvas, document, region_bounds)
