@@ -29,7 +29,7 @@ CENTER_MASK[2 * 5 + 2] = 1
 CORNER_MASK = [0] * 9
 CORNER_MASK[0] = 1
 
-GAP_VALUES = [1, 4, 7, 256, 0, -3, 2.9, 300, "abc", None]
+GAP_VALUES = [1, 4, 7, 256, 0, -3, 2.9, 300, "abc", None, "5_000"]
 
 
 def _solid(w, h):

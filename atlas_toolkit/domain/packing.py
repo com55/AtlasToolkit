@@ -225,10 +225,24 @@ def normalize_gap(value: object) -> int:
     JS reaches the same answers by a different route: Number(None) is 0 and
     Number("abc") is NaN, both of which fail the `< 1` / `isFinite` checks
     and land on 4 -- here the equivalent conversions raise, and the except
-    branch returns the same 4."""
+    branch returns the same 4.
+
+    PARITY IS NARROWED TO WHAT IS REACHABLE, not claimed in general. The two
+    routes agree on every value a real caller can deliver, and on the tested
+    corpus (ints, floats, bools, None, "abc", "  7  ", "1e2", "", "0",
+    "5_000", NaN, Infinity, out-of-range). They do NOT agree on every
+    possible string: Number("0x10")/("0o17")/("0b101") are 16/15/5 while
+    float() raises and lands on 4. Those radix forms are deliberately left
+    divergent because no production path can deliver a string here at all --
+    atlas-extracter.js:192 substitutes 4 for any non-finite value before
+    nestPack is reached, and atlas-api.js:608 normalizes on the way in.
+    Underscore-grouped strings ARE handled below, because that is the one
+    direction where Python would otherwise be more permissive than JS."""
     if isinstance(value, bool):
         number = float(int(value))
     else:
+        if isinstance(value, str) and "_" in value:
+            return 4  # PEP 515 grouping; Number() yields NaN -> 4
         try:
             number = float(value)  # type: ignore[arg-type]
         except (TypeError, ValueError):
