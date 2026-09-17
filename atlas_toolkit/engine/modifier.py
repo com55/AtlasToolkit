@@ -15,16 +15,19 @@ Deliberately NOT ported:
 - parseAtlas / updateAtlasText / _parseScoped: convenience re-parses of
   document.py's model (spec §2 "do not port"); this module works on
   AtlasDocument directly.
-- _packAndEmit / _shelfPack / _canvasHash / repackWithModdedSprites /
-  repackWithEffectiveModel / rebuildAtlasText / _rotateSpriteForPack: the
-  next ("repack/smart packing") stage.
-- maskRawSprite / _maskModdedSprites: the "mesh" stage.
+- maskRawSprite / _maskModdedSprites: the "mesh" stage (they need the
+  RasterBackend mesh primitives Stage 3 stubbed).
+- rebuild()'s multi-page fan-out: the session stage -- deciding which
+  pages to rewrite needs modBatches/moddedSprites/_fullCanvasRegions,
+  which are atlas-session.js state, and the maintainer has the multi-page
+  repack slated for redesign (pool-and-rebalance across pages).
 
 JS truthiness, binding for every function here: "missing" offsets, mesh
 geometry, or region means `is None`, never Python falsiness -- an empty JS
 array/object is truthy, its Python equivalent is falsy."""
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
@@ -304,6 +307,123 @@ def scale_document_to_page_image(
         if page.filename == target_page:
             page.size = [real_w, real_h]
     return scaled
+
+
+_MAX_ARRAY_INDEX = 2 ** 32 - 1
+
+
+def _is_array_index(name: str) -> bool:
+    """True for a canonical JS array-index key: a non-negative integer in
+    [0, 2**32 - 1) written without a sign, leading zeros, or surrounding
+    whitespace. Verified against real Object.keys: "0", "2", "10" and
+    "4294967294" are indices; "01", "00", "007", "-1", "1.5",
+    "4294967295", "4294967296", " 2", "+2" and "2e3" are not.
+
+    The `isascii()` guard is load-bearing, not defensive padding.
+    str.isdigit() is True for non-ASCII digits, and they split two ways:
+    int("٢") is 2 and int("߅") is 5 (so the round-trip rejects them
+    correctly), but int("²") raises ValueError -- an uncaught crash on a
+    region name that JS would simply treat as a non-index string. A JS
+    array index is ASCII-digits-only, so checking that first is both
+    faithful and total."""
+    return (
+        name.isascii()
+        and name.isdigit()
+        and str(int(name)) == name
+        and int(name) < _MAX_ARRAY_INDEX
+    )
+
+
+def js_object_key_order(names: list[str]) -> list[str]:
+    """Reorder `names` the way a JS object orders its keys: canonical
+    array-index keys first, ascending numerically, then every other key in
+    insertion order.
+
+    This is load-bearing, not cosmetic. atlas-modifier.js's parseAtlas
+    builds its region list as Object.keys(processor.regions)
+    (atlas-modifier.js:26), so a region literally named "2" is packed
+    BEFORE one named "10" even when the atlas text lists 10 first --
+    confirmed against real JS, which returns ["2", "10", "a"] for text
+    order 10, 2, a and places "2" at (0, 0). AtlasDocument.parse preserves
+    text order, so without this the packer diverges in both placement and
+    emitted region order.
+
+    CARRY-FORWARD to the session stage: domain/effective_model.py's
+    derive_effective_model reads its region order straight off its
+    argument's dict keys. That is free in JS (an object's keys are always
+    canonically ordered) but not in Python, so the session stage must pass
+    it a mapping already ordered by this function, or the structural
+    (Add/Remove/Rename) repack path diverges the same way."""
+    indices = sorted((name for name in names if _is_array_index(name)), key=int)
+    rest = [name for name in names if not _is_array_index(name)]
+    return [*indices, *rest]
+
+
+def region_meta(region: Region) -> dict:
+    """A Region rendered in the JS `_parseScoped` region-object shape --
+    camelCase keys, because this is the shape domain/effective_model.py
+    already produces and consumes (its own docstring calls the values
+    "JS-shaped"), so the structural repack path needs no translation.
+    `_pack_and_emit` reads regions in exactly this shape on both paths."""
+    return {
+        "name": region.name,
+        "atlasName": region.atlas_name or region.name,
+        "page": region.page_filename,
+        "index": region.index,
+        "bounds": [region.x, region.y, region.w, region.h],
+        "offsets": region.offsets,
+        "rotate": region.rotate,
+        "split": region.split,
+        "pad": region.pad,
+        "extraPairs": [(key, list(values)) for key, values in region.extra_pairs],
+    }
+
+
+def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
+    """SHA-256 of a sprite's raw RGBA bytes -- the dedup identity
+    _packAndEmit groups by. Port of _canvasHash.
+
+    Two parts of the JS are deliberately not ported. Its double
+    getImageData "priming read" works around a documented Chromium
+    GPU-readback bug that does not exist for Pillow (see
+    raster/base.py's get_pixels docstring). Its djb2 fallback exists only
+    for a missing crypto.subtle. Neither changes which sprites group
+    together, which is the only property parity tests assert -- digest
+    STRINGS are never compared across the two runtimes."""
+    return hashlib.sha256(raster.get_pixels(handle)).hexdigest()
+
+
+def extract_raw_sprite(raster: RasterBackend, image: ImageHandle, region: dict) -> ImageHandle:
+    """Crop one region's raw sprite out of a page image, undoing any
+    stored rotation. Port of AtlasModifier._extractRawSprite -- the single
+    rotation seam, same as JS routing through cropAndRotate."""
+    x, y, w, h = region["bounds"]
+    return raster.crop_rotate(image, x, y, w, h, region["rotate"])
+
+
+def rotate_sprite_for_pack(
+    raster: RasterBackend, sprite: ImageHandle, degrees: int
+) -> ImageHandle:
+    """Rotate a sprite by a PACK degree (0/90/180/270) before pasting it
+    onto the packed canvas. Port of _rotateSpriteForPack.
+
+    THE DEGREE IS INVERTED ON PURPOSE, and getting this wrong is
+    undetectable by dimensions alone (90 and 270 both swap w/h). JS's
+    _rotateSpriteForPack(sprite, 90) calls _rotate90CCW, which is
+    cropAndRotate(src, 0, 0, h, w, 270) -- a pack rotation of 90 is
+    executed as the STORED-rotation value 270, and vice versa, because
+    crop_rotate's parameter is "the stored atlas rotation to undo", not a
+    rotation to apply. 180 is its own inverse, and any other value
+    (including 0) returns the input handle unchanged -- never a clone, so
+    the handle-identity invariant group_names_by_sprite_identity relies on
+    is preserved."""
+    if degrees == 90:
+        return raster.rotate_image(sprite, 270)
+    if degrees == 180:
+        return raster.rotate_image(sprite, 180)
+    if degrees == 270:
+        return raster.rotate_image(sprite, 90)
+    return sprite
 
 
 @dataclass(frozen=True)
