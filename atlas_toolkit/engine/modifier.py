@@ -280,8 +280,6 @@ def _mask_modded_sprites(
     if mesh_lookup_fn is None:
         return
     for names in group_names_by_sprite_identity(sprites, modded_sprites):
-        if len(names) == 1:
-            continue  # skip single-name groups (user-provided modded sprites)
         combined = combine_mesh_geometry(names, mesh_lookup_fn)
         if combined is None:
             continue  # no mesh data for anyone in this group -- leave as-is

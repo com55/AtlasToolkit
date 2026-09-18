@@ -81,6 +81,26 @@ def test_mask_modded_sprites_applies_one_combined_mask_to_shared_group():
     assert raster._images[shared].getpixel((8, 5))[3] == 255
 
 
+def test_mask_modded_sprites_masks_a_singleton_group_too():
+    # Regression test for a real bug caught in this task's review: a
+    # SINGLE modded sprite (no shared-canvas siblings -- the most common
+    # real case) must still be masked when it has mesh geometry. A prior
+    # implementation attempt added an `if len(names) == 1: continue`
+    # guard that silently skipped this exact case, invisible to every
+    # other test in this file (which only exercises the 2-name shared
+    # group and the mesh_lookup_fn=None no-op).
+    raster = PillowRasterBackend()
+    sprite = _patterned_sprite(raster, 10, 10)
+    sprites = {"alpha": sprite}
+    modded = {"alpha": sprite}
+    mesh_lookup_fn = lambda name: LEFT_HALF_RECT  # noqa: E731
+    _mask_modded_sprites(raster, sprites, modded, mesh_lookup_fn)
+    assert sprites["alpha"] != sprite  # must be a fresh masked clone, not the original
+    img = raster._images[sprites["alpha"]]
+    assert img.getpixel((2, 5))[3] == 255  # masked-in side preserved
+    assert img.getpixel((8, 5))[3] == 0    # masked-out side -- the bug this test catches
+
+
 def test_mask_modded_sprites_is_noop_when_mesh_lookup_fn_is_none():
     raster = PillowRasterBackend()
     shared = _patterned_sprite(raster, 4, 4)
@@ -131,12 +151,17 @@ def test_repack_with_modded_sprites_masks_pristine_regions_with_geom():
 
 
 def test_repack_with_modded_sprites_skips_masking_for_modded_names():
-    # A region present in moddedSprites must NOT be looked up in
-    # meshLookupFn during the pristine-extraction pass (atlas-modifier.js:
-    # `!(name in (moddedSprites || {}))` guard) -- it gets the modded
-    # sprite's own content, unmasked here (only _maskModdedSprites masks
-    # modded content, and only when the modded sprite itself has mesh
-    # data via the SAME name/group).
+    # A region present in moddedSprites must NOT be masked via the
+    # PRISTINE-extraction pass (atlas-modifier.js: `!(name in
+    # (moddedSprites || {}))` guard) -- it gets the modded sprite's own
+    # content there, unmasked. It IS still eligible for masking later,
+    # via _mask_modded_sprites, which legitimately calls mesh_lookup_fn
+    # once per shared-identity group (including a singleton group of
+    # just this one name) via combine_mesh_geometry. So the correct
+    # assertion is "looked up exactly once" (the _mask_modded_sprites
+    # call), not "never looked up at all" -- a naive "not in calls"
+    # assertion is wrong and would fail against CORRECT behavior once
+    # _mask_modded_sprites actually processes singleton groups.
     raster = PillowRasterBackend()
     base = _base_page(raster, 20, 20)
     modifier = AtlasModifier(AtlasDocument.parse(PAGE_TEXT), base, raster, "p.png")
@@ -148,7 +173,10 @@ def test_repack_with_modded_sprites_skips_masking_for_modded_names():
 
     modded_sprite = _patterned_sprite(raster, 10, 10)
     modifier.repack_with_modded_sprites({"alpha": modded_sprite}, None, tracking_lookup, None)
-    assert "alpha" not in calls
+    # Zero calls would come from the pristine pass (which correctly skips
+    # "alpha" since it's in modded_sprites); exactly one comes from
+    # _mask_modded_sprites processing the singleton ["alpha"] group.
+    assert calls.count("alpha") == 1
 
 
 def _find_uncovered_pixel(canvas_w, canvas_h, bounds_by_name):
