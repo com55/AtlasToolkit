@@ -417,6 +417,20 @@ def solid_mask(w: int, h: int) -> bytearray:
     return bytearray(b"\x01" * (w * h))
 
 
+def union_masks(masks: list[bytearray], w: int, h: int) -> bytearray:
+    """OR every mask in `masks` together. Empty input returns a solid
+    mask, matching the "no mesh data -> unmasked" convention used
+    throughout this codebase. Port of unionMasks."""
+    if not masks:
+        return solid_mask(w, h)
+    out = bytearray(w * h)
+    for mask in masks:
+        for i, value in enumerate(mask):
+            if value:
+                out[i] = 1
+    return out
+
+
 def footprint_for_canonical(dedup_names: list[str], ctx: dict) -> bytearray:
     """The occupied-footprint mask for ONE canonical (post-dedup) packed
     item, in the same (w x h) space as the sprite that will be packed.
@@ -427,39 +441,78 @@ def footprint_for_canonical(dedup_names: list[str], ctx: dict) -> bytearray:
     engine/ import (spec §2 point 2): `sprites`, `raster`,
     `mesh_lookup_fn`, `modded_sprites`, `added_sprites`, `regions`,
     `combine_mesh_geometry`, `group_names_by_sprite_identity`,
-    `mask_crop_rect_for_offsets`.
-
-    MESH STAGE: only the no-mesh path is implemented here, and its
-    reachability is NARROWER than an earlier version of this docstring
-    claimed (corrected after Task 5's review, verified against the JS
-    source). `mesh_lookup_fn is None` is not the shape production takes:
-    all three real repack call sites (atlas-session.js:299, 319, 366)
-    build `meshLookupFn` UNCONDITIONALLY, and getRepackMeshGeometry
-    (atlas-extracter.js:169-172) returns null PER NAME when the
-    Mesh-Aware Repack toggle is off. So JS passes a truthy function that
-    answers null for every name, and repack-nest.js:323's
-    `if (!meshLookupFn) return solidMask(w, h)` is unreachable from
-    production; JS's real no-mesh fallback is the per-name `if (!geom)`
-    at repack-nest.js:362, inside logic this port still stubs.
-
-    Every mesh-derived branch needs RasterBackend.rasterize_mesh_mask,
-    still a NotImplementedError stub until the mesh stage (spec §7
-    ordering: basic raster -> modifier -> repack -> mesh), so it raises
-    here in one place rather than being silently omitted. What the mesh
-    stage must add: the dimension-compatibility filter over the dedup
-    group, the shared-canvas-mod group union via combine_mesh_geometry,
-    the offsets crop-back path via mask_crop_rect_for_offsets -- and a
-    decision on how the Python session stage expresses "mesh not usable",
-    since transcribing JS's always-construct-the-lambda convention would
-    make engine/modifier.py's _require_no_mesh raise on every repack."""
+    `mask_crop_rect_for_offsets`."""
     sprites = ctx["sprites"]
     raster = ctx["raster"]
+    mesh_lookup_fn = ctx.get("mesh_lookup_fn")
+
     canonical_w, canonical_h = raster.size(sprites[dedup_names[0]])
-    if ctx.get("mesh_lookup_fn") is None:
+    if mesh_lookup_fn is None:
         return solid_mask(canonical_w, canonical_h)
-    raise NotImplementedError(
-        "footprint_for_canonical's mesh-derived branches land in the "
-        "separate 'mesh' stage (spec §7 ordering), together with "
-        "RasterBackend.rasterize_mesh_mask -- see this function's "
-        "docstring for what that stage must add."
-    )
+
+    modded_sprites = ctx.get("modded_sprites")
+    added_sprites = ctx.get("added_sprites")
+    regions = ctx["regions"]
+    combine_mesh_geometry_fn = ctx["combine_mesh_geometry"]
+    group_names_by_sprite_identity_fn = ctx["group_names_by_sprite_identity"]
+    mask_crop_rect_for_offsets_fn = ctx["mask_crop_rect_for_offsets"]
+
+    w, h = canonical_w, canonical_h
+    mod_groups = group_names_by_sprite_identity_fn(sprites, modded_sprites)
+
+    # Dedup does not guarantee every name in this group shares the
+    # canonical's own dimensions (a pixel-hash collision between
+    # differently-shaped sprites is possible) -- resolved once, for the
+    # whole group, before any branching below.
+    dedup_set = set(dedup_names)
+    # dedup_names[0] is always the canonical name (its size was already
+    # read above as canonical_w/canonical_h) -- Stage 5's ledger flagged
+    # the redundant second raster.size call here as harmless but asked
+    # this stage to fold it away rather than carry it forward again.
+    compatible: dict[str, bool] = {dedup_names[0]: True}
+    for name in dedup_names[1:]:
+        sprite_w, sprite_h = raster.size(sprites[name])
+        compatible[name] = sprite_w == w and sprite_h == h
+
+    def alpha_mask(handle) -> bytearray:
+        return bytearray(1 if bit else 0 for bit in raster.read_alpha_mask(handle))
+
+    masks: list[bytearray] = []
+    handled: set[str] = set()
+    for name in dedup_names:
+        if name in handled:
+            continue
+        if not compatible[name]:
+            handled.add(name)
+            continue
+        mod_group = next((g for g in mod_groups if name in g), None)
+        if mod_group is not None:
+            usable_group = [n for n in mod_group if n in dedup_set and compatible.get(n)]
+            combined = combine_mesh_geometry_fn(usable_group, mesh_lookup_fn) if usable_group else None
+            if combined is not None:
+                mask_handle = raster.rasterize_mesh_mask(combined["uvs"], combined["triangles"], w, h)
+                masks.append(alpha_mask(mask_handle))
+            else:
+                masks.append(solid_mask(w, h))
+            handled.update(mod_group)
+            continue
+        handled.add(name)
+        geom = mesh_lookup_fn(name)
+        if geom is None:
+            masks.append(solid_mask(w, h))
+            continue
+        is_modded_or_added = (
+            (modded_sprites is not None and name in modded_sprites)
+            or (added_sprites is not None and name in added_sprites)
+        )
+        region = regions[name]
+        if is_modded_or_added or region["offsets"] is None:
+            mask_handle = raster.rasterize_mesh_mask(geom["uvs"], geom["triangles"], w, h)
+            masks.append(alpha_mask(mask_handle))
+        else:
+            rect = mask_crop_rect_for_offsets_fn(region["offsets"], w, h)
+            orig_w, orig_h = region["offsets"][2], region["offsets"][3]
+            full_handle = raster.rasterize_mesh_mask(geom["uvs"], geom["triangles"], orig_w, orig_h)
+            cropped_handle = raster.crop_rotate(full_handle, rect["x"], rect["y"], rect["w"], rect["h"], 0)
+            masks.append(alpha_mask(cropped_handle))
+    return union_masks(masks, w, h)

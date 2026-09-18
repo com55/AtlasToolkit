@@ -195,11 +195,24 @@ def test_footprint_for_canonical_without_mesh_is_solid():
     assert footprint_for_canonical(["a"], ctx) == solid_mask(4, 3)
 
 
-def test_footprint_for_canonical_with_mesh_defers_to_the_mesh_stage():
+def test_footprint_for_canonical_with_mesh_lookup_returning_none_gives_solid():
+    # When mesh_lookup_fn is provided but returns None for a name, that
+    # name's mesh is treated as solid (no mesh data available). This is the
+    # "mesh-aware mode off" path on a per-name basis (not just a per-mode
+    # lookup function).
     class _Raster:
         def size(self, handle):
             return handle
 
-    ctx = {"sprites": {"a": (4, 3)}, "raster": _Raster(), "mesh_lookup_fn": lambda name: None}
-    with pytest.raises(NotImplementedError, match="mesh"):
-        footprint_for_canonical(["a"], ctx)
+    ctx = {
+        "sprites": {"a": (4, 3)},
+        "raster": _Raster(),
+        "regions": {"a": {"offsets": None}},
+        "mesh_lookup_fn": lambda name: None,
+        "combine_mesh_geometry": lambda names, lookup: None,
+        "group_names_by_sprite_identity": lambda sprites, modded: [],
+        "mask_crop_rect_for_offsets": lambda offsets, w, h: None,
+    }
+    # When mesh_lookup_fn returns None (no mesh data), the result is solid
+    # (all opaque).
+    assert footprint_for_canonical(["a"], ctx) == solid_mask(4, 3)
