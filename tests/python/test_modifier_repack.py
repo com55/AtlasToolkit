@@ -246,15 +246,23 @@ def test_repack_orders_integer_like_names_the_way_js_does():
     assert result["atlas_text"].index("\n2\n") < result["atlas_text"].index("\n10\n")
 
 
-@pytest.mark.parametrize(
-    "call",
-    [
-        lambda m, fn: m.repack_with_modded_sprites(None, None, fn),
-        lambda m, fn: m.repack_with_effective_model([], {}, None, None, None, fn),
-    ],
-)
-def test_mesh_aware_repack_defers_to_the_mesh_stage(call):
+def test_mesh_aware_repack_works_with_mesh_lookup_fn_returning_none():
+    # When mesh_lookup_fn is provided but returns None for all names (no mesh
+    # geometry), repack proceeds normally without applying masking. This is the
+    # common case: mesh_lookup_fn is given but the Mesh-Aware Repack toggle is
+    # off, so every name returns None. Verify that the repack succeeds and
+    # produces a valid result.
     raster = PillowRasterBackend()
     modifier = _modifier(raster, PAGE_TEXT, 64, 64, "p.png")
-    with pytest.raises(NotImplementedError, match="mesh"):
-        call(modifier, lambda name: None)
+    # Test repack_with_modded_sprites
+    result1 = modifier.repack_with_modded_sprites(None, None, lambda name: None)
+    assert result1.image is not None
+    assert len(result1.region_bounds) > 0
+    # Test repack_with_effective_model
+    region_names = js_object_key_order(modifier.region_names)
+    effective_regions = {name: region_meta(modifier.regions[name]) for name in region_names}
+    result2 = modifier.repack_with_effective_model(
+        region_names, effective_regions, None, None, None, lambda name: None,
+    )
+    assert result2.image is not None
+    assert len(result2.region_bounds) > 0

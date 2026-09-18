@@ -243,6 +243,55 @@ def group_names_by_sprite_identity(
     return list(groups.values())
 
 
+def mask_raw_sprite(
+    raster: RasterBackend, sprite: ImageHandle, mesh_geometry: dict, region: dict,
+) -> None:
+    """Masks a freshly-extracted pristine sprite IN PLACE to its mesh
+    silhouette. Mesh UVs are normalized to the region's raw crop size when
+    it has no offsets, or to the full original (orig_w, orig_h) when it
+    does -- the crop-back rect recovers just the sub-rect this raw crop
+    occupies within that full-size space. Port of maskRawSprite."""
+    offsets = region["offsets"]
+    if offsets is None:
+        mask = raster.rasterize_mesh_mask(
+            mesh_geometry["uvs"], mesh_geometry["triangles"], *raster.size(sprite),
+        )
+        raster.composite_destination_in(sprite, mask)
+        return
+    orig_w, orig_h = offsets[2], offsets[3]
+    rect = mask_crop_rect_for_offsets(offsets, *raster.size(sprite))
+    full_mask = raster.rasterize_mesh_mask(mesh_geometry["uvs"], mesh_geometry["triangles"], orig_w, orig_h)
+    raster.composite_destination_in(sprite, full_mask, (rect["x"], rect["y"], rect["w"], rect["h"]))
+
+
+def _mask_modded_sprites(
+    raster: RasterBackend,
+    sprites: dict[str, ImageHandle],
+    modded_sprites: Optional[dict[str, ImageHandle]],
+    mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]],
+) -> None:
+    """Masks the overlay entries of `sprites` (mutating the dict, never
+    `modded_sprites`' own values or handles) to their mesh silhouette.
+    Each group from group_names_by_sprite_identity gets ONE combined mask
+    applied to ONE fresh clone, reassigned to every name in the group --
+    preserving the "identical handle across the group" property dedup
+    relies on, while never touching the caller's own handle. Port of
+    _maskModdedSprites."""
+    if mesh_lookup_fn is None:
+        return
+    for names in group_names_by_sprite_identity(sprites, modded_sprites):
+        if len(names) == 1:
+            continue  # skip single-name groups (user-provided modded sprites)
+        combined = combine_mesh_geometry(names, mesh_lookup_fn)
+        if combined is None:
+            continue  # no mesh data for anyone in this group -- leave as-is
+        masked = raster.clone(sprites[names[0]])
+        mask = raster.rasterize_mesh_mask(combined["uvs"], combined["triangles"], *raster.size(masked))
+        raster.composite_destination_in(masked, mask)
+        for name in names:
+            sprites[name] = masked
+
+
 def scale_document_to_page_image(
     document: AtlasDocument, target_page: str, real_w: int, real_h: int,
 ) -> AtlasDocument:
@@ -713,22 +762,6 @@ class AtlasModifier:
         names = js_object_key_order(self.region_names)
         return names, {name: region_meta(self.regions[name]) for name in names}
 
-    def _require_no_mesh(self, mesh_lookup_fn) -> None:
-        """Mesh masking of extracted/modded sprites (maskRawSprite,
-        _maskModdedSprites) needs RasterBackend.rasterize_mesh_mask and
-        composite_destination_in, both still NotImplementedError stubs
-        until the mesh stage (spec §7 ordering). Raising in one place keeps
-        the parameter in the signature -- it is part of the real call shape
-        every production repack site binds -- without pretending the
-        masking happened."""
-        if mesh_lookup_fn is not None:
-            raise NotImplementedError(
-                "mesh-aware repack (maskRawSprite / _maskModdedSprites) lands "
-                "in the separate 'mesh' stage (spec §7 ordering), together "
-                "with RasterBackend.rasterize_mesh_mask -- pass "
-                "mesh_lookup_fn=None until then."
-            )
-
     def repack_with_modded_sprites(
         self,
         modded_sprites: Optional[dict[str, ImageHandle]],
@@ -747,26 +780,28 @@ class AtlasModifier:
         deliberately preserves canvas identity here, and
         group_names_by_sprite_identity groups by handle value.
 
-        CALLER PRECONDITION -- PASS `mesh_lookup_fn=None` UNLESS MESH
-        MASKING IS GENUINELY WANTED, and note that it is not implemented
-        yet (see _require_no_mesh). Do NOT transcribe the JS call sites'
-        shape: all three (atlas-session.js:299, 319, 366) construct
-        `meshLookupFn` unconditionally, and getRepackMeshGeometry
-        (atlas-extracter.js:169-172) returns null PER NAME when the
-        Mesh-Aware Repack toggle is off. So JS always hands over a truthy
-        function that answers null for every name. Porting that shape
-        literally would make this method raise NotImplementedError on every
-        repack, forever, with no mesh feature engaged. Port the intent:
-        pass None when mesh is not usable."""
-        self._require_no_mesh(mesh_lookup_fn)
+        When `mesh_lookup_fn` is given, every pristine (non-modded) region
+        with real mesh geometry gets masked via mask_raw_sprite before
+        packing, and every modded-sprite identity group with real mesh
+        geometry gets masked via _mask_modded_sprites -- mirroring
+        atlas-modifier.js:845-862 exactly. Pass `mesh_lookup_fn=None` when
+        mesh masking is not wanted."""
         region_names, regions = self._scoped_region_meta()
         sprites = {
             name: extract_raw_sprite(self.raster, self.base_image, regions[name])
             for name in region_names
         }
+        if mesh_lookup_fn is not None:
+            for name in region_names:
+                if name in (modded_sprites or {}):
+                    continue
+                geom = mesh_lookup_fn(name)
+                if geom is not None:
+                    mask_raw_sprite(self.raster, sprites[name], geom, regions[name])
         for name, sprite in (modded_sprites or {}).items():
             if name in sprites:
                 sprites[name] = sprite
+        _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn)
         return self._pack_and_emit(
             sprites, region_names, regions, full_canvas_regions,
             nest_options, modded_sprites, None, mesh_lookup_fn,
@@ -795,31 +830,31 @@ class AtlasModifier:
         `added_sprites` is an AddBatch source that never existed in the
         pristine parse.
 
-        TWO CALLER PRECONDITIONS, both silent when violated:
+        TWO CALLER PRECONDITIONS:
 
-        1. `effective_region_names` MUST ALREADY BE IN JS OBJECT-KEY ORDER.
-           Unlike repack_with_modded_sprites, this method does NOT order its
-           own names -- it forwards the caller's list straight to
-           _pack_and_emit, which trusts it. Order it with
-           js_object_key_order() before calling. Note that
-           domain/effective_model.py's derive_effective_model takes its
-           order from `list(region_meta.keys())`, which is free in JS (object
-           keys are always canonically ordered) but not in Python -- so the
-           mapping fed to THAT function must be ordered too.
-        2. Pass `mesh_lookup_fn=None` unless mesh masking is genuinely
-           wanted -- it is not implemented yet. Do not transcribe the JS call
-           sites' shape; see repack_with_modded_sprites' docstring for why
-           doing so would make every repack raise."""
-        self._require_no_mesh(mesh_lookup_fn)
+        1. `effective_region_names` MUST ALREADY BE IN JS OBJECT-KEY ORDER
+           (see repack_with_modded_sprites' sibling note -- unchanged from
+           Stage 5).
+        2. When `mesh_lookup_fn` is given, masking mirrors
+           repack_with_modded_sprites, with one addition: a name present
+           in `added_sprites` is also excluded from the pristine-masking
+           pass (mirrors atlas-modifier.js:871-889's third guard clause --
+           an AddBatch sprite never had a pristine region to look mesh
+           geometry up for)."""
         _pristine_names, pristine_regions = self._scoped_region_meta()
         sprites: dict[str, ImageHandle] = {}
         for name, meta in pristine_regions.items():
             if name not in effective_regions:
                 continue  # dropped by a RemoveBatch
             sprites[name] = extract_raw_sprite(self.raster, self.base_image, meta)
+            if mesh_lookup_fn is not None and name not in (modded_sprites or {}) and name not in (added_sprites or {}):
+                geom = mesh_lookup_fn(name)
+                if geom is not None:
+                    mask_raw_sprite(self.raster, sprites[name], geom, meta)
         for name, sprite in (modded_sprites or {}).items():
             if name in sprites:
                 sprites[name] = sprite
+        _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn)
         for key, sprite in (added_sprites or {}).items():
             sprites[key] = sprite  # AddBatch -- a new key, never in the pristine parse
         return self._pack_and_emit(
