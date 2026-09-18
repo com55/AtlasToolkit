@@ -97,24 +97,32 @@ class RasterBackend(Protocol):
     ) -> ImageHandle:
         """Standalone opaque-white-inside mask, nonzero-winding-rule compound-
         path fill -- matches region-mesh-mask.js's rasterizeMeshMask exactly.
-        NOT IMPLEMENTED in this stage -- lands in the separate, later "mesh"
-        stage per the architecture spec's §7 migration ordering (basic raster
-        -> modifier -> repack -> mesh). PillowRasterBackend.rasterize_mesh_mask
-        raises NotImplementedError until that stage. Real implementation
-        needs a from-scratch vectorized (numpy) rasterizer -- Pillow's
-        ImageDraw has no native winding-rule compound-path fill primitive --
-        which is exactly the kind of dependency/design decision this stage
-        deliberately defers rather than folding in silently."""
+        `PillowRasterBackend`'s implementation is a from-scratch numpy-
+        vectorized rasterizer (Pillow's ImageDraw has no native winding-rule
+        compound-path fill primitive): pixel-center sampling, edges
+        canonicalized to (low-y, high-y) storage order with true winding
+        direction carried separately so that opposite-winding copies of the
+        same physical edge (e.g. two independently-authored meshes sharing a
+        boundary) compute an identical floating-point crossing test and
+        cancel exactly under nonzero-winding fill, rather than merely
+        approximately. No antialiasing (hard edges) -- Canvas's fill is
+        antialiased; that difference is confined to polygon edges, not the
+        interior, and is an accepted, documented divergence, not a bug."""
 
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
         src_rect: tuple[int, int, int, int] | None = None,
     ) -> None:
         """Mutates dest, keeping only pixels where mask is opaque (Porter-Duff
-        destination-in). NOT IMPLEMENTED in this stage -- same "mesh" stage
-        deferral as rasterize_mesh_mask above; this primitive has no caller
-        until mesh masking ports, since every real call site composites a
-        mesh-rasterized mask specifically."""
+        destination-in, correct for straight/non-premultiplied alpha).
+        `PillowRasterBackend`'s implementation composes `dest`'s and (the
+        optionally `src_rect`-cropped) `mask`'s alpha channels via
+        `PIL.ImageChops.multiply` (exact `(a*b)//255` per pixel), then calls
+        `putalpha`. `ImageChops.multiply` itself does not enforce that its
+        two operands share a size (it silently truncates to the smaller
+        extent on a mismatch); `putalpha` is what actually raises
+        `ValueError` on a size mismatch, turning a caller bug into a hard
+        error rather than a silently truncated composite."""
 
     def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
         """One bool per pixel, row-major, True where alpha > 0 -- matches
