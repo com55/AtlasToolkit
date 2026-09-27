@@ -867,6 +867,7 @@ export const AtlasAPI = {
         await platform.writeFilesToFolder(
           folder,
           extracted.map(item => ({ name: item.filename, data: item.blob })),
+          _confirmDialog,
         );
         return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
       }
@@ -1077,7 +1078,7 @@ export const AtlasAPI = {
       if (_useFolderPicker()) {
         const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
         if (!folder) return 'Cancelled';
-        await platform.writeFilesToFolder(folder, outputs);
+        await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
         _session.markSaved();
         // Matches old Python engine's bridge.py save_merged_to() exactly
         // (`f"Saved to: {result[0]}"`) when a real path is available

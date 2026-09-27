@@ -1134,6 +1134,8 @@ img#preview-img {
   margin-bottom: 24px;
   line-height: 1.5;
   white-space: pre-line;
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
 }
 
 .modal-buttons {
