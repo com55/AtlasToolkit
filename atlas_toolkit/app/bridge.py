@@ -188,6 +188,26 @@ class Api:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(base64.b64decode(base64_data))
 
+    def existing_output_names(self, folder: str, names: list) -> list[str]:
+        """Output names that already occupy a path under `folder`.
+
+        Matches platform.js `existingOutputNames` for the desktop folder
+        save: a file or a directory with that name must be confirmed before
+        `write_file_bytes` replaces it. Empty names are ignored.
+        """
+        parent = Path(folder)
+        found: list[str] = []
+        for name in names or []:
+            if not isinstance(name, str) or not name or name in (".", ".."):
+                continue
+            candidate = parent / name
+            try:
+                if candidate.is_file() or candidate.is_dir():
+                    found.append(name)
+            except OSError:
+                continue
+        return found
+
     def list_sibling_page_images(self, atlas_path: str) -> dict[str, str]:
         """Glob the `.atlas` file's parent directory for `*.png` siblings —
         pure I/O, no atlas-text parsing (the JS side already knows which page

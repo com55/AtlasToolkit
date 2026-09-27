@@ -262,11 +262,87 @@ export async function pickSaveFolder(defaultDir = '') {
 }
 
 /**
+ * Copy for the overwrite confirm. One dialog lists every name that already
+ * occupies an output path; confirming replaces all of them.
+ */
+export function overwriteConfirmCopy(names) {
+  const lead = names.length === 1
+    ? 'This file already exists and will be replaced:'
+    : 'These files already exist and will be replaced:';
+  return {
+    title: 'Overwrite files?',
+    message: `${lead}\n${names.join('\n')}`,
+  };
+}
+
+/** True when the save may proceed. An empty list never calls `confirm`. */
+export async function confirmOverwrite(names, confirm) {
+  if (!names || names.length === 0) return true;
+  const { title, message } = overwriteConfirmCopy(names);
+  return !!(await confirm(message, title));
+}
+
+/**
+ * Names in `names` that already exist under `target`.
+ * A directory with the same name counts: the write would hit that path.
+ * target: a plain path string (pywebview) or a FileSystemDirectoryHandle.
+ */
+export async function existingOutputNames(target, names) {
+  const list = (Array.isArray(names) ? names : []).filter((name) => typeof name === 'string' && name);
+  if (list.length === 0) return [];
+
+  if (typeof target === 'string') {
+    if (_isPywebview() && window.pywebview.api.existing_output_names) {
+      const found = await window.pywebview.api.existing_output_names(target, list);
+      return Array.isArray(found) ? found : [];
+    }
+    return [];
+  }
+
+  if (target && typeof target.getFileHandle === 'function') {
+    const found = [];
+    for (const name of list) {
+      try {
+        await target.getFileHandle(name, { create: false });
+        found.push(name);
+      } catch (e) {
+        if (e?.name === 'NotFoundError') continue;
+        // The name exists, but as a directory rather than a file.
+        if (e?.name === 'TypeMismatchError') {
+          found.push(name);
+          continue;
+        }
+        throw e;
+      }
+    }
+    return found;
+  }
+
+  return [];
+}
+
+function _saveCancelled() {
+  const error = new Error('Save cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
  * Write a list of {name, data} to a folder.
  * target: a plain path string (pywebview) or a FileSystemDirectoryHandle
  * (browser, from pickSaveFolder).
+ * `confirm(message, title)` is required when any output name already exists.
+ * Declining throws AbortError and writes nothing.
  */
-export async function writeFilesToFolder(target, files) {
+export async function writeFilesToFolder(target, files, confirm) {
+  const existing = await existingOutputNames(target, files.map((item) => item.name));
+  if (existing.length > 0) {
+    if (typeof confirm !== 'function') {
+      throw new Error('writeFilesToFolder: refusing to replace existing files without confirmation');
+    }
+    if (!(await confirmOverwrite(existing, confirm))) throw _saveCancelled();
+  }
+
   if (typeof target === 'string') {
     const sep = target.includes('\\') ? '\\' : '/';
     for (const item of files) {
