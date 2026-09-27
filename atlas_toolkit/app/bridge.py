@@ -293,6 +293,25 @@ class Api:
         )
         return result[0] if result else None
 
+    def pick_skel_file(self, default_dir: str = "") -> Optional[str]:
+        """Native single-file Open dialog for a .skel, opened at the atlas
+        folder — same desktop UX as pick_mod_image. The manual .skel button
+        used a browser file input even on pywebview, which cannot start in
+        that folder."""
+        if not self._window:
+            return None
+        file_types = ("Skeleton Files (*.skel)", "All files (*.*)")
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=file_types,
+            directory=default_dir or "",
+        )
+        path = _dialog_first_path(result)
+        if not path or not path.lower().endswith(".skel"):
+            return None
+        return path
+
     def pick_save_folder(self, default_dir: str = "") -> Optional[str]:
         """Native folder-picker for output (extract-to-folder / save_modified)
         — see platform.js's pickSaveFolder(), Phase 3."""

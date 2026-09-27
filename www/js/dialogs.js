@@ -276,7 +276,23 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
 
   nameInput.oninput = () => { nameTouchedByUser = true; revalidate(); };
   fileInput.onchange = () => { if (fileInput.files[0]) onFileSelected(fileInput.files[0]); };
-  dropArea.onclick = () => fileInput.click();
+  dropArea.onclick = async () => {
+    // pywebview: native Open dialog at the atlas folder, same as the missing
+    // page image and Modify Selected pickers. A plain file input cannot
+    // start in that directory.
+    if (isPywebviewDesktop() && window.pywebview.api.pick_page_image) {
+      try {
+        const atlasDir = window.AtlasAPI?.get_current_atlas_directory?.() || '';
+        const path = await window.pywebview.api.pick_page_image('', atlasDir);
+        if (!path) return;
+        onFileSelected(await loadFileAsFile(path));
+      } catch (e) {
+        console.error('add-region image picker error:', e);
+      }
+      return;
+    }
+    fileInput.click();
+  };
   dropArea.ondragover = (e) => e.preventDefault();
   dropArea.ondrop = (e) => {
     e.preventDefault();
