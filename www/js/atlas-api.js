@@ -661,8 +661,21 @@ export const AtlasAPI = {
   },
 
   /** Manual .skel picker — covers sibling auto-resolve misses and the
-   *  browser/PWA target where .skel isn't in the picked/dropped file set. */
+   *  browser/PWA target where .skel isn't in the picked/dropped file set.
+   *  pywebview uses the native Open dialog at the atlas folder, same as
+   *  pick_mod_image / pick_page_image — a plain file input cannot. */
   async pick_skel_file() {
+    if (isPywebviewDesktop() && window.pywebview.api.pick_skel_file) {
+      const path = await window.pywebview.api.pick_skel_file(_currentAtlasDirectory);
+      if (!path) return false;
+      try {
+        const file = await loadFileAsFile(path, 'application/octet-stream');
+        return AtlasAPI.apply_skel_file(file);
+      } catch (e) {
+        console.error('pick_skel_file error:', e);
+        return false;
+      }
+    }
     const files = await _pickFiles({ accept: '.skel', multiple: false });
     if (files.length === 0) return false;
     return AtlasAPI.apply_skel_file(files[0]);
