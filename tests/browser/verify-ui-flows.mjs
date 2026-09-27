@@ -380,20 +380,49 @@ const browser = await chromium.launch({ headless: true });
   await page.waitForTimeout(80);
   ui = await readUi(page);
   check('desktop: gear opens the gap panel', ui.nestGapPanelOpen);
+  const gapAnchor = await page.evaluate(() => {
+    const gear = document.getElementById('btn-nest-settings').getBoundingClientRect();
+    const panel = document.getElementById('nest-gap-panel').getBoundingClientRect();
+    return { delta: Math.abs(panel.right - gear.right), panelRight: panel.right, gearRight: gear.right };
+  });
+  check('desktop: gap panel top-right aligns with the gear button',
+    gapAnchor.delta <= 2, JSON.stringify(gapAnchor));
   const gapInput = page.locator('#nest-gap-distance');
   check('desktop: gap-distance input enabled once Nest Regions is checked', !(await gapInput.isDisabled()));
   const popoverBtns = await page.evaluate(() => {
     const closeBtn = document.getElementById('nest-gap-close');
+    const resetBtn = document.getElementById('nest-gap-reset');
     const confirmBtn = document.getElementById('nest-gap-confirm');
     return {
       closeDisplay: getComputedStyle(closeBtn).display,
+      resetDisplay: getComputedStyle(resetBtn).display,
+      resetText: resetBtn.innerText,
       confirmH: confirmBtn.getBoundingClientRect().height,
       confirmText: confirmBtn.innerText,
     };
   });
-  check('desktop: popover shows a small Confirm and no Close',
-    popoverBtns.closeDisplay === 'none' && popoverBtns.confirmText === 'Confirm' && popoverBtns.confirmH > 0 && popoverBtns.confirmH <= 26,
+  check('desktop: popover shows Reset and Confirm, no Close',
+    popoverBtns.closeDisplay === 'none' && popoverBtns.resetDisplay !== 'none'
+      && popoverBtns.resetText === 'Reset' && popoverBtns.confirmText === 'Confirm'
+      && popoverBtns.confirmH > 0 && popoverBtns.confirmH <= 26,
     JSON.stringify(popoverBtns));
+  const packingChrome = await page.evaluate(() => {
+    const text = document.getElementById('nest-regions-label-text')?.textContent || '';
+    const badges = [...document.querySelectorAll('#options-row .opt-beta-badge')]
+      .filter((el) => getComputedStyle(el).display !== 'none')
+      .map((el) => el.textContent.trim());
+    return { text, badges };
+  });
+  check('desktop: Smart Packing label includes the applied gap',
+    packingChrome.text === 'Smart Packing (4px)', packingChrome.text);
+  check('desktop: Smart Packing and Advance Mode show a Beta badge',
+    packingChrome.badges.filter((t) => t === 'Beta').length === 2,
+    JSON.stringify(packingChrome.badges));
+  await gapInput.fill('12');
+  await page.click('#nest-gap-reset');
+  check('desktop: gap Reset restores the default 4px draft',
+    (await gapInput.inputValue()) === '4',
+    `value=${await gapInput.inputValue()}`);
   await page.evaluate(() => { window.__nestGapWriteCount = 0; }); // clean baseline before the burst
   await gapInput.fill('2');
   await gapInput.type('7'); // draft only -- must not write until Confirm
@@ -408,6 +437,9 @@ const browser = await chromium.launch({ headless: true });
   const writeCount = await page.evaluate(() => window.__nestGapWriteCount);
   check('desktop: Confirm writes the drafted gap distance once',
     writeCount === 1, `writeCount=${writeCount}`);
+  const packingAfterConfirm = await page.evaluate(() => document.getElementById('nest-regions-label-text')?.textContent);
+  check('desktop: Smart Packing label reflects the confirmed gap',
+    packingAfterConfirm === 'Smart Packing (27px)', packingAfterConfirm);
   await page.keyboard.press('Escape');
   await page.click('#nest-regions-toggle-row');
   await page.waitForTimeout(200);
@@ -1153,7 +1185,7 @@ for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { 
           fullyVisible: box.top >= rowBox.top - 1 && box.bottom <= rowBox.bottom + 1,
           kidCount: kids.length,
           lineStart: li.classList.contains('is-line-start'),
-          borderLeft: parseFloat(getComputedStyle(li).borderLeftWidth) || 0,
+          hasDivider: getComputedStyle(li, '::before').content !== 'none',
         };
       });
       const btn = document.getElementById('btn-options-collapse');
@@ -1190,15 +1222,74 @@ for (const vp of [{ w: 430, h: 800 }, { w: 390, h: 844 }, { w: 360, h: 800 }, { 
       expandedGeo.groups.at(-1)?.id === 'options-group-advance',
       JSON.stringify(expandedGeo.groups.map((g) => g.id)));
     check(`portrait ${vp.w}x${vp.h}: first group on each wrap line has no vertical divider`,
-      expandedGeo.groups.every((g) => g.lineStart === (g.borderLeft === 0)),
+      expandedGeo.groups.every((g) => g.lineStart === !g.hasDivider),
       JSON.stringify(expandedGeo.groups));
     const lineStarts = expandedGeo.groups.filter((g) => g.lineStart);
     check(`portrait ${vp.w}x${vp.h}: wrapped lines each have a divider-free start`,
-      lineStarts.length >= 1 && lineStarts.every((g) => g.borderLeft === 0),
+      lineStarts.length >= 1 && lineStarts.every((g) => !g.hasDivider),
       JSON.stringify(lineStarts));
   }
 
   check(`portrait ${vp.w}x${vp.h}: zero page errors`, errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
+
+// Wrap oscillation at 494–504px: .is-line-start used to drop 11px of
+// divider chrome, so a group that just wrapped fit the previous line,
+// regained the chrome, and wrapped again (row 1/2 flash).
+for (const w of [494, 499, 504]) {
+  const ctx = await browser.newContext({ viewport: { width: w, height: 800 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(URL_ROOT, { waitUntil: 'networkidle' });
+
+  const loaded = await loadSinglePageFixtureAtlas(page);
+  check(`wrap-stable ${w}px: single-page fixture loaded`, loaded.ok);
+  await page.click('#mode-modify');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const skelBtn = document.getElementById('btn-pick-skel');
+    skelBtn.classList.remove('hidden');
+    skelBtn.classList.add('skel-ok');
+    skelBtn.textContent = 'hero_spr.skel';
+    const label = document.getElementById('nest-regions-label-text');
+    if (label) label.textContent = 'Smart Packing (32px)';
+  });
+  await page.click('#nest-regions-toggle-row');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const label = document.getElementById('nest-regions-label-text');
+    if (label) label.textContent = 'Smart Packing (32px)';
+    const btn = document.getElementById('btn-options-collapse');
+    const row = document.getElementById('options-row');
+    if (btn && row && !btn.classList.contains('hidden') && !row.classList.contains('is-expanded')) {
+      btn.click();
+    }
+  });
+  await page.waitForTimeout(80);
+
+  const sampleWrap = () => page.evaluate(() => [...document.querySelectorAll('#options-row > li')]
+    .filter((li) => getComputedStyle(li).display !== 'none' && !li.classList.contains('hidden'))
+    .map((li) => ({
+      id: li.id,
+      top: Math.round(li.getBoundingClientRect().top),
+      lineStart: li.classList.contains('is-line-start'),
+      hasDivider: getComputedStyle(li, '::before').content !== 'none',
+    })));
+
+  const first = await sampleWrap();
+  await page.waitForTimeout(120);
+  const second = await sampleWrap();
+  await page.waitForTimeout(120);
+  const third = await sampleWrap();
+  check(`wrap-stable ${w}px: line assignment does not flash across frames`,
+    JSON.stringify(first) === JSON.stringify(second) && JSON.stringify(second) === JSON.stringify(third),
+    JSON.stringify({ first, second, third }));
+  check(`wrap-stable ${w}px: wrap-start groups hide the vertical divider`,
+    first.every((g) => g.lineStart === !g.hasDivider),
+    JSON.stringify(first));
+  check(`wrap-stable ${w}px: zero page errors`, errors.length === 0, errors.join('; '));
   await ctx.close();
 }
 

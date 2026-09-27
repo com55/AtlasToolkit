@@ -1,5 +1,6 @@
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
 import { validateRegionName } from './region-name-validation.js';
+import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -16,6 +17,7 @@ export function showConfirm(message, title = 'Confirm') {
       btnConfirm.removeEventListener('click', onConfirm);
       btnCancel.removeEventListener('click', onCancel);
       window.removeEventListener('keydown', onKey);
+      hideBusyStatus();
     }
     function onConfirm() { cleanup(); resolve(true); }
     function onCancel()  { cleanup(); resolve(false); }
@@ -33,6 +35,10 @@ export function showConfirm(message, title = 'Confirm') {
  * where a toast would render underneath it and go unseen.
  */
 export function showAlert(message, title = 'Notice') {
+  if (isBusy() || isModalOverlayOpen()) {
+    queueBusyError(String(message ?? ''), title);
+    return Promise.resolve();
+  }
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-overlay');
     document.getElementById('modal-title').innerText = title;
@@ -51,6 +57,7 @@ export function showAlert(message, title = 'Notice') {
       btnCancel.classList.remove('hidden');
       btnConfirm.removeEventListener('click', onOk);
       window.removeEventListener('keydown', onKey);
+      hideBusyStatus();
     }
     function onOk() { cleanup(); resolve(); }
     function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter') onOk(); }
@@ -301,14 +308,17 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
     if (!result.ok || !selectedFile) return;
     submitting = true;
     confirmBtn.disabled = true;
+    const file = selectedFile;
+    const name = result.value;
+    _addRegionDialogState = null;
+    document.body.dataset.addRegionDialogOpen = 'false';
     try {
-      await onConfirm(selectedFile, result.value);
-      close();
+      await onConfirm(file, name);
     } catch (e) {
       console.error(e);
       showToast('Failed to add region.', 'error');
-      confirmBtn.disabled = false;
     } finally {
+      close();
       submitting = false;
     }
   };

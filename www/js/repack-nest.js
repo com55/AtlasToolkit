@@ -85,18 +85,61 @@ export function dilate(mask, w, h, gap) {
 
 // ─── gapDistance normalization ────────────────────────────────────────────────
 
+/** Default Smart Packing gap (px). Used by normalizeGap's fallback and the
+ *  gap-panel Reset control. */
+export const DEFAULT_NEST_GAP = 4;
+
 /** Normalize a gapDistance value to a finite integer >= 1, falling back to
  *  the default (4) on anything else -- an invalid value (corrupt pref, a
  *  bad direct API call) is closer to "unset" than "user chose 1". */
 export function normalizeGap(v) {
   const n = Math.floor(Number(v));
-  if (!Number.isFinite(n) || n < 1) return 4;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_NEST_GAP;
   return Math.min(n, 256);
 }
 
 // ─── The packer ───────────────────────────────────────────────────────────────
 
 const SCAN_STEP = 4; // px -- fixed-step raster scan, not per-pixel (performance)
+
+function maskIsSolid(mask) {
+  for (let i = 0; i < mask.length; i++) if (!mask[i]) return false;
+  return mask.length > 0;
+}
+
+/** Inclusive-prefix occupied count. sum[(y+1)*stride + (x+1)] = occupied
+ *  cells in [0, x] x [0, y] of the padded grid. Lets findFirstFit reject
+ *  (or accept) a whole bounding box in O(1) instead of scanning every
+ *  pixel of a solid added sprite against a mesh-aware hole-filled canvas
+ *  — that scan is what timed out nestPack on mobile. */
+function occupiedIntegral(occupied, paddedW, paddedH) {
+  const stride = paddedW + 1;
+  const sum = new Uint32Array((paddedH + 1) * stride);
+  for (let y = 0; y < paddedH; y++) {
+    let row = 0;
+    const srcRow = y * paddedW;
+    const dstRow = (y + 1) * stride;
+    const prevRow = y * stride;
+    for (let x = 0; x < paddedW; x++) {
+      row += occupied[srcRow + x];
+      sum[dstRow + x + 1] = sum[prevRow + x + 1] + row;
+    }
+  }
+  return { sum, stride };
+}
+
+function rectOccupiedCount(integral, x, y, w, h) {
+  const s = integral.stride;
+  const sum = integral.sum;
+  return sum[(y + h) * s + (x + w)]
+    - sum[y * s + (x + w)]
+    - sum[(y + h) * s + x]
+    + sum[y * s + x];
+}
+
+function makeOccupiedIntegral(occupied, canvasW, canvasH, gap) {
+  return occupiedIntegral(occupied, canvasW + 2 * gap, canvasH + 2 * gap);
+}
 
 /** Build the 4 rotation variants of one item's footprint, each carrying an
  *  undilated mask (for fit-testing) and a separately-dilated mask (for
@@ -106,11 +149,12 @@ const SCAN_STEP = 4; // px -- fixed-step raster scan, not per-pixel (performance
  *  convention (core-region-ops.js's cropAndRotate): rotate:90 is stored
  *  90 CCW, rotate:270 is stored 90 CW. */
 function rotationVariants(item, gap) {
+  const solid = maskIsSolid(item.footprint);
   const variants = [
-    { deg: 0, w: item.w, h: item.h, mask: item.footprint },
-    { deg: 90, w: item.h, h: item.w, mask: rotate90CCW(item.footprint, item.w, item.h) },
-    { deg: 180, w: item.w, h: item.h, mask: rotate180(item.footprint, item.w, item.h) },
-    { deg: 270, w: item.h, h: item.w, mask: rotate90CW(item.footprint, item.w, item.h) },
+    { deg: 0, w: item.w, h: item.h, mask: item.footprint, solid },
+    { deg: 90, w: item.h, h: item.w, mask: rotate90CCW(item.footprint, item.w, item.h), solid },
+    { deg: 180, w: item.w, h: item.h, mask: rotate180(item.footprint, item.w, item.h), solid },
+    { deg: 270, w: item.h, h: item.w, mask: rotate90CW(item.footprint, item.w, item.h), solid },
   ];
   for (const v of variants) v.dilatedMask = dilate(v.mask, v.w, v.h, gap);
   return variants;
@@ -120,8 +164,11 @@ function rotationVariants(item, gap) {
  *  exceeding canvas bounds or overlapping the (already-dilated) occupied
  *  grid? `occupied` is a (canvasW+2*gap) x (canvasH+2*gap) grid, logical
  *  position (lx, ly) at physical index (ly+gap)*(canvasW+2*gap)+(lx+gap). */
-function fits(occupied, canvasW, canvasH, gap, rot, x, y) {
+function fits(occupied, canvasW, canvasH, gap, rot, x, y, integral) {
   if (x + rot.w > canvasW || y + rot.h > canvasH) return false;
+  const count = rectOccupiedCount(integral, x + gap, y + gap, rot.w, rot.h);
+  if (count === 0) return true;
+  if (rot.solid || count === rot.w * rot.h) return false;
   const paddedW = canvasW + 2 * gap;
   for (let my = 0; my < rot.h; my++) {
     for (let mx = 0; mx < rot.w; mx++) {
@@ -137,11 +184,11 @@ function fits(occupied, canvasW, canvasH, gap, rot, x, y) {
  *  try every rotation in order; the first that fits wins. Position is the
  *  primary axis (not rotation) so the result stays close to a natural
  *  top-to-bottom, left-to-right fill. */
-function findFirstFit(variants, occupied, canvasW, canvasH, gap) {
+function findFirstFit(variants, occupied, canvasW, canvasH, gap, integral) {
   for (let y = 0; y <= canvasH - 1; y += SCAN_STEP) {
     for (let x = 0; x <= canvasW - 1; x += SCAN_STEP) {
       for (const rot of variants) {
-        if (fits(occupied, canvasW, canvasH, gap, rot, x, y)) return { rot, x, y };
+        if (fits(occupied, canvasW, canvasH, gap, rot, x, y, integral)) return { rot, x, y };
       }
     }
   }
@@ -220,11 +267,12 @@ export function nestPack(items, { gapDistance = 4 } = {}) {
   const sorted = [...items].sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
 
   let canvasW = 0, canvasH = 0, occupied = new Uint8Array(0);
+  let integral = null;
   const placements = [];
 
   for (const item of sorted) {
     const variants = rotationVariants(item, gap);
-    let spot = canvasW > 0 ? findFirstFit(variants, occupied, canvasW, canvasH, gap) : null;
+    let spot = canvasW > 0 ? findFirstFit(variants, occupied, canvasW, canvasH, gap, integral) : null;
     // Growth is monotonic (each call strictly increases canvasW or canvasH
     // by at least the unrotated variant's own dimension), so this loop
     // always terminates -- worst case, the canvas eventually becomes large
@@ -232,9 +280,11 @@ export function nestPack(items, { gapDistance = 4 } = {}) {
     // previously-placed item's dilated footprint.
     while (!spot) {
       ({ canvasW, canvasH, occupied } = growCanvas(canvasW, canvasH, occupied, variants[0], gap));
-      spot = findFirstFit(variants, occupied, canvasW, canvasH, gap);
+      integral = makeOccupiedIntegral(occupied, canvasW, canvasH, gap);
+      spot = findFirstFit(variants, occupied, canvasW, canvasH, gap, integral);
     }
     stampOccupied(occupied, canvasW, gap, spot.rot, spot.x, spot.y);
+    integral = makeOccupiedIntegral(occupied, canvasW, canvasH, gap);
     placements.push({
       name: item.name, x: spot.x, y: spot.y,
       pw: spot.rot.w, ph: spot.rot.h, rotate: spot.rot.deg,

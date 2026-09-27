@@ -261,8 +261,18 @@ body.mode-modify.advance-mode-on #sidebar-head {
 #options-row {
   height: 35px;
   min-height: 35px;
-  padding: 0 10px;
-  gap: 6px;
+  /* Right pad is always reserved for the collapse chevron so toggling
+     .is-overflowing cannot change wrap width. Left pad is 10px; wrap-start
+     ::before sits 11px into that pad and is clipped by overflow-x. */
+  padding: 0 40px 0 10px;
+  /* 6px inner-control gap used to sit next to 11px of per-<li> divider
+     chrome (margin 2 + border 1 + padding 8). That chrome was removed on
+     .is-line-start, so at ~494–504px a wrapped group lost 11px, fit the
+     previous line, regained the chrome, and wrapped again (row flash).
+     The divider is now an absolutely-positioned ::before in this column-gap,
+     so wrap width never changes when the line-start class toggles. */
+  column-gap: 17px;
+  row-gap: 6px;
   list-style: none;
   margin: 0;
   display: flex;
@@ -283,10 +293,6 @@ body.mode-modify.advance-mode-on #sidebar-head {
   height: auto;
 }
 
-#options-row.is-overflowing {
-  padding-right: 40px;
-}
-
 #options-row > li {
   display: flex;
   flex-direction: row;
@@ -296,16 +302,32 @@ body.mode-modify.advance-mode-on #sidebar-head {
   max-width: 100%;
   min-width: 0;
   gap: 6px;
-  border-left: 1px solid #444;
-  padding-left: 8px;
-  margin-left: 2px;
+  position: relative;
+  box-sizing: border-box;
+  /* The row is flex-wrap + align-content:flex-start so extra wrapped
+     lines clip below the 35px bar (collapse chevron). That also sizes a
+     single flex line to the toggle (18px) and packs it to the top —
+     WebView2 shows Mesh Cropping sitting against the app-bar. Fill the
+     row's content box (35px border-box minus 1px border-bottom) so
+     align-items:center actually centers the control. */
+  height: 34px;
 }
-
-#options-row > li:first-child,
-#options-row > li.is-line-start {
-  border-left: none;
-  padding-left: 0;
-  margin-left: 0;
+#options-row > li::before {
+  content: "";
+  position: absolute;
+  /* 11px into the 17px column-gap. For a wrap-start <li> this lands 1px
+     past the row's 10px left padding, so overflow-x:hidden clips it even
+     before JS adds .is-line-start. */
+  left: -11px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background-color: #444;
+  pointer-events: none;
+}
+#options-row > li:first-child::before,
+#options-row > li.is-line-start::before {
+  content: none;
 }
 
 #options-row .only-view-mode,
@@ -538,6 +560,23 @@ button {
   /* nowrap + flex-shrink:0 keeps each label one line. Overflow is absorbed
      by wrapping whole <li> groups, not by shrinking or scrolling labels. */
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.opt-beta-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 15px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid #d4b44a;
+  background: #1a1406;
+  color: #f0d24a;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -826,6 +865,7 @@ button {
   font-size: 12px;
 }
 
+#nest-gap-overlay.is-touch-modal #nest-gap-reset,
 #nest-gap-overlay.is-touch-modal #nest-gap-confirm {
   flex: 1;
   height: 28px;
@@ -960,6 +1000,82 @@ img#preview-img {
 }
 ::-webkit-scrollbar-corner {
   background-color: #1e1e1e;
+}
+
+/* Busy overlay — same chrome as #modal-overlay/#modal-box so Processing
+   matches confirm/alert. Confirm is dismissed before paint; silent
+   withLock still uses #modal-overlay at 4500. */
+#busy-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 4700;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: auto;
+}
+#busy-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: #252526;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  padding: 24px 32px;
+  min-width: 200px;
+  max-width: min(420px, calc(100vw - 32px));
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+#busy-spinner {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #4fc3f7;
+  border-radius: 50%;
+  animation: busy-spin 0.8s linear infinite;
+}
+@keyframes busy-spin {
+  to { transform: rotate(360deg); }
+}
+#busy-label {
+  margin: 0;
+  color: #e5e5e5;
+  font-size: 15px;
+  line-height: 1.3;
+}
+#busy-reject {
+  margin: 0;
+  color: #f0c674;
+  font-size: 13px;
+  line-height: 1.3;
+}
+#busy-reject:empty {
+  display: none;
+}
+#busy-status-line {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4800;
+  pointer-events: none;
+  background-color: #333;
+  color: #f0c674;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  max-width: min(520px, calc(100vw - 32px));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 /* Modal Styling */

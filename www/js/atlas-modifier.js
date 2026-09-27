@@ -7,7 +7,8 @@ import { AtlasProcessor } from './atlas-extracter.js';
 import { AtlasDocument } from './atlas-document.js';
 import { cropAndRotate, roundHalfEven, roundUpToMultiple, maskInPlace } from './core-region-ops.js';
 import { rasterizeMeshMask } from './region-mesh-mask.js';
-import { nestPack, footprintForCanonical } from './repack-nest.js';
+import { footprintForCanonical } from './repack-nest.js';
+import { runNestPack } from './job-runner.js';
 
 // ─── Parse atlas text using AtlasProcessor ──────────────────────────────────
 
@@ -748,7 +749,7 @@ export class AtlasModifier {
           maskCropRectForOffsets,
         }),
       }));
-      ({ canvasW, canvasH, placements } = nestPack(items, { gapDistance: nestOptions.gapDistance }));
+      ({ canvasW, canvasH, placements } = await runNestPack(items, { gapDistance: nestOptions.gapDistance }));
     } else {
       ({ canvasW, canvasH, placements } = _shelfPack(packItems));
     }

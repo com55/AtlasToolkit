@@ -6,6 +6,7 @@
  */
 
 import { isTouchDevice, isPywebviewDesktop } from './platform.js';
+import { DEFAULT_NEST_GAP } from './repack-nest.js';
 
 const HOVER_DELAY_MS = 500;
 const LONG_PRESS_MS = 450;
@@ -72,11 +73,15 @@ function positionGapPanel(anchor) {
   const panel = gapPanel();
   const rect = anchor.getBoundingClientRect();
   const pad = 8;
-  panel.style.left = `${rect.left}px`;
+  // Throwaway placement so width is known, then pin the panel's top-right
+  // corner to the gear button's right edge (it used to grow rightward from
+  // the button's left edge).
+  panel.style.left = '0px';
   panel.style.top = `${rect.bottom + 6}px`;
   const popRect = panel.getBoundingClientRect();
-  let left = rect.left;
+  let left = rect.right - popRect.width;
   let top = rect.bottom + 6;
+  if (left < pad) left = pad;
   if (left + popRect.width > window.innerWidth - pad) {
     left = Math.max(pad, window.innerWidth - pad - popRect.width);
   }
@@ -137,6 +142,7 @@ export function initOptionsPopover({ applyGap, revertGap } = {}) {
   const slider = document.getElementById('nest-gap-slider');
   const number = document.getElementById('nest-gap-distance');
   const closeBtn = document.getElementById('nest-gap-close');
+  const resetBtn = document.getElementById('nest-gap-reset');
   const confirmBtn = document.getElementById('nest-gap-confirm');
   if (!pop || !overlay || !btn || !slider || !number) return;
 
@@ -180,13 +186,17 @@ export function initOptionsPopover({ applyGap, revertGap } = {}) {
 
   btn.addEventListener('click', openGapPanel);
   closeBtn?.addEventListener('click', (e) => { e.stopPropagation(); closeGapPanel(); });
+  resetBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    number.value = String(DEFAULT_NEST_GAP);
+    slider.value = String(DEFAULT_NEST_GAP);
+  });
   confirmBtn?.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!applyGapCb) return;
     confirmBtn.disabled = true;
     try {
-      const ok = await applyGapCb(number.value);
-      if (ok) closeGapPanel({ revert: false });
+      await applyGapCb(number.value);
     } finally {
       confirmBtn.disabled = false;
     }
