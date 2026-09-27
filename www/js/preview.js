@@ -14,10 +14,9 @@ export function setPreviewSrc(url) {
   previewImg.src = url || '';
   _previewObjectUrl = (url && String(url).startsWith('blob:')) ? url : null;
   if (prev && prev !== url) {
-    // get_preview() memoizes blob: URLs. If we revoke one that's still
-    // cached there, Edit→View would set <img src> to a dead blob and
-    // show the broken-image icon (found 2026-08-23).
-    if (AtlasAPI.forget_preview_url) AtlasAPI.forget_preview_url(prev);
+    // PreviewCache holds live blob: URLs. Revoking one it still owns
+    // would break View A→B→A (and Edit page 0→1→0) reuse.
+    if (AtlasAPI.preview_url_is_cached && AtlasAPI.preview_url_is_cached(prev)) return;
     URL.revokeObjectURL(prev);
   }
 }

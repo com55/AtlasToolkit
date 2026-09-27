@@ -15,6 +15,8 @@ import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
 import { parseSkeleton, UnsupportedVersionError } from './vendor/spine-skeleton-binary/index.js';
 import { buildMeshLookup } from './region-mesh-lookup.js';
 import { normalizeGap } from './repack-nest.js';
+import { withBusy, BUSY_LABEL, BUSY_LOADING_LABEL, isOverlayPainted } from './busy-overlay.js';
+import { PreviewCache, PackResultCache, viewPreviewKey, editPreviewKey, packSignature } from './preview-cache.js';
 
 /** Returned by load helpers when the user cancels a missing-images dialog. */
 export const LOAD_CANCELLED = 'cancelled';
@@ -63,20 +65,41 @@ let _nestGapDistance = 4;
 // tooltip. null when there's no .skel captured yet, or when it parsed with
 // usable Mesh geometry.
 let _meshUnavailableReason = null;
-let _previewMemo = { key: null, value: null };
+const _previewCache = new PreviewCache(24);
+const _packResultCache = new PackResultCache(12);
+let _loadEpoch = 0;
+let _skelEpoch = 0;
 
-function _clearPreviewMemo() {
-  if (_previewMemo.value && String(_previewMemo.value).startsWith('blob:')) {
-    URL.revokeObjectURL(_previewMemo.value);
-  }
-  _previewMemo = { key: null, value: null };
+function _bumpLoadEpoch() {
+  _loadEpoch++;
+  _previewCache.invalidateAll();
+  _packResultCache.invalidateAll();
 }
 
-/** Drop the memo if it still points at *url* (already revoked by the caller). */
-function _forgetPreviewMemoUrl(url) {
-  if (url && _previewMemo.value === url) {
-    _previewMemo = { key: null, value: null };
-  }
+function _currentPackSig() {
+  return packSignature(_nestRegionsEnabled, _nestGapDistance, _meshAwareRepackEnabled);
+}
+
+function _ingestEditPage(pageIndex, url) {
+  if (!url || !_session) return;
+  _previewCache.set(
+    editPreviewKey(pageIndex, _session.modGeneration, _loadEpoch, _currentPackSig()),
+    url,
+  );
+}
+
+function _packResultKey() {
+  return `${_session.modGeneration}:${_currentPackSig()}`;
+}
+
+function _rememberPackResult(result) {
+  if (!_session || !result) return;
+  if (result.image) _ingestEditPage(0, result.image);
+  _packResultCache.set(_packResultKey(), {
+    active: _session.active,
+    repacked: _session.repacked,
+    result,
+  });
 }
 
 /** Only worth re-running repack if at least one batch has actually been
@@ -89,9 +112,25 @@ function _forgetPreviewMemoUrl(url) {
  *  modify-mode preview pane is still showing the extraction-composite
  *  view (unaffected by either mesh toggle), not a packed-atlas view --
  *  nothing to refresh yet. */
+async function _rerunAndRemember() {
+  const result = await _session.rerunRepack();
+  _rememberPackResult(result);
+  return result;
+}
+
 async function _maybeRerunRepack() {
-  if (_session && _session.modBatches.length > 0) return await _session.rerunRepack();
-  return null;
+  if (!_session || _session.modBatches.length === 0) return null;
+  const hit = _packResultCache.get(_packResultKey());
+  if (hit && hit.active) {
+    _session.active = hit.active;
+    _session.repacked = hit.repacked;
+    if (hit.result && hit.result.image) _ingestEditPage(0, hit.result.image);
+    return hit.result;
+  }
+  // Cache hit restores the previous packed preview in-place — do not
+  // paint #busy-overlay for that path or A→B→A flashes a Processing card.
+  if (isOverlayPainted()) return _rerunAndRemember();
+  return withBusy(BUSY_LABEL, _rerunAndRemember);
 }
 
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
@@ -410,7 +449,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
     _currentAtlasDirectory = sourceDir;
     _currentAtlasText = convertedText;
     await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
-    _clearPreviewMemo();
+    _bumpLoadEpoch();
 
     // Fresh session bound to the pristine processor + atlas text.
     _session = new AtlasSession(_processor, _currentAtlasText, _currentAtlasFilename);
@@ -489,7 +528,7 @@ async function _reparseSkelAndPushToProcessor() {
     _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
     _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
   }
-  _clearPreviewMemo();
+  _skelEpoch++;
 }
 
 /** Prefer the skel captured at load; otherwise retry from the atlas folder
@@ -563,7 +602,6 @@ export const AtlasAPI = {
     _meshMaskEnabled = !!enabled;
     AtlasAPI.set_pref('meshCropping', _meshMaskEnabled);
     if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
-    _clearPreviewMemo();
     return null; // Mesh Cropping no longer affects repack output at all now that the two toggles are decoupled -- no rerun needed.
   },
 
@@ -744,16 +782,12 @@ export const AtlasAPI = {
 
   async get_preview(names) {
     if (!_processor || !names || names.length === 0) return null;
-    // Memoize on the selection set + mod generation. Generation stays 0 in
-    // extract mode, so identical selections short-circuit the composite;
-    // applying a mod bumps it so a stale preview is never served.
-    const gen = _session ? _session.modGeneration : 0;
-    const key = `${[...names].sort().join(',')}:${gen}`;
-    if (_previewMemo.key === key) return _previewMemo.value;
-    _clearPreviewMemo();
+    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch);
+    const hit = _previewCache.get(key);
+    if (hit) return hit;
     try {
       const url = await _processor.getPreviewDataURL(names);
-      _previewMemo = { key, value: url };
+      if (url) _previewCache.set(key, url);
       return url;
     } catch (e) {
       console.error('get_preview error:', e);
@@ -784,6 +818,7 @@ export const AtlasAPI = {
     const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
+    const run = async () => {
     const extracted = [];
 
     let count = 0;
@@ -839,12 +874,16 @@ export const AtlasAPI = {
       if (e && e.name === 'AbortError') return 'Cancelled';
       throw e;
     }
+    };
+    if (targets.length > 1) return withBusy(BUSY_LABEL, run);
+    return run();
   },
 
   // ── Modify Mode ────────────────────────────────────────────────────────────
 
   async enter_modify_mode() {
     if (!_processor || !_session) return null;
+    return withBusy(BUSY_LOADING_LABEL, async () => {
     try {
       const pages = _processor.pages || [];
       if (pages.length === 0) return null;
@@ -852,12 +891,12 @@ export const AtlasAPI = {
       const baseImg = _processor.getPageImage(initialPage);
       if (!baseImg) return null;
 
-      // Entering modify mode always starts from a clean batch list.
-      // Drop the view-mode preview memo so a later exit can't reuse a
-      // blob: URL that setPreviewSrc is about to revoke (broken-image
-      // after Edit→View, 2026-08-23).
+      // Fresh batches; bump gen so Edit-page cache from the previous
+      // session cannot be served as this pristine view. Do not invalidate
+      // PreviewCache — View keys omit gen and must survive enter/exit.
       _session.clearModifyState();
-      _clearPreviewMemo();
+      _session.modGeneration++;
+      _packResultCache.invalidateAll();
 
       // Build region bounds for overlay: { name: [x, y, w, h, rotate] }.
       // Scaled per page to the real loaded image size (see
@@ -871,8 +910,10 @@ export const AtlasAPI = {
       baseCanvas.height = baseImg.naturalHeight || baseImg.height;
       baseCanvas.getContext('2d').drawImage(baseImg, 0, 0);
 
+      const image = await canvasToPreviewUrl(baseCanvas);
+      _ingestEditPage(0, image);
       return {
-        image: await canvasToPreviewUrl(baseCanvas),
+        image,
         regions: regionBounds,
         pages: pages.map(p => p.filename),
         regionPages: _getRegionPageMap(),
@@ -882,17 +923,16 @@ export const AtlasAPI = {
       console.error('enter_modify_mode error:', e);
       return null;
     }
+    });
   },
 
   exit_modify_mode() {
     if (_session) _session.clearModifyState();
-    _clearPreviewMemo();
+    _packResultCache.invalidateAll();
   },
 
-  /** Called by setPreviewSrc when it revokes a blob: URL that get_preview
-   *  may still be memoizing — otherwise Edit→View serves a dead blob. */
-  forget_preview_url(url) {
-    _forgetPreviewMemoUrl(url);
+  preview_url_is_cached(url) {
+    return _previewCache.owns(url);
   },
 
   /**
@@ -915,10 +955,15 @@ export const AtlasAPI = {
       }
       index = Number(index);
       if (!Number.isInteger(index) || index < 0) return null;
+      const key = editPreviewKey(index, _session.modGeneration, _loadEpoch, _currentPackSig());
+      const hit = _previewCache.get(key);
+      const activePage = (_session.processor.pages[index] || {}).filename || String(pageFilenameOrIndex);
+      if (hit) return { image: hit, activePage, activeIndex: index };
       const canvas = _session.getModifyPageImage(index);
       if (!canvas) return null;
-      const activePage = (_session.processor.pages[index] || {}).filename || String(pageFilenameOrIndex);
-      return { image: await canvasToPreviewUrl(canvas), activePage, activeIndex: index };
+      const image = await canvasToPreviewUrl(canvas);
+      if (image) _previewCache.set(key, image);
+      return { image, activePage, activeIndex: index };
     } catch (e) {
       console.error('get_modify_page_preview error:', e);
       return null;
@@ -970,13 +1015,20 @@ export const AtlasAPI = {
   /** Process a mod image (File or canvas/img) for the selected regions. */
   async process_mod_image(source, selectedNames) {
     if (!_session || !selectedNames || selectedNames.length === 0) return null;
-    try {
-      return await _session.processModImage(source, selectedNames);
-    } catch (e) {
-      console.error('process_mod_image error:', e);
-      if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
-      return null;
-    }
+    return withBusy(BUSY_LABEL, async () => {
+      try {
+        const result = await _session.processModImage(source, selectedNames);
+        if (result) {
+          _packResultCache.invalidateAll();
+          _rememberPackResult(result);
+        }
+        return result;
+      } catch (e) {
+        console.error('process_mod_image error:', e);
+        if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
+        return null;
+      }
+    });
   },
 
   /** Save the merged atlas files. Installed PWA: folder picker + batched
@@ -1062,18 +1114,27 @@ export const AtlasAPI = {
       ...Object.fromEntries(Object.keys(effective.regions).map((k) => [k, effective.labels[k] ?? k])),
     }));
     if (!validation.ok) throw new Error(validation.reason);
-    const sourceCanvas = await _loadImage(file);
-    const internalKey = this._generateAddInternalKey(validation.value);
-    return await _session.applyStructuralBatch(new AddBatch(internalKey, validation.value, sourceCanvas));
+    return withBusy(BUSY_LABEL, async () => {
+      const sourceCanvas = await _loadImage(file);
+      const internalKey = this._generateAddInternalKey(validation.value);
+      const result = await _session.applyStructuralBatch(new AddBatch(internalKey, validation.value, sourceCanvas));
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
   },
 
   async remove_regions(keys) {
     if (!_session) throw new Error('No active modify session.');
-    let result = null;
-    for (const key of keys) {
-      result = await _session.applyStructuralBatch(new RemoveBatch(key));
-    }
-    return result;
+    return withBusy(BUSY_LABEL, async () => {
+      let result = null;
+      for (const key of keys) {
+        result = await _session.applyStructuralBatch(new RemoveBatch(key));
+      }
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
   },
 
   async rename_region(key, newAtlasName) {
@@ -1084,7 +1145,12 @@ export const AtlasAPI = {
       .map((k) => effective.labels[k] ?? k);
     const validation = validateRegionName(newAtlasName, others);
     if (!validation.ok) throw new Error(validation.reason);
-    return await _session.applyStructuralBatch(new RenameBatch(key, validation.value));
+    return withBusy(BUSY_LABEL, async () => {
+      const result = await _session.applyStructuralBatch(new RenameBatch(key, validation.value));
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
   },
 
 };

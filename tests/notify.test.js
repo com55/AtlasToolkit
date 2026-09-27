@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { showToast } from '../www/js/dialogs.js';
+import { withBusy, resetBusyForTests, lastBusyMessage } from '../www/js/busy-overlay.js';
 
 function classList(initial = []) {
   const set = new Set(initial);
@@ -32,6 +33,10 @@ function setupDom() {
   const toastContainer = {
     appendChild(node) { toasts.push(node); },
   };
+  const busyOverlay = { classList: classList(['hidden']) };
+  const busyReject = { textContent: '' };
+  const busyLabel = { textContent: '' };
+  const busyStatus = { textContent: '', classList: classList(['hidden']) };
   const nodes = {
     'modal-overlay': overlay,
     'modal-title': title,
@@ -39,6 +44,10 @@ function setupDom() {
     'btn-modal-confirm': btnConfirm,
     'btn-modal-cancel': btnCancel,
     'toast-container': toastContainer,
+    'busy-overlay': busyOverlay,
+    'busy-reject': busyReject,
+    'busy-label': busyLabel,
+    'busy-status-line': busyStatus,
   };
   globalThis.document = {
     getElementById: (id) => nodes[id] || null,
@@ -51,8 +60,12 @@ function setupDom() {
     addEventListener() {},
     removeEventListener() {},
   };
-  return { overlay, title, message, btnConfirm, btnCancel, toasts };
+  return { overlay, title, message, btnConfirm, btnCancel, toasts, busyOverlay, busyReject };
 }
+
+test.afterEach(() => {
+  resetBusyForTests();
+});
 
 test('error notices open the modal dialog instead of a toast', () => {
   const dom = setupDom();
@@ -82,4 +95,27 @@ test('success and info notices stay as toasts', () => {
   assert.equal(dom.toasts.length, 2);
   assert.equal(dom.toasts[0].className, 'toast success');
   assert.equal(dom.toasts[1].className, 'toast info');
+});
+
+test('error notices during withBusy stay on the busy overlay then flush after unlock', async () => {
+  const dom = setupDom();
+  const alerts = [];
+  globalThis.window.showAlert = (message, title) => { alerts.push({ message, title }); };
+  await withBusy('working', async () => {
+    showToast('Failed to update Nest Regions.', 'error');
+    assert.equal(dom.overlay.classList.contains('hidden'), true);
+    assert.equal(dom.busyReject.textContent, 'Failed to update Nest Regions.');
+    assert.equal(lastBusyMessage(), 'Failed to update Nest Regions.');
+    assert.equal(alerts.length, 0);
+  });
+  await new Promise((r) => queueMicrotask(r));
+  assert.deepEqual(alerts, [{ message: 'Failed to update Nest Regions.', title: 'Error' }]);
+});
+
+test('error notices while the confirm modal is open do not replace the confirm', () => {
+  const dom = setupDom();
+  dom.overlay.classList.remove('hidden');
+  showToast('drop while confirming', 'error');
+  assert.equal(dom.overlay.classList.contains('hidden'), false);
+  assert.equal(dom.title.innerText, 'Confirm');
 });

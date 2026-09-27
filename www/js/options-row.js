@@ -94,7 +94,22 @@ export function initOptionsRowCollapse() {
   });
 
   new ResizeObserver(scheduleOptionsRowOverflowSync).observe(row);
-  new MutationObserver(scheduleOptionsRowOverflowSync).observe(row, {
+  new MutationObserver((mutations) => {
+    const relevant = mutations.some((m) => {
+      if (m.type === 'characterData' || m.type === 'childList') return true;
+      if (m.attributeName === 'hidden' || m.attributeName === 'style') return true;
+      if (m.attributeName !== 'class') return true;
+      const el = m.target;
+      if (!(el instanceof Element)) return true;
+      // is-overflowing / is-expanded / is-line-start are written by
+      // syncOptionsRowOverflow itself — re-entering on those classes is
+      // what turned a wrap-width flicker into a rAF flash loop.
+      if (el.id === 'options-row') return false;
+      if (el.parentElement === row) return false;
+      return true;
+    });
+    if (relevant) scheduleOptionsRowOverflowSync();
+  }).observe(row, {
     childList: true,
     subtree: true,
     attributes: true,

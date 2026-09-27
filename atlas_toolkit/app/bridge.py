@@ -602,6 +602,15 @@ class Api:
                     )
                 return
 
+            busy = self._window.evaluate_js(
+                "!!(window.isBusy && window.isBusy())"
+            )
+            if busy:
+                self._window.evaluate_js(
+                    "window.noteBusyConflict && window.noteBusyConflict()"
+                )
+                return
+
             if path_lower.endswith(".atlas"):
                 # Native drops bypass script.js's openFile() entirely (that's
                 # the JS-only "Open" button's own guard), so loading a new
@@ -655,7 +664,8 @@ class Api:
             # Promise wrapper immediately and the caller would think the
             # drop finished before merge/preview even started.
             self._evaluate_js_promise(
-                f"window.applyNativeModImageDrop({json.dumps(path)})"
+                f"window.applyNativeModImageDrop({json.dumps(path)})",
+                timeout=120.0,
             )
         except Exception as e:
             log.error("Native image drop error: %s", e)

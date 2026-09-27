@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atlas-toolkit-v88';
+const CACHE_NAME = 'atlas-toolkit-v100';
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;
 const CORE_ASSETS = [
@@ -18,15 +18,18 @@ const CORE_ASSETS = [
   'js/atlas-extracter.js',
   'js/atlas-modifier.js',
   'js/atlas-session.js',
+  'js/busy-overlay.js',
   'js/core-region-ops.js',
   'js/dialogs.js',
   'js/drop.js',
   'js/effective-region-model.js',
+  'js/job-runner.js',
   'js/modify-mode.js',
   'js/options-popover.js',
   'js/options-row.js',
   'js/panel-resizer.js',
   'js/platform.js',
+  'js/preview-cache.js',
   'js/preview.js',
   'js/region-list.js',
   'js/region-mesh-lookup.js',
@@ -46,6 +49,7 @@ const CORE_ASSETS = [
   'js/vendor/spine-skeleton-binary/read-skeleton-38.js',
   'js/vendor/spine-skeleton-binary/read-skeleton-42.js',
   'js/zip.js',
+  'workers/engine-job-worker.js',
 ].map((path) => new URL(path, APP_BASE_URL).href);
 
 self.addEventListener('install', (event) => {

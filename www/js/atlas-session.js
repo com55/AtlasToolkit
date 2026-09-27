@@ -100,6 +100,7 @@ export class AtlasSession {
     this.processor = processor;
     this.atlasText = atlasText;
     this.filename = filename;
+    this.modGeneration = 0;      // bumped on process/rebuild; never reset to 0 in clearModifyState
     this.clearModifyState();
   }
 
@@ -109,7 +110,8 @@ export class AtlasSession {
     this.repacked = null;        // { canvas|null, pages|null, text }  repack result cache
     this.active = null;          // currently-displayed merged output
     this.modificationsSaved = false;
-    this.modGeneration = 0;      // bumped on every processModImage
+    // modGeneration is NOT reset here — View cache keys omit it, and a
+    // failed processModImage/_restoreSnapshot still needs the pre-call value.
   }
 
   get isMultiPage() {
@@ -497,15 +499,12 @@ export class AtlasSession {
   }
 
   /** Re-run the full rebuild without registering a new mod batch — used
-   *  when a preference that affects repack output (mesh masking,
-   *  mesh-aware toggle) changes mid-session and the currently-displayed
-   *  result needs to reflect it immediately. Same engine
-   *  processModImage() uses; bumps modGeneration too so any
-   *  generation-keyed preview cache doesn't serve a stale result. */
+   *  when a preference that affects repack output (nest, gap, mesh-aware)
+   *  changes mid-session. Does not bump modGeneration: option A→B→A is
+   *  keyed by packSignature, and bumping would miss the previous pack. */
   async rerunRepack() {
     const snap = this._snapshotForTransaction();
     try {
-      this.modGeneration++;
       return await this._rebuildAndBuildResult();
     } catch (e) {
       this._restoreSnapshot(snap);

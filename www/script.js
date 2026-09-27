@@ -10,6 +10,7 @@ import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButton
 import { previewImg, resetPreview } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
+import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
@@ -282,6 +283,10 @@ async function openFile() {
  *  .atlas file lives in on disk — threaded through so extract/save dialogs can
  *  default to it, matching the old Python engine. */
 async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, atlasDirectory) {
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
   try {
     const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
@@ -304,6 +309,10 @@ async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, at
 /** Apply a mod image dropped natively onto the currently-selected regions
  *  in Edit mode (native drag-drop delivers a path, not a browser File). */
 async function applyNativeModImageDrop(imagePath) {
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
   if (state.currentMode !== 'modify') {
     showToast('Enter Edit Mode first to drop images.', 'error');
     return false;
@@ -373,3 +382,5 @@ window.AtlasAPI                  = AtlasAPI;
 window.loadAtlasFromNative       = loadAtlasFromNative;
 window.applyNativeModImageDrop   = applyNativeModImageDrop;
 window.applyNativeSkelDrop       = applyNativeSkelDrop;
+window.isBusy                    = isBusy;
+window.noteBusyConflict          = noteBusyConflict;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rotate90CW, rotate180, rotate90CCW, dilate, normalizeGap, growCanvas } from '../www/js/repack-nest.js';
+import { rotate90CW, rotate180, rotate90CCW, dilate, normalizeGap, growCanvas, DEFAULT_NEST_GAP } from '../www/js/repack-nest.js';
 import { nestPack } from '../www/js/repack-nest.js';
 
 // 2x3 (w=2,h=3) asymmetric pattern -- chosen specifically to NOT be
@@ -76,15 +76,15 @@ test('dilate: a cell at the mask edge is not clipped in the padded output', () =
   assert.equal(out[5 * w + 5], 0); // well outside the dilated block
 });
 
-test('normalizeGap: valid integers pass through, invalid input falls back to 4', () => {
+test('normalizeGap: valid integers pass through, invalid input falls back to DEFAULT_NEST_GAP', () => {
   assert.equal(normalizeGap(1), 1);
   assert.equal(normalizeGap(10), 10);
   assert.equal(normalizeGap(2.7), 2); // floored, not rounded
-  assert.equal(normalizeGap(0), 4);
-  assert.equal(normalizeGap(-3), 4);
-  assert.equal(normalizeGap(NaN), 4);
-  assert.equal(normalizeGap(Infinity), 4);
-  assert.equal(normalizeGap('not a number'), 4);
+  assert.equal(normalizeGap(0), DEFAULT_NEST_GAP);
+  assert.equal(normalizeGap(-3), DEFAULT_NEST_GAP);
+  assert.equal(normalizeGap(NaN), DEFAULT_NEST_GAP);
+  assert.equal(normalizeGap(Infinity), DEFAULT_NEST_GAP);
+  assert.equal(normalizeGap('not a number'), DEFAULT_NEST_GAP);
   assert.equal(normalizeGap(50000), 256);
   assert.equal(normalizeGap(256), 256);
 });
@@ -263,4 +263,30 @@ test('nestPack throws on a non-positive-dimension item instead of hanging', () =
     () => nestPack([{ name: 'z', w: 0, h: 0, footprint: new Uint8Array(0) }], { gapDistance: 1 }),
     /non-positive dimensions/,
   );
+});
+
+test('nestPack: a large solid item against mesh-like holes finishes quickly', () => {
+  // Repro shape for Add-region + Mesh-Aware + Nest: existing items are
+  // sparse disks (holes in the occupied grid) and the added sprite is a
+  // solid rect that cannot sit in those holes. Without an O(1) bbox
+  // reject, findFirstFit scans every solid pixel at every origin.
+  const hosts = [];
+  for (let i = 0; i < 8; i++) {
+    const w = 64, h = 64;
+    const fp = new Uint8Array(w * h);
+    const cx = w / 2, cy = h / 2, r2 = (w * 0.4) * (w * 0.4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dx = x - cx, dy = y - cy;
+        if (dx * dx + dy * dy < r2) fp[y * w + x] = 1;
+      }
+    }
+    hosts.push({ name: `h${i}`, w, h, footprint: fp });
+  }
+  const added = { name: 'added', w: 96, h: 96, footprint: solid(96, 96) };
+  const t0 = Date.now();
+  const result = nestPack([...hosts, added], { gapDistance: 4 });
+  const ms = Date.now() - t0;
+  assert.equal(result.placements.length, 9);
+  assert.ok(ms < 2000, `nestPack too slow (${ms}ms) for solid-in-holes; bbox reject likely missing`);
 });

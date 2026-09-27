@@ -4,6 +4,7 @@ import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButton
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay, updatePreview } from './preview.js';
 import { showToast, showConfirm, isAddRegionDialogOpen } from './dialogs.js';
+import { isBusy, noteBusyConflict } from './busy-overlay.js';
 import { platform, isPywebviewDesktop, loadFileAsFile, isSkelFilename } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
@@ -20,6 +21,10 @@ function hideDropOverlay() {
 
 async function processDroppedFiles(files) {
   if (!files || files.length === 0) return;
+  if (isBusy()) {
+    noteBusyConflict();
+    return;
+  }
 
   const isPng = (f) => f && (f.type === 'image/png' || /\.png$/i.test(f.name || ''));
   const skelFiles = files.filter((f) => isSkelFilename(f.name));
@@ -106,6 +111,10 @@ export async function applyDroppedSkelFile(file) {
 /** Native OS drop delivers a path, not a browser File — load bytes then reuse
  *  the same apply path as the in-page drop handler. */
 export async function applyNativeSkelDrop(skelPath) {
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
   try {
     const file = await loadFileAsFile(skelPath, 'application/octet-stream');
     return applyDroppedSkelFile(file);
@@ -126,6 +135,7 @@ const isMissingDialogOpen = () => document.body.dataset.missingDialogOpen === 't
 
 window.addEventListener('dragenter', (e) => {
   e.preventDefault();
+  if (isBusy()) return;
   if (isMissingDialogOpen()) return;
   if (isAddRegionDialogOpen()) return;
   if (e.dataTransfer.types.includes('Files')) showDropOverlay();
