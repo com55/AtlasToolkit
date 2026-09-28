@@ -2,9 +2,9 @@
  * LRU cache of preview blob: URLs. JobRunner must not import this module.
  */
 
-export function viewPreviewKey(names, loadEpoch, meshMaskEnabled, skelEpoch) {
+export function viewPreviewKey(names, loadEpoch, meshMaskEnabled, skelEpoch, forceResize = false) {
   const sorted = [...(names || [])].map(String).sort();
-  return `view:${sorted.join('\0')}:${loadEpoch}:${meshMaskEnabled ? 1 : 0}:${skelEpoch}`;
+  return `view:${sorted.join('\0')}:${loadEpoch}:${meshMaskEnabled ? 1 : 0}:${skelEpoch}:${forceResize ? 1 : 0}`;
 }
 
 export function editPreviewKey(pageIndex, modGeneration, loadEpoch, packSig = '') {

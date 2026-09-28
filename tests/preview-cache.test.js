@@ -116,6 +116,17 @@ test('mesh toggle is a different View key; the previous URL remains cached', () 
   cache.invalidateAll();
 });
 
+test('forced resizing is a trailing View key bit and defaults off when omitted', () => {
+  const omitted = viewPreviewKey(['arm'], 1, true, 0);
+  const off = viewPreviewKey(['arm'], 1, true, 0, false);
+  const on = viewPreviewKey(['arm'], 1, true, 0, true);
+  assert.equal(omitted, off);
+  assert.equal(viewPreviewKey(['arm'], 1, true, 0), viewPreviewKey(['arm'], 1, true, 0));
+  assert.notEqual(off, on);
+  assert.equal(on.endsWith(':1'), true);
+  assert.equal(off.endsWith(':0'), true);
+});
+
 test('skelEpoch bump misses the previous View entry', () => {
   const cache = new PreviewCache(24);
   const before = viewPreviewKey(['arm'], 1, true, 0);

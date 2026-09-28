@@ -380,6 +380,29 @@ export function updateNestRegionsUI({ force = false } = {}) {
   }
 }
 
+export function updateForcedResizingUI() {
+  document.getElementById('chk-forced-resizing').checked = AtlasAPI.get_forced_resizing();
+}
+
+document.getElementById('chk-forced-resizing').addEventListener('change', async (e) => {
+  if (isBusy()) {
+    e.target.checked = !e.target.checked;
+    noteBusyConflict();
+    return;
+  }
+  hideHelpPopover();
+  await withLock(async () => {
+    try {
+      await AtlasAPI.set_forced_resizing(e.target.checked);
+      updateForcedResizingUI();
+      updatePreview(getSelectedRegions());
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update Forced Resizing.', 'error');
+    }
+  });
+});
+
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
   if (isBusy()) {
     e.target.checked = !e.target.checked;

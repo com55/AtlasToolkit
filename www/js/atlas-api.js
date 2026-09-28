@@ -60,6 +60,10 @@ let _meshAwareRepackEnabled = true;
 // change until they opt in.
 let _nestRegionsEnabled = false;
 let _nestGapDistance = 4;
+// View Mode only. Stretches the selected-region composite to the largest
+// extracted canvas. Default off: it changes preview geometry, so existing
+// sessions stay unscaled until the user opts in. Persisted as 'forcedResizing'.
+let _forcedResizing = false;
 // null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
 // why the current .skel (if any) can't be used, for the picker button's
 // tooltip. null when there's no .skel captured yet, or when it parsed with
@@ -582,6 +586,20 @@ export const AtlasAPI = {
     _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
   },
 
+  /** Reads the persisted 'forcedResizing' pref. Call once at startup. */
+  async init_forced_resizing_from_pref() {
+    _forcedResizing = !!(await AtlasAPI.get_pref('forcedResizing', false));
+  },
+
+  get_forced_resizing() {
+    return _forcedResizing;
+  },
+
+  async set_forced_resizing(enabled) {
+    _forcedResizing = !!enabled;
+    AtlasAPI.set_pref('forcedResizing', _forcedResizing);
+  },
+
   /** Reads the persisted 'meshAwareRepack' pref into _meshAwareRepackEnabled.
    *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. */
   async init_mesh_aware_repack_from_pref() {
@@ -795,17 +813,23 @@ export const AtlasAPI = {
 
   async get_preview(names) {
     if (!_processor || !names || names.length === 0) return null;
-    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch);
+    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
     const hit = _previewCache.get(key);
     if (hit) return hit;
-    try {
-      const url = await _processor.getPreviewDataURL(names);
-      if (url) _previewCache.set(key, url);
-      return url;
-    } catch (e) {
-      console.error('get_preview error:', e);
-      return null;
-    }
+    const build = async () => {
+      try {
+        const url = await _processor.getPreviewDataURL(names, { forceResize: _forcedResizing });
+        if (url) _previewCache.set(key, url);
+        return url;
+      } catch (e) {
+        console.error('get_preview error:', e);
+        return null;
+      }
+    };
+    // Lanczos on a multi-region selection can take a few seconds. Paint the
+    // busy overlay first; a cache hit above skips this.
+    if (_forcedResizing && names.length > 1) return await withBusy('Resizing...', build);
+    return await build();
   },
 
   /**

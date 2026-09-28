@@ -2,7 +2,7 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, applyNestGapDistance } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, updateForcedResizingUI, applyNestGapDistance } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
@@ -89,8 +89,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   await AtlasAPI.init_mesh_mask_from_pref();
   await AtlasAPI.init_mesh_aware_repack_from_pref();
   await AtlasAPI.init_nest_regions_from_pref();
+  await AtlasAPI.init_forced_resizing_from_pref();
   updateMeshCroppingUI();
   updateNestRegionsUI();
+  updateForcedResizingUI();
 
   initSaveSplitMenu();
 

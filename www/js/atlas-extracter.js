@@ -12,6 +12,7 @@
 
 import { AtlasDocument } from './atlas-document.js';
 import { cropAndRotate as coreCropAndRotate, extractRegionFromPage } from './core-region-ops.js';
+import { resizeCanvasLanczos } from './lanczos-resize.js';
 
 class AtlasPage {
   constructor(filename) {
@@ -217,7 +218,7 @@ export class AtlasProcessor {
    * fix (2026-08-23): a 2k–4k page can take hundreds of ms just to
    * base64-encode, then the <img> has to decode it again.
    */
-  getPreviewDataURL(names) {
+  getPreviewDataURL(names, { forceResize = false } = {}) {
     const images = names
       .filter(n => n in this.regions)
       .map(n => this.extractRegion(n))
@@ -226,17 +227,26 @@ export class AtlasProcessor {
     if (images.length === 0) return Promise.resolve(null);
     if (images.length === 1) return canvasToPreviewUrl(images[0]);
 
-    const maxW = Math.max(...images.map(c => c.width));
-    const maxH = Math.max(...images.map(c => c.height));
+    const frame = previewCompositeFrame(
+      images.map((c) => ({ width: c.width, height: c.height })),
+      forceResize,
+    );
 
     const canvas = document.createElement('canvas');
-    canvas.width = maxW;
-    canvas.height = maxH;
+    canvas.width = frame.width;
+    canvas.height = frame.height;
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
 
-    // Composite in reverse order (last on top matches Python's alpha_composite)
+    // Composite in reverse order (last on top matches Python's alpha_composite).
+    // Forced resizing enlarges each extracted canvas with Lanczos-3. The GPU
+    // path is the same kernel; the CPU path only visits opaque pixels.
     for (const img of [...images].reverse()) {
-      ctx.drawImage(img, 0, 0);
+      if (!frame.scale || (img.width === frame.width && img.height === frame.height)) {
+        ctx.drawImage(img, 0, 0);
+        continue;
+      }
+      ctx.drawImage(resizeCanvasLanczos(img, frame.width, frame.height), 0, 0);
     }
 
     return canvasToPreviewUrl(canvas);
@@ -260,6 +270,34 @@ export class AtlasProcessor {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Greatest extracted-canvas area, in name order. An equal area keeps the
+ *  earlier entry. */
+export function pickForceResizeTarget(sizes) {
+  let best = sizes[0];
+  let bestArea = best.width * best.height;
+  for (let i = 1; i < sizes.length; i++) {
+    const area = sizes[i].width * sizes[i].height;
+    if (area > bestArea) {
+      best = sizes[i];
+      bestArea = area;
+    }
+  }
+  return { width: best.width, height: best.height };
+}
+
+/** Frame for the View Mode multi-image composite. Forced resizing scales
+ *  every canvas to the single largest area; otherwise the frame is
+ *  max(width) × max(height) and images are drawn unscaled. */
+export function previewCompositeFrame(sizes, forceResize) {
+  const width = Math.max(...sizes.map((s) => s.width));
+  const height = Math.max(...sizes.map((s) => s.height));
+  if (!forceResize || sizes.length < 2) {
+    return { width, height, scale: false };
+  }
+  const target = pickForceResizeTarget(sizes);
+  return { width: target.width, height: target.height, scale: true };
+}
 
 /**
  * Encode a canvas as a `blob:` URL via toBlob() — skips the PNG→base64
