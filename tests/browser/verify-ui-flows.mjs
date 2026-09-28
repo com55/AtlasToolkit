@@ -325,7 +325,7 @@ const browser = await chromium.launch({ headless: true });
   const items = page.locator('.region-item');
   await items.nth(0).click();
   await items.nth(2).click({ modifiers: ['Shift'] });
-  await page.waitForTimeout(120); // 50ms preview debounce
+  await page.waitForTimeout(800); // 300ms view-preview debounce + paint
   ui = await readUi(page);
   check('desktop: shift-click range selects 3', ui.selected.length === 3, ui.selected.join(','));
   check('desktop: composite preview rendered', ui.previewSrcLen > 100);
@@ -595,7 +595,7 @@ const browser = await chromium.launch({ headless: true });
 
   // Tap = toggle-select per the touch input model
   await page.locator('.region-item').nth(0).tap();
-  await page.waitForTimeout(350); // tap-vs-longpress settle + preview debounce
+  await page.waitForTimeout(800); // tap release + 300ms view-preview debounce + paint
   let ui = await readUi(page);
   check('touch: tap selects a region', ui.selected.length === 1, ui.selected.join(','));
   const touchGeom = await readPreviewGeom(page);

@@ -7,6 +7,8 @@
  * "high" smoothing (Mitchell) was softer than a manual Lanczos enlarge.
  */
 
+import { createCanvas } from './canvas-surface.js';
+
 const LANCZOS_A = 3;
 
 function lanczos(x) {
@@ -299,8 +301,7 @@ function linkProgram(gl, fsSource) {
 
 function getGpu() {
   if (gpuState || gpuFailed) return gpuState;
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
+  const canvas = createCanvas(1, 1);
   const gl = canvas.getContext('webgl2', {
     alpha: true,
     premultipliedAlpha: false,
@@ -328,7 +329,7 @@ function getGpu() {
     midFb: gl.createFramebuffer(),
     outTex: gl.createTexture(),
     outFb: gl.createFramebuffer(),
-    outCanvas: document.createElement('canvas'),
+    outCanvas: createCanvas(1, 1),
   };
   for (const tex of [gpuState.srcTex, gpuState.midTex, gpuState.outTex]) {
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -412,9 +413,7 @@ export function resizeCanvasLanczos(source, dstW, dstH) {
   const srcCtx = source.getContext('2d', { willReadFrequently: true });
   const data = srcCtx.getImageData(0, 0, source.width, source.height);
   const resized = lanczosResizeRGBA(data.data, source.width, source.height, dstW, dstH);
-  const canvas = document.createElement('canvas');
-  canvas.width = dstW;
-  canvas.height = dstH;
+  const canvas = createCanvas(dstW, dstH);
   const ctx = canvas.getContext('2d');
   const image = ctx.createImageData(dstW, dstH);
   image.data.set(resized);

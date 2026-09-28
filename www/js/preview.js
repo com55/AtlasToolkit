@@ -148,9 +148,70 @@ export function clearOverlay() {
   if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
 }
 
-export async function updatePreview(regions) {
+// View Mode preview only. Both a click and a held mouse/touch wait 100ms
+// from the last selection change. Releasing the pointer restarts that wait.
+const VIEW_PREVIEW_DEBOUNCE_MS = 100;
+const VIEW_PREVIEW_HELD_DEBOUNCE_MS = 100;
+
+let viewPointerHeld = false;
+let previewTimer = null;
+let previewGeneration = 0;
+let pendingRegions = null;
+let settlePreview = null;
+
+export function setViewPreviewPointerHeld(held) {
+  const was = viewPointerHeld;
+  viewPointerHeld = !!held;
+  if (was && !viewPointerHeld && previewTimer) {
+    armViewPreview(pendingRegions, VIEW_PREVIEW_DEBOUNCE_MS);
+  }
+}
+
+function armViewPreview(regions, delay) {
+  pendingRegions = regions;
+  const gen = ++previewGeneration;
+  if (previewTimer) clearTimeout(previewTimer);
+  if (settlePreview) {
+    const finish = settlePreview;
+    settlePreview = null;
+    finish();
+  }
+  return new Promise((resolve) => {
+    settlePreview = resolve;
+    previewTimer = setTimeout(() => {
+      previewTimer = null;
+      const finish = settlePreview;
+      settlePreview = null;
+      void runViewPreview(regions, gen).finally(() => { if (finish) finish(); });
+    }, delay);
+  });
+}
+
+function showPreviewBusy() {
+  document.getElementById('preview-busy')?.classList.remove('hidden');
+}
+
+function hidePreviewBusy() {
+  document.getElementById('preview-busy')?.classList.add('hidden');
+}
+
+/** Two frames so the spinner paints before synchronous resize work. */
+function yieldForPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+/** Let input queued during the preview call bump previewGeneration first. */
+function yieldToInput() {
+  return new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
+async function runViewPreview(regions, gen) {
   const status = document.getElementById('status-text');
   if (!regions || regions.length === 0) {
+    if (gen !== previewGeneration) return;
+    hidePreviewBusy();
     previewImg.style.display = 'none';
     status.innerText = 'No selection';
     updateSaveMergedButton();
@@ -158,12 +219,26 @@ export async function updatePreview(regions) {
   }
   const keys = regions.map(r => r.key);
   const labels = regions.map(r => r.label);
-  const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(keys) : null;
+  const cached = !!(AtlasAPI.preview_is_cached && AtlasAPI.preview_is_cached(keys));
+  if (!cached && gen === previewGeneration) {
+    showPreviewBusy();
+    await yieldForPaint();
+  }
+  let base64Img = null;
+  try {
+    base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(keys) : null;
+  } catch (e) {
+    console.error(e);
+  }
+  await yieldToInput();
+  if (gen !== previewGeneration) return;
+  hidePreviewBusy();
   if (base64Img) {
     setPreviewSrc(base64Img);
     previewImg.style.display = 'block';
     status.innerText = labels.length === 1 ? `Previewing: ${labels[0]}` : `Previewing: ${labels.length} regions`;
     previewImg.onload = function () {
+      if (gen !== previewGeneration) return;
       applyAutoFit();
       const imgW = previewImg.naturalWidth, imgH = previewImg.naturalHeight;
       status.innerText = labels.length === 1
@@ -177,6 +252,13 @@ export async function updatePreview(regions) {
     status.innerText = 'Preview failed';
     updateSaveMergedButton();
   }
+}
+
+export function updatePreview(regions) {
+  return armViewPreview(
+    regions,
+    viewPointerHeld ? VIEW_PREVIEW_HELD_DEBOUNCE_MS : VIEW_PREVIEW_DEBOUNCE_MS,
+  );
 }
 
 export function updateModifyPreview(names) {

@@ -13,6 +13,7 @@
 import { AtlasDocument } from './atlas-document.js';
 import { cropAndRotate as coreCropAndRotate, extractRegionFromPage } from './core-region-ops.js';
 import { resizeCanvasLanczos } from './lanczos-resize.js';
+import { canvasToPngBlob, createCanvas } from './canvas-surface.js';
 
 class AtlasPage {
   constructor(filename) {
@@ -223,33 +224,33 @@ export class AtlasProcessor {
       .filter(n => n in this.regions)
       .map(n => this.extractRegion(n))
       .filter(Boolean);
-
-    if (images.length === 0) return Promise.resolve(null);
-    if (images.length === 1) return canvasToPreviewUrl(images[0]);
-
-    const frame = previewCompositeFrame(
-      images.map((c) => ({ width: c.width, height: c.height })),
-      forceResize,
-    );
-
-    const canvas = document.createElement('canvas');
-    canvas.width = frame.width;
-    canvas.height = frame.height;
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
-
-    // Composite in reverse order (last on top matches Python's alpha_composite).
-    // Forced resizing enlarges each extracted canvas with Lanczos-3. The GPU
-    // path is the same kernel; the CPU path only visits opaque pixels.
-    for (const img of [...images].reverse()) {
-      if (!frame.scale || (img.width === frame.width && img.height === frame.height)) {
-        ctx.drawImage(img, 0, 0);
-        continue;
-      }
-      ctx.drawImage(resizeCanvasLanczos(img, frame.width, frame.height), 0, 0);
-    }
-
+    const canvas = renderPreviewCanvases(images, forceResize);
     return canvasToPreviewUrl(canvas);
+  }
+
+  /** Plain data for a preview Worker. Page pixels stay on the caller. */
+  previewJobSpec(names, forceResize) {
+    const regions = [];
+    const pageIds = [];
+    for (const name of names) {
+      const region = this.regions[name];
+      if (!region) continue;
+      if (!pageIds.includes(region.pageFilename)) pageIds.push(region.pageFilename);
+      const page = this._pageMap[region.pageFilename];
+      const mesh = this.getMeshGeometry(name);
+      regions.push({
+        pageId: region.pageFilename,
+        x: region.x,
+        y: region.y,
+        w: region.w,
+        h: region.h,
+        rotate: region.rotate,
+        offsets: region.offsets ? [...region.offsets] : null,
+        page: page ? { scaleX: page.scaleX, scaleY: page.scaleY } : null,
+        mesh: mesh ? { uvs: [...mesh.uvs], triangles: [...mesh.triangles] } : null,
+      });
+    }
+    return { forceResize: !!forceResize, regions, pageIds };
   }
 
   /**
@@ -286,6 +287,29 @@ export function pickForceResizeTarget(sizes) {
   return { width: best.width, height: best.height };
 }
 
+/** Stack extracted canvases. One image is returned as-is. */
+export function renderPreviewCanvases(images, forceResize) {
+  if (!images || images.length === 0) return null;
+  if (images.length === 1) return images[0];
+  const frame = previewCompositeFrame(
+    images.map((c) => ({ width: c.width, height: c.height })),
+    forceResize,
+  );
+  const canvas = createCanvas(frame.width, frame.height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  // Reverse order: the earlier list entry is painted last (on top).
+  // Forced resizing enlarges each extracted canvas with Lanczos-3.
+  for (const img of [...images].reverse()) {
+    if (!frame.scale || (img.width === frame.width && img.height === frame.height)) {
+      ctx.drawImage(img, 0, 0);
+      continue;
+    }
+    ctx.drawImage(resizeCanvasLanczos(img, frame.width, frame.height), 0, 0);
+  }
+  return canvas;
+}
+
 /** Frame for the View Mode multi-image composite. Forced resizing scales
  *  every canvas to the single largest area; otherwise the frame is
  *  max(width) × max(height) and images are drawn unscaled. */
@@ -304,17 +328,11 @@ export function previewCompositeFrame(sizes, forceResize) {
  * step that `toDataURL('image/png')` does on the main thread. The preview
  * <img> and getPreviewPngBlob()'s fetch(img.src) both accept blob: URLs.
  */
-export function canvasToPreviewUrl(canvas) {
-  if (!canvas) return Promise.resolve(null);
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('canvas.toBlob failed'));
-        return;
-      }
-      resolve(URL.createObjectURL(blob));
-    }, 'image/png');
-  });
+export async function canvasToPreviewUrl(canvas) {
+  if (!canvas) return null;
+  const blob = await canvasToPngBlob(canvas);
+  if (!blob) return null;
+  return URL.createObjectURL(blob);
 }
 
 /** Load an image from a File object or a URL/data-URL string. */

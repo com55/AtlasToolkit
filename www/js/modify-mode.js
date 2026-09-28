@@ -391,16 +391,14 @@ document.getElementById('chk-forced-resizing').addEventListener('change', async 
     return;
   }
   hideHelpPopover();
-  await withLock(async () => {
-    try {
-      await AtlasAPI.set_forced_resizing(e.target.checked);
-      updateForcedResizingUI();
-      updatePreview(getSelectedRegions());
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to update Forced Resizing.', 'error');
-    }
-  });
+  try {
+    await AtlasAPI.set_forced_resizing(e.target.checked);
+    updateForcedResizingUI();
+    updatePreview(getSelectedRegions());
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Forced Resizing.', 'error');
+  }
 });
 
 document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
@@ -410,17 +408,15 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
     return;
   }
   hideHelpPopover();
-  await withLock(async () => {
-    try {
-      const result = await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
-      updateMeshCroppingUI();
-      updatePreview(getSelectedRegions()); // unrelated to repack -- always refresh, as today
-      if (result) await onModPreviewReceived(result);
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to update Mesh Cropping.', 'error');
-    }
-  });
+  try {
+    const result = await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
+    updateMeshCroppingUI();
+    updatePreview(getSelectedRegions()); // unrelated to repack -- always refresh, as today
+    if (result) await onModPreviewReceived(result);
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Mesh Cropping.', 'error');
+  }
 });
 
 document.getElementById('chk-mesh-aware-repack').addEventListener('change', async (e) => {

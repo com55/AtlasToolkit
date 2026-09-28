@@ -182,6 +182,10 @@
         <div id="preview-container">
           <img id="preview-img" src="" alt="Preview" />
           <canvas id="region-overlay"></canvas>
+          <div id="preview-busy" class="hidden" aria-live="polite" aria-busy="true">
+            <div id="preview-busy-spinner" aria-hidden="true"></div>
+            <p id="preview-busy-label">Processing...</p>
+          </div>
         </div>
         <div id="toast-container"></div>
       </div>
