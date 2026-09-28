@@ -17,6 +17,7 @@ import { buildMeshLookup } from './region-mesh-lookup.js';
 import { normalizeGap } from './repack-nest.js';
 import { withBusy, BUSY_LABEL, BUSY_LOADING_LABEL, isOverlayPainted } from './busy-overlay.js';
 import { PreviewCache, PackResultCache, viewPreviewKey, editPreviewKey, packSignature } from './preview-cache.js';
+import { runPreviewJob } from './preview-jobs.js';
 
 /** Returned by load helpers when the user cancels a missing-images dialog. */
 export const LOAD_CANCELLED = 'cancelled';
@@ -559,6 +560,25 @@ async function _skelForSave() {
   return null;
 }
 
+async function buildPreviewWorkerMessage(names, forceResize) {
+  const spec = _processor.previewJobSpec(names, forceResize);
+  const pages = [];
+  const transfer = [];
+  for (const pageId of spec.pageIds) {
+    const img = _processor.getPageImage(pageId);
+    if (!img) continue;
+    const bitmap = await createImageBitmap(img);
+    pages.push({ id: pageId, bitmap });
+    transfer.push(bitmap);
+  }
+  return {
+    forceResize: spec.forceResize,
+    regions: spec.regions,
+    pages,
+    transfer,
+  };
+}
+
 // ─── Public API (mirrors pywebview.api) ───────────────────────────────────────
 
 export const AtlasAPI = {
@@ -811,25 +831,24 @@ export const AtlasAPI = {
     return region ? region.pageFilename : '';
   },
 
+  preview_is_cached(names) {
+    if (!_processor || !names || names.length === 0) return false;
+    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
+    return _previewCache.has(key);
+  },
+
   async get_preview(names) {
     if (!_processor || !names || names.length === 0) return null;
     const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
     const hit = _previewCache.get(key);
     if (hit) return hit;
-    const build = async () => {
-      try {
-        const url = await _processor.getPreviewDataURL(names, { forceResize: _forcedResizing });
-        if (url) _previewCache.set(key, url);
-        return url;
-      } catch (e) {
-        console.error('get_preview error:', e);
-        return null;
-      }
-    };
-    // Lanczos on a multi-region selection can take a few seconds. Paint the
-    // busy overlay first; a cache hit above skips this.
-    if (_forcedResizing && names.length > 1) return await withBusy('Resizing...', build);
-    return await build();
+    // A new selection joins this promise when the key matches, or starts
+    // another Worker when it does not. The result is cached either way.
+    return runPreviewJob(key, {
+      build: () => buildPreviewWorkerMessage(names, _forcedResizing),
+      fallback: () => _processor.getPreviewDataURL(names, { forceResize: _forcedResizing }),
+      store: (url) => { if (url) _previewCache.set(key, url); },
+    });
   },
 
   /**

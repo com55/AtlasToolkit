@@ -22,6 +22,7 @@
  * are exercised via a headless-browser pixel test.
  */
 import { rasterizeMeshMask } from './region-mesh-mask.js';
+import { createCanvas } from './canvas-surface.js';
 
 /**
  * Python `round()` parity (banker's rounding): on an exact .5 tie, round to
@@ -88,9 +89,7 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   const cropW = isSwapped ? h : w;
   const cropH = isSwapped ? w : h;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  const canvas = createCanvas(w, h);
   // willReadFrequently: every sprite this produces gets getImageData'd at
   // least once downstream (repack dedup hashing -- atlas-modifier.js's
   // _canvasHash), often twice (its documented priming-read workaround).
@@ -188,9 +187,7 @@ export function extractRegionFromPage(pageImage, region, page = null, meshGeomet
     origH = roundHalfEven(origH * sy);
   }
 
-  const canvas = document.createElement('canvas');
-  canvas.width = origW;
-  canvas.height = origH;
+  const canvas = createCanvas(origW, origH);
   const ctx = canvas.getContext('2d', { willReadFrequently: true }); // see cropAndRotate's comment
   ctx.imageSmoothingEnabled = false;
   const pasteX = offX;

@@ -1,6 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
-import { updatePreview, updateModifyPreview } from './preview.js';
+import { updatePreview, updateModifyPreview, setViewPreviewPointerHeld } from './preview.js';
 import { updateModeToggleUI, setAdvanceMode } from './app-bar.js';
 
 // ─── Auto-Scroll State ────────────────────────────────────────────────────────
@@ -136,12 +136,21 @@ export function triggerPreviewUpdate() {
   const currentJSON = JSON.stringify(getSelectedRegions());
   if (currentJSON !== lastSelectedJSON) {
     lastSelectedJSON = currentJSON;
-    if (previewTimeout) clearTimeout(previewTimeout);
-    previewTimeout = setTimeout(() => {
-      const regions = getSelectedRegions();
-      if (state.currentMode === 'modify') updateModifyPreview(regions);
-      else updatePreview(regions);
-    }, 50);
+    if (previewTimeout) {
+      clearTimeout(previewTimeout);
+      previewTimeout = null;
+    }
+    if (state.currentMode === 'modify') {
+      previewTimeout = setTimeout(() => {
+        previewTimeout = null;
+        updateModifyPreview(getSelectedRegions());
+      }, 50);
+    } else {
+      // View Mode debounce (100ms, including while the pointer is held)
+      // lives in updatePreview. A newer selection starts its own job;
+      // the previous one still finishes and is cached.
+      updatePreview(getSelectedRegions());
+    }
     updateButtons();
     updateRemoveButtonState();
     updateRenameButtonState();
@@ -165,6 +174,7 @@ function onRegionMouseDown(e, index) {
   if (e.button !== 0) return;
   if (e.shiftKey) e.preventDefault();
   state.isDragSelecting = true;
+  if (state.currentMode === 'extract') setViewPreviewPointerHeld(true);
   state.dragStartIndex  = index;
   if (e.ctrlKey || e.metaKey) {
     toggleIndex(index);
@@ -242,7 +252,7 @@ window.addEventListener('mouseup', () => {
     state.isDragSelecting = false;
     stopAutoScroll();
     window.removeEventListener('mousemove', onWindowMouseMove);
-    if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
+    if (state.currentMode === 'extract') setViewPreviewPointerHeld(false);
     else updateModifyPreview(getSelectedRegions());
     updateButtons();
     updateRemoveButtonState();
@@ -269,6 +279,7 @@ function onRegionTouchStart(e, index) {
   suppressMouseDownUntil = Date.now() + 700;
   const t = e.touches[0];
   touchSelectActive   = true;
+  if (state.currentMode === 'extract') setViewPreviewPointerHeld(true);
   touchRangeMode      = false;
   touchStartIndex     = index;
   touchStartX         = t.clientX;
@@ -322,6 +333,7 @@ function onWindowTouchMove(e) {
 
 function endTouchSelection() {
   clearTouchLongPressTimer();
+  if (state.currentMode === 'extract') setViewPreviewPointerHeld(false);
   touchSelectActive   = false;
   touchRangeMode      = false;
   touchStartIndex     = -1;
@@ -367,8 +379,10 @@ window.addEventListener('keydown', (e) => {
   }
   state.lastClickIndex = newIndex;
   renderSelection();
-  if (state.currentMode === 'extract') updatePreview(getSelectedRegions());
-  else updateModifyPreview(getSelectedRegions());
+  if (state.currentMode === 'extract') {
+    lastSelectedJSON = JSON.stringify(getSelectedRegions());
+    updatePreview(getSelectedRegions());
+  } else updateModifyPreview(getSelectedRegions());
   updateButtons();
   updateRemoveButtonState();
   updateRenameButtonState();

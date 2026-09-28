@@ -18,6 +18,16 @@ test.afterEach(() => {
   resetBusyForTests();
 });
 
+test('PreviewCache.has reports a stored key without dropping it', () => {
+  const cache = new PreviewCache();
+  const url = blobUrl();
+  cache.set('a', url);
+  assert.equal(cache.has('a'), true);
+  assert.equal(cache.has('missing'), false);
+  assert.equal(cache.get('a'), url);
+  cache.invalidateAll();
+});
+
 test('viewPreviewKey omits modGeneration so A→B→A across Edit still hits', () => {
   const a = viewPreviewKey(['b', 'a'], 1, true, 0);
   const b = viewPreviewKey(['c'], 1, true, 0);

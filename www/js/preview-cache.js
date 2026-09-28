@@ -23,6 +23,10 @@ export class PreviewCache {
     this._map = new Map(); // key -> blob: URL, insertion order = LRU
   }
 
+  has(key) {
+    return this._map.has(key);
+  }
+
   get(key) {
     if (!this._map.has(key)) return null;
     const url = this._map.get(key);
