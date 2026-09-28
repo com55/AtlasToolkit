@@ -45,5 +45,35 @@ class PickSkelFileTests(unittest.TestCase):
         self.assertIsNone(api.pick_skel_file(r"C:\atlas"))
 
 
+class PickSaveFileTests(unittest.TestCase):
+    def test_png_save_offers_png_filter(self):
+        api = Api()
+        window = _FakeWindow((r"C:\out\hero.png",))
+        api.set_window(window)
+
+        path = api.pick_save_file("hero.png", r"C:\out")
+
+        self.assertEqual(path, r"C:\out\hero.png")
+        self.assertEqual(window.dialog_type, webview.FileDialog.SAVE)
+        self.assertEqual(window.kwargs["directory"], r"C:\out")
+        self.assertEqual(window.kwargs["save_filename"], "hero.png")
+        self.assertIn("*.png", window.kwargs["file_types"][0])
+        self.assertIn("All files", window.kwargs["file_types"][1])
+
+    def test_non_png_save_does_not_force_a_png_filter(self):
+        api = Api()
+        window = _FakeWindow((r"C:\out\pack.zip",))
+        api.set_window(window)
+
+        api.pick_save_file("pack.zip", r"C:\out")
+
+        self.assertNotIn("file_types", window.kwargs)
+
+    def test_cancel_returns_none(self):
+        api = Api()
+        api.set_window(_FakeWindow(None))
+        self.assertIsNone(api.pick_save_file("hero.png", r"C:\out"))
+
+
 if __name__ == "__main__":
     unittest.main()
