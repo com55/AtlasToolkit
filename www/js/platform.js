@@ -121,6 +121,49 @@ export function nativePathBasename(path) {
   return parts.length > 0 ? parts[parts.length - 1] : '';
 }
 
+/** Parent directory of a native OS path, or '' when there is none. */
+function nativePathDirname(path) {
+  const raw = String(path || '');
+  const idx = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'));
+  if (idx <= 0) return '';
+  return raw.slice(0, idx);
+}
+
+/**
+ * A filename has an extension when a dot sits strictly inside the name
+ * (`hero.png`, `shot.tar.gz`). A trailing dot (`hero.`) does not count.
+ * The bare name `.png` already is the png extension.
+ */
+function _basenameHasExtension(basename) {
+  const name = String(basename || '');
+  if (!name || name === '.' || name === '..') return false;
+  if (name.toLowerCase() === '.png') return true;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1;
+}
+
+/**
+ * Append `.png` when the last path segment has no extension.
+ * An existing extension of any kind is left as the user typed it.
+ */
+export function ensurePngExtension(pathOrName) {
+  const path = String(pathOrName ?? '');
+  if (!path) return path;
+  const base = nativePathBasename(path);
+  if (!base || _basenameHasExtension(base)) return path;
+  const stem = path.endsWith('.') ? path.slice(0, -1) : path;
+  return `${stem}.png`;
+}
+
+/**
+ * Save-as names: only PNG exports gain a missing extension.
+ * Zip and atlas saves keep whatever the user typed.
+ */
+export function finalizeSaveFilename(suggestedName, chosenPath) {
+  if (!/\.png$/i.test(String(suggestedName || ''))) return chosenPath;
+  return ensurePngExtension(chosenPath);
+}
+
 /**
  * Map a dropped PNG path onto a missing-page row by filename. Used when
  * pywebview's native drop event has no usable clientX/clientY.
@@ -371,12 +414,52 @@ export async function writeFilesToFolder(target, files, confirm) {
   throw new Error('writeFilesToFolder: invalid target');
 }
 
+async function _confirmReplace(names) {
+  const { title, message } = overwriteConfirmCopy(names);
+  if (typeof window.showConfirm === 'function') return !!(await window.showConfirm(message, title));
+  if (typeof window.confirm === 'function') return !!window.confirm(`${title}\n\n${message}`);
+  return false;
+}
+
+/**
+ * If this PNG save came back without an extension, append `.png`.
+ * When that changes the path onto a file that already exists, confirm
+ * before replacing it — the save dialog's own overwrite prompt covered
+ * the name the user typed, not the name we just adjusted.
+ * Returns null when the user declines.
+ */
+async function _pathAfterPngExtension(chosenPath, suggestedName) {
+  const finalPath = finalizeSaveFilename(suggestedName, chosenPath);
+  if (finalPath === chosenPath) return finalPath;
+  const dir = nativePathDirname(finalPath);
+  const base = nativePathBasename(finalPath);
+  if (dir && base) {
+    const existing = await existingOutputNames(dir, [base]);
+    if (existing.length > 0 && !(await _confirmReplace(existing))) return null;
+  }
+  return finalPath;
+}
+
+async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
+  const finalName = finalizeSaveFilename(suggestedName, fileHandle.name);
+  if (finalName === fileHandle.name || typeof fileHandle.move !== 'function') return fileHandle;
+  try {
+    await fileHandle.move(finalName);
+  } catch (e) {
+    if (e?.name !== 'InvalidModificationError') throw e;
+    if (!(await _confirmReplace([finalName]))) return null;
+    await fileHandle.move(finalName, { overwrite: true });
+  }
+  return fileHandle;
+}
+
 /**
  * Save a single Blob via a Save As dialog (D1 — output pickers route
  * through the native bridge on pywebview, unlike input pickers).
  * Returns a FileSystemFileHandle (browser, truthy — pass back in as
  * `startIn` for the next save), `true` (pywebview — no handle concept), or
  * `null`/`false` if the user cancelled. Never throws on cancel.
+ * PNG saves whose typed name has no extension are stored as `.png`.
  * @param {object} [opts]
  * @param {*} [opts.startIn] Browser File System Access API resume point.
  * @param {string} [opts.defaultDir] pywebview native dialog starting directory
@@ -386,7 +469,9 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
   if (_isPywebview() && window.pywebview.api.pick_save_file) {
     const path = await window.pywebview.api.pick_save_file(filename, defaultDir);
     if (!path) return null;
-    await window.pywebview.api.write_file_bytes(path, await blobToBase64(blob));
+    const finalPath = await _pathAfterPngExtension(path, filename);
+    if (!finalPath) return null;
+    await window.pywebview.api.write_file_bytes(finalPath, await blobToBase64(blob));
     return true;
   }
 
@@ -406,7 +491,11 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
   if (startIn) pickerOptions.startIn = startIn;
 
   try {
-    const fileHandle = await window.showSaveFilePicker(pickerOptions);
+    const fileHandle = await _applyPngExtensionToHandle(
+      await window.showSaveFilePicker(pickerOptions),
+      filename,
+    );
+    if (!fileHandle) return null;
     const writable = await fileHandle.createWritable();
     await writable.write(blob);
     await writable.close();

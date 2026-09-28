@@ -347,10 +347,19 @@ class Api:
         "Save Preview As") — see platform.js's saveFileWithDialog(), Phase 3."""
         if not self._window:
             return None
+        dialog_kwargs = {
+            "directory": default_dir or "",
+            "save_filename": default_filename,
+        }
+        # WinForms SaveFileDialog appends the selected filter's extension
+        # when the typed name has none (AddExtension defaults to true) and
+        # its overwrite prompt then applies to that final name. JS still
+        # checks the returned path, for the All-files filter and for browsers.
+        if str(default_filename or "").lower().endswith(".png"):
+            dialog_kwargs["file_types"] = ("PNG image (*.png)", "All files (*.*)")
         result = self._window.create_file_dialog(
             webview.FileDialog.SAVE,
-            directory=default_dir or "",
-            save_filename=default_filename,
+            **dialog_kwargs,
         )
         return result[0] if result else None
 
