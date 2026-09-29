@@ -6,7 +6,7 @@ import {
   resetPreview,
   drawRegionOverlay, clearOverlay,
   updatePreview, updateModifyPreview, updateSaveMergedButton, setPreviewSrc,
-  applyAutoFit,
+  applyAutoFit, refreshMeshHullOverlay,
 } from './preview.js';
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { withLock, withBusy, isBusy, noteBusyConflict } from './busy-overlay.js';
@@ -319,6 +319,7 @@ export function updateMeshCroppingUI() {
     : "Mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
   meshAwareRow.removeAttribute('title');
   syncHelpPopover();
+  updateMeshHullUI();
 
   // Shared .skel picker button -- relevant toggle depends on which mode is
   // currently active: View mode shows Mesh Cropping row, Edit mode shows
@@ -352,6 +353,22 @@ export function updateMeshCroppingUI() {
   }
 }
 
+const MESH_HULL_HELP = "Draw each selected region's mesh silhouette in blue over the preview. The saved image stays unchanged.";
+
+export function updateMeshHullUI() {
+  const chk = document.getElementById('chk-mesh-hull');
+  const row = document.getElementById('mesh-hull-toggle-row');
+  if (!chk || !row) return;
+  const { available } = AtlasAPI.get_mesh_mask_state();
+  chk.checked = AtlasAPI.get_mesh_hull_enabled();
+  chk.disabled = !available;
+  row.dataset.help = available
+    ? MESH_HULL_HELP
+    : 'Requires a usable .skel file with mesh attachments.';
+  row.removeAttribute('title');
+  syncHelpPopover();
+}
+
 /** Syncs the Nest Regions checkbox + gap-distance input from
  *  AtlasAPI.get_nest_options(). Call after anything that can change that
  *  state: the toggle itself, the gap-distance input, or app startup.
@@ -383,6 +400,23 @@ export function updateNestRegionsUI({ force = false } = {}) {
 export function updateForcedResizingUI() {
   document.getElementById('chk-forced-resizing').checked = AtlasAPI.get_forced_resizing();
 }
+
+document.getElementById('chk-mesh-hull').addEventListener('change', async (e) => {
+  if (isBusy()) {
+    e.target.checked = !e.target.checked;
+    noteBusyConflict();
+    return;
+  }
+  hideHelpPopover();
+  try {
+    await AtlasAPI.set_mesh_hull_enabled(e.target.checked);
+    updateMeshHullUI();
+    refreshMeshHullOverlay();
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Show Mesh Silhouettes.', 'error');
+  }
+});
 
 document.getElementById('chk-forced-resizing').addEventListener('change', async (e) => {
   if (isBusy()) {

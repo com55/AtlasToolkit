@@ -41,7 +41,11 @@ test(
     const bytes = new Uint8Array(readFileSync(SAMPLE_SKEL_PATH));
     const { attachments } = parseSkeleton(bytes);
     for (const name of ['SAMPLE_1', 'SAMPLE_2', 'SAMPLE_3']) {
-      assert.equal(attachments.get(name)?.type, 'Mesh');
+      const mesh = attachments.get(name);
+      assert.equal(mesh?.type, 'Mesh');
+      assert.equal(typeof mesh.hullLength, 'number');
+      assert.ok(mesh.hullLength >= 3);
+      assert.ok(mesh.hullLength * 2 <= mesh.uvs.length);
     }
   },
 );
