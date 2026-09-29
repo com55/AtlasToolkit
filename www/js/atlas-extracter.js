@@ -11,7 +11,7 @@
  */
 
 import { AtlasDocument } from './atlas-document.js';
-import { cropAndRotate as coreCropAndRotate, extractRegionFromPage } from './core-region-ops.js';
+import { cropAndRotate as coreCropAndRotate, extractRegionFromPage, extractedCanvasSize } from './core-region-ops.js';
 import { resizeCanvasLanczos } from './lanczos-resize.js';
 import { canvasToPngBlob, createCanvas } from './canvas-surface.js';
 
@@ -54,7 +54,7 @@ export class AtlasProcessor {
     this.regions = {};       // name → AtlasRegion (ordered by insertion)
     this._loadedImages = {}; // pageName → HTMLImageElement
     this._pageMap = {};      // pageName → AtlasPage
-    this._meshLookup = null;   // Map<regionName, {uvs, triangles}> | null
+    this._meshLookup = null;   // Map<regionName, {uvs, triangles, hullLength}> | null
     this._maskEnabled = false;
     this._nestEnabled = false;
     this._nestGapDistance = 4;
@@ -228,6 +228,28 @@ export class AtlasProcessor {
     return canvasToPreviewUrl(canvas);
   }
 
+  /** Hull polylines for the View Mode overlay. Ignores the Mesh Cropping
+   *  toggle. Skips a region whose page image is not loaded, matching
+   *  getPreviewDataURL, which also drops that region from the composite. */
+  previewHullLayout(names, forceResize) {
+    const entries = [];
+    for (const name of names) {
+      const region = this.regions[name];
+      if (!region) continue;
+      if (!this._loadedImages[region.pageFilename]) continue;
+      const page = this._pageMap[region.pageFilename];
+      const size = extractedCanvasSize(region, page);
+      const mesh = this._meshAvailableFor(name);
+      entries.push({
+        width: size.width,
+        height: size.height,
+        uvs: mesh ? mesh.uvs : null,
+        hullLength: mesh ? mesh.hullLength : 0,
+      });
+    }
+    return layoutPreviewHulls(entries, !!forceResize);
+  }
+
   /** Plain data for a preview Worker. Page pixels stay on the caller. */
   previewJobSpec(names, forceResize) {
     const regions = [];
@@ -308,6 +330,46 @@ export function renderPreviewCanvases(images, forceResize) {
     ctx.drawImage(resizeCanvasLanczos(img, frame.width, frame.height), 0, 0);
   }
   return canvas;
+}
+
+/** Place each region's hull in the same composite space as renderPreviewCanvases.
+ *  Forced resizing scales a smaller canvas on both axes to the target frame.
+ *  A canvas already at that size stays 1:1. */
+export function layoutPreviewHulls(entries, forceResize) {
+  if (!entries || entries.length === 0) {
+    return { frame: { width: 0, height: 0, scale: false }, items: [] };
+  }
+  const frame = previewCompositeFrame(
+    entries.map((e) => ({ width: e.width, height: e.height })),
+    forceResize,
+  );
+  const items = entries.map((e) => {
+    const stretch = !!(frame.scale && (e.width !== frame.width || e.height !== frame.height));
+    return {
+      width: e.width,
+      height: e.height,
+      scaleX: stretch ? frame.width / e.width : 1,
+      scaleY: stretch ? frame.height / e.height : 1,
+      uvs: e.uvs || null,
+      hullLength: e.hullLength || 0,
+    };
+  });
+  return { frame, items };
+}
+
+/** Closed hull in composite pixels. The first hullLength UV pairs are Spine's
+ *  outline; later pairs are interior vertices and are not stroked. */
+export function hullPolyline(item) {
+  const n = item.hullLength | 0;
+  if (!item.uvs || n < 3 || item.uvs.length < n * 2) return null;
+  const pts = new Array(n);
+  for (let i = 0; i < n; i++) {
+    pts[i] = {
+      x: item.uvs[i * 2] * item.width * item.scaleX,
+      y: item.uvs[i * 2 + 1] * item.height * item.scaleY,
+    };
+  }
+  return pts;
 }
 
 /** Frame for the View Mode multi-image composite. Forced resizing scales

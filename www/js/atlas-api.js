@@ -40,7 +40,7 @@ let _session = null;               // AtlasSession — owns modify-mode state / 
 let _lastSaveHandle = null;
 let _currentSkel = null; // { name, blob } | null
 let _parsedSkeleton = null;   // {version, attachments} | null
-let _meshLookup = null;       // Map<name, {uvs,triangles}> | null
+let _meshLookup = null;       // Map<name, {uvs,triangles,hullLength}> | null
 // User preference, persisted across sessions the same way other startup-restored prefs are -- does NOT reset per
 // atlas load. Initialized once from the 'meshCropping' pref at startup via
 // init_mesh_mask_from_pref(); changed only by an explicit user toggle
@@ -65,6 +65,9 @@ let _nestGapDistance = 4;
 // extracted canvas. Default off: it changes preview geometry, so existing
 // sessions stay unscaled until the user opts in. Persisted as 'forcedResizing'.
 let _forcedResizing = false;
+// View Mode only. Draws Spine hull outlines on the preview overlay.
+// Default off. Persisted as 'meshHullView'. Does not change the preview bitmap.
+let _meshHullEnabled = false;
 // null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
 // why the current .skel (if any) can't be used, for the picker button's
 // tooltip. null when there's no .skel captured yet, or when it parsed with
@@ -618,6 +621,27 @@ export const AtlasAPI = {
   async set_forced_resizing(enabled) {
     _forcedResizing = !!enabled;
     AtlasAPI.set_pref('forcedResizing', _forcedResizing);
+  },
+
+  /** Reads the persisted 'meshHullView' pref. Call once at startup. */
+  async init_mesh_hull_from_pref() {
+    _meshHullEnabled = !!(await AtlasAPI.get_pref('meshHullView', false));
+  },
+
+  get_mesh_hull_enabled() {
+    return _meshHullEnabled;
+  },
+
+  async set_mesh_hull_enabled(enabled) {
+    _meshHullEnabled = !!enabled;
+    AtlasAPI.set_pref('meshHullView', _meshHullEnabled);
+  },
+
+  /** Composite-space hulls for the current View selection. Null when the
+   *  overlay is off. Independent of Mesh Cropping. */
+  get_mesh_hull_layout(names) {
+    if (!_meshHullEnabled || !_processor) return null;
+    return _processor.previewHullLayout(names || [], _forcedResizing);
   },
 
   /** Reads the persisted 'meshAwareRepack' pref into _meshAwareRepackEnabled.

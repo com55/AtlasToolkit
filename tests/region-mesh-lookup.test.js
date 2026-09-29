@@ -4,13 +4,13 @@ import { buildMeshLookup } from '../www/js/region-mesh-lookup.js';
 
 test('keeps only Mesh-type attachments, drops others', () => {
   const attachments = new Map([
-    ['SAMPLE_1', { type: 'Mesh', path: 'SAMPLE_1', uvs: [0,0,1,0,0,1], triangles: [0,1,2] }],
+    ['SAMPLE_1', { type: 'Mesh', path: 'SAMPLE_1', uvs: [0,0,1,0,0,1], triangles: [0,1,2], hullLength: 3 }],
     ['Halo', { type: 'Region', path: 'Halo' }],
     ['fronthair', { type: 'LinkedMesh', path: 'fronthair' }],
   ]);
   const lookup = buildMeshLookup({ attachments });
   assert.deepEqual([...lookup.keys()], ['SAMPLE_1']);
-  assert.deepEqual(lookup.get('SAMPLE_1'), { uvs: [0,0,1,0,0,1], triangles: [0,1,2] });
+  assert.deepEqual(lookup.get('SAMPLE_1'), { uvs: [0,0,1,0,0,1], triangles: [0,1,2], hullLength: 3 });
 });
 
 test('returns an empty Map when no attachments are Mesh-type', () => {

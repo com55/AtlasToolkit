@@ -2,12 +2,12 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, updateForcedResizingUI, applyNestGapDistance } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, updateForcedResizingUI, updateMeshHullUI, applyNestGapDistance } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
-import { previewImg, resetPreview } from './js/preview.js';
+import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
 import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
@@ -90,9 +90,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   await AtlasAPI.init_mesh_aware_repack_from_pref();
   await AtlasAPI.init_nest_regions_from_pref();
   await AtlasAPI.init_forced_resizing_from_pref();
+  await AtlasAPI.init_mesh_hull_from_pref();
   updateMeshCroppingUI();
   updateNestRegionsUI();
   updateForcedResizingUI();
+  updateMeshHullUI();
 
   initSaveSplitMenu();
 
@@ -225,6 +227,7 @@ async function _resetUiAfterFreshLoad() {
   state.lastClickIndex = -1;
   previewImg.style.display = 'none';
   resetPreview();
+  clearOverlay();
   updateButtons();
   updateRemoveButtonState();
   updateRenameButtonState();
