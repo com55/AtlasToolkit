@@ -400,12 +400,11 @@ def js_object_key_order(names: list[str]) -> list[str]:
     text order, so without this the packer diverges in both placement and
     emitted region order.
 
-    CARRY-FORWARD to the session stage: domain/effective_model.py's
-    derive_effective_model reads its region order straight off its
-    argument's dict keys. That is free in JS (an object's keys are always
-    canonically ordered) but not in Python, so the session stage must pass
-    it a mapping already ordered by this function, or the structural
-    (Add/Remove/Rename) repack path diverges the same way."""
+    For a structural session rebuild, apply this ordering to the INITIAL
+    pristine region map before calling derive_effective_model. The fold
+    appends Add keys to its effective region_names array; pass that resulting
+    array to the packer unchanged. Re-sorting the folded array would move a
+    numeric Add key ahead of pristine names, unlike the JavaScript batch fold."""
     indices = sorted((name for name in names if _is_array_index(name)), key=int)
     rest = [name for name in names if not _is_array_index(name)]
     return [*indices, *rest]
@@ -432,8 +431,10 @@ def region_meta(region: Region) -> dict:
 
 
 def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
-    """SHA-256 of a sprite's raw RGBA bytes -- the dedup identity
-    _packAndEmit groups by. Port of _canvasHash.
+    """SHA-256 of hash-normalized RGBA bytes -- the dedup identity
+    _packAndEmit groups by. Port of _canvasHash. Source raw bytes remain
+    untouched: only the temporary hash buffer zeros RGB at alpha zero,
+    matching Canvas readback. All nonzero-alpha RGBA is preserved.
 
     Two parts of the JS are deliberately not ported. Its double
     getImageData "priming read" works around a documented Chromium
@@ -442,7 +443,11 @@ def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
     for a missing crypto.subtle. Neither changes which sprites group
     together, which is the only property parity tests assert -- digest
     STRINGS are never compared across the two runtimes."""
-    return hashlib.sha256(raster.get_pixels(handle)).hexdigest()
+    pixels = bytearray(raster.get_pixels(handle))
+    for index in range(0, len(pixels), 4):
+        if pixels[index + 3] == 0:
+            pixels[index:index + 3] = b"\x00\x00\x00"
+    return hashlib.sha256(pixels).hexdigest()
 
 
 def extract_raw_sprite(raster: RasterBackend, image: ImageHandle, region: dict) -> ImageHandle:
@@ -637,16 +642,12 @@ class AtlasModifier:
         only because _parseScoped had just produced it), and the result
         carries a document instead of atlas text.
 
-        CALLER PRECONDITION -- `region_names` MUST ALREADY BE IN JS
-        OBJECT-KEY ORDER. This function does not re-derive it. Real JS gets
-        that ordering for free because its region list comes from
-        Object.keys() (atlas-modifier.js:26), which puts canonical
-        array-index keys first in ascending order; Python dicts and
-        AtlasDocument.parse preserve text order instead. Pass names through
-        js_object_key_order() first -- `_scoped_region_meta()` does exactly
-        that. Skip it and a region literally named "2" packs after one named
-        "10", silently, and every test that avoids integer-like names still
-        passes."""
+        CALLER ORDER CONTRACT -- region_names is consumed exactly as supplied;
+        this function does not re-derive or re-sort it. For pristine-only repacks,
+        _scoped_region_meta() supplies JS Object.keys order. For structural
+        repacks, the caller orders the initial pristine map before folding batches,
+        then passes the effective region_names array through unchanged. A
+        numeric Add key therefore remains at the tail of that array."""
         # 1. Deduplicate by pixel hash (single-page repack keeps dedup ON).
         hash_to_canonical: dict[str, str] = {}
         canonical_map: dict[str, str] = {}
@@ -830,9 +831,10 @@ class AtlasModifier:
 
         TWO CALLER PRECONDITIONS:
 
-        1. `effective_region_names` MUST ALREADY BE IN JS OBJECT-KEY ORDER
-           (see repack_with_modded_sprites' sibling note -- unchanged from
-           Stage 5).
+        1. The caller orders the INITIAL pristine map with js_object_key_order()
+           before deriving the effective model, then supplies the resulting
+           effective_region_names array unchanged. Do not re-sort after the fold:
+           numeric Add keys remain in append order.
         2. When `mesh_lookup_fn` is given, masking mirrors
            repack_with_modded_sprites, with one addition: a name present
            in `added_sprites` is also excluded from the pristine-masking

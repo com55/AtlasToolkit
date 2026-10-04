@@ -402,16 +402,13 @@ class AtlasDocument:
         extraPairs entries are 2-tuples) -- this port does not
         independently guard against a malformed region_data shape (a
         short tuple, a non-dict meta) the way parse() must guard against
-        malformed raw atlas TEXT (see Task 4's `_at` helper). Ruled on,
-        not fixed, during Task 5's scrutinize review: the only current
-        producer of this shape, Region.to_meta_dict(), always emits a
-        well-formed dict (int index from _parse_int, always-2-tuple
-        extra_pairs, from `parse()`'s own always->=1-element split
-        result); the only wired JS caller similarly always builds
-        4-element bounds. Revisit this assumption when a real Python
-        caller of from_rebuild_args exists in a later stage, if that
-        caller's own well-formedness guarantee is weaker than
-        to_meta_dict()'s."""
+        malformed raw atlas TEXT (see Task 4's `_at` helper). The current
+        metadata producers, Region.to_meta_dict() and AtlasModifier._pack_and_emit()
+        (using JS-shaped region_meta/effective-model metadata), emit well-formed
+        dictionaries. parse() produces always-2-tuple extra_pairs from its own
+        always->=1-element split result; the modifier and wired JS caller build
+        4-element bounds. Revisit this assumption if a new caller's
+        well-formedness guarantee is weaker than these producers'."""
         page = Page(
             filename=str(_get_or(page_info, "page", "atlas.png")),
             size=new_size,

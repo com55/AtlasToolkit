@@ -83,6 +83,49 @@ def test_canvas_hash_groups_identical_pixels_and_separates_different_ones():
     assert canvas_hash(raster, first) != canvas_hash(raster, different_shape)
 
 
+def _rgba_png(raster, data):
+    buf = io.BytesIO()
+    Image.frombytes("RGBA", (2, 1), data).save(buf, format="PNG")
+    return raster.decode_png(buf.getvalue())
+
+
+@pytest.mark.parametrize("masked", [False, True])
+def test_canvas_hash_normalizes_only_hidden_rgb_without_mutation_or_allocation(masked):
+    raster = PillowRasterBackend()
+    first = bytes([90, 1, 2, 0, 10, 20, 30, 255])
+    same_visible = bytes([3, 4, 5, 0, 10, 20, 30, 255])
+    different_visible = bytes([3, 4, 5, 0, 11, 20, 30, 255])
+    inputs = [first, same_visible, different_visible]
+    if masked:
+        inputs = [data[:3] + b"\xff" + data[4:] for data in inputs]
+    handles = [_rgba_png(raster, data) for data in inputs]
+    if masked:
+        mask = _rgba_png(raster, bytes([255, 255, 255, 0, 255, 255, 255, 255]))
+        for handle in handles:
+            raster.composite_destination_in(handle, mask)
+        raster.dispose(mask)
+    before = [(raster.size(h), raster.get_pixels(h)) for h in handles]
+    assert [pixels for _, pixels in before] == [first, same_visible, different_visible]
+    allocations = raster._next_handle
+    live = set(raster._images)
+    hashes = [canvas_hash(raster, h) for h in handles]
+    assert [(raster.size(h), raster.get_pixels(h)) for h in handles] == before
+    assert raster._next_handle == allocations
+    assert set(raster._images) == live
+    assert hashes[0] == hashes[1]
+    assert hashes[0] != hashes[2]
+
+
+def test_canvas_hash_preserves_alpha_one_and_its_rgb():
+    raster = PillowRasterBackend()
+    inputs = [
+        bytes([90, 1, 2, 0, 10, 20, 30, 255]),
+        bytes([90, 1, 2, 1, 10, 20, 30, 255]),
+        bytes([91, 1, 2, 1, 10, 20, 30, 255]),
+    ]
+    assert len({canvas_hash(raster, _rgba_png(raster, data)) for data in inputs}) == 3
+
+
 def test_extract_raw_sprite_undoes_a_stored_rotation():
     raster = PillowRasterBackend()
     page = _patterned(raster, 40, 40, 200)

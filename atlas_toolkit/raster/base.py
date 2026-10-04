@@ -27,9 +27,9 @@ should another ever exist):
   surfaces this as the natural `KeyError` from its internal registry dict
   lookup -- no dedicated exception type, since nothing in this spec or its
   real callers needs to distinguish "disposed" from "never existed."
-  Ownership/lifetime beyond that (which `AtlasSession` disposes when) is a
-  later stage's concern (spec §3's "ImageHandle lifecycle" paragraph) --
-  not designed here.
+  `AtlasSession` owns only handles allocated through its private facade and
+  releases its roots and temporary reads on close; foreign backend handles
+  remain the caller's responsibility.
 - Never assert byte-identity of `encode_png`'s OUTPUT against another
   runtime's PNG encoder (a browser's `canvas.toBlob`, another Pillow
   build). Encoders differ byte-for-byte even for pixel-identical images.
