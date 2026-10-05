@@ -150,70 +150,74 @@ def shelf_pack(items: list[dict]) -> dict:
 
 # ─── Rotation (pure array arithmetic on 0/1 masks) ──────────────────────
 
+def _grid(mask: bytes, w: int, h: int) -> np.ndarray:
+    """View a flat row-major mask as an (h, w) uint8 array, no copy."""
+    return np.frombuffer(mask, dtype=np.uint8).reshape(h, w)
+
+
+def _rot_cw_grid(grid: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(grid.T[:, ::-1])
+
+
+def _rot_ccw_grid(grid: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(grid.T[::-1, :])
+
+
+def _rot_180_grid(grid: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(grid[::-1, ::-1])
+
+
 def rotate90_cw(mask: bytes, w: int, h: int) -> bytearray:
     """Rotate a w x h mask 90 degrees clockwise. Output is h x w. Port of
     repack-nest.js's rotate90CW."""
-    out = bytearray(w * h)
-    for y in range(h):
-        for x in range(w):
-            out[x * h + (h - 1 - y)] = mask[y * w + x]
-    return out
+    return bytearray(_rot_cw_grid(_grid(mask, w, h)).tobytes())
 
 
 def rotate180(mask: bytes, w: int, h: int) -> bytearray:
     """Rotate a w x h mask 180 degrees. Output is w x h. Port of
     repack-nest.js's rotate180."""
-    size = w * h
-    out = bytearray(size)
-    for i in range(size):
-        out[size - 1 - i] = mask[i]
-    return out
+    return bytearray(_rot_180_grid(_grid(mask, w, h)).tobytes())
 
 
 def rotate90_ccw(mask: bytes, w: int, h: int) -> bytearray:
     """Rotate a w x h mask 90 degrees counter-clockwise. Output is h x w.
     Port of repack-nest.js's rotate90CCW."""
-    out = bytearray(w * h)
-    for y in range(h):
-        for x in range(w):
-            out[(w - 1 - x) * h + y] = mask[y * w + x]
-    return out
+    return bytearray(_rot_ccw_grid(_grid(mask, w, h)).tobytes())
 
 
 # ─── Dilation ───────────────────────────────────────────────────────────
+
+def _dilate_grid(grid: np.ndarray, gap: int) -> np.ndarray:
+    """Chebyshev dilation of an (h, w) mask by `gap`, returned as an
+    (h + 2*gap, w + 2*gap) uint8 array. The input sits at offset (gap, gap)
+    in the output; cells grown past the padded border are clipped, which
+    cannot lose anything because the padding already holds the full
+    margin. A (2*gap+1)-square window sum via a 2-D cumulative sum, so the
+    cost is O(area) regardless of `gap`."""
+    h, w = grid.shape
+    padded_h, padded_w = h + 2 * gap, w + 2 * gap
+    window = 2 * gap + 1
+    source = np.zeros((padded_h + 2 * gap, padded_w + 2 * gap), dtype=np.int32)
+    source[2 * gap:2 * gap + h, 2 * gap:2 * gap + w] = grid != 0
+    summed = np.zeros((source.shape[0] + 1, source.shape[1] + 1), dtype=np.int32)
+    np.cumsum(np.cumsum(source, axis=0, dtype=np.int32), axis=1, dtype=np.int32, out=summed[1:, 1:])
+    counts = (
+        summed[window:window + padded_h, window:window + padded_w]
+        - summed[:padded_h, window:window + padded_w]
+        - summed[window:window + padded_h, :padded_w]
+        + summed[:padded_h, :padded_w]
+    )
+    return (counts > 0).astype(np.uint8)
+
 
 def dilate(mask: bytes, w: int, h: int, gap: int) -> dict:
     """Grow every occupied cell outward by `gap` cells (Chebyshev
     distance). Returns a mask padded by `gap` on every side --
     (w + 2*gap) x (h + 2*gap) -- so the dilation margin is never clipped;
-    the input's own (0, 0) is (gap, gap) in the output. Two-pass separable
-    expand, O(w*h*gap) not O(w*h*gap**2). Port of repack-nest.js's
-    dilate."""
-    padded_w = w + 2 * gap
-    padded_h = h + 2 * gap
-    stage1 = bytearray(padded_w * h)
-    for y in range(h):
-        for x in range(w):
-            if not mask[y * w + x]:
-                continue
-            cx = x + gap
-            x0 = max(0, cx - gap)
-            x1 = min(padded_w - 1, cx + gap)
-            for nx in range(x0, x1 + 1):
-                stage1[y * padded_w + nx] = 1
-
-    out = bytearray(padded_w * padded_h)
-    for y in range(h):
-        for x in range(padded_w):
-            if not stage1[y * padded_w + x]:
-                continue
-            cy = y + gap
-            y0 = max(0, cy - gap)
-            y1 = min(padded_h - 1, cy + gap)
-            for ny in range(y0, y1 + 1):
-                out[ny * padded_w + x] = 1
-    return {"mask": out, "w": padded_w, "h": padded_h}
-
+    the input's own (0, 0) is (gap, gap) in the output. Port of
+    repack-nest.js's dilate (vectorized; same result)."""
+    out = _dilate_grid(_grid(mask, w, h), gap)
+    return {"mask": bytearray(out.tobytes()), "w": w + 2 * gap, "h": h + 2 * gap}
 
 # ─── gap_distance normalization ─────────────────────────────────────────
 
@@ -260,68 +264,150 @@ def normalize_gap(value: object) -> int:
 # ─── The packer ─────────────────────────────────────────────────────────
 
 _SCAN_STEP = 4  # px -- fixed-step raster scan, not per-pixel (performance)
+_OVERLAP_ROW_BLOCK = 64  # rows tested per numpy call in the exact overlap check
+_PRUNE_SAMPLES = 64  # mask cells probed across ALL candidate origins before the exact test
 
 
 def _rotation_variants(item: dict, gap: int) -> list[dict]:
     """The 4 rotation variants of one item's footprint, each carrying an
     UNDILATED mask (for fit-testing) and a separately-dilated mask (for
     stamping once placed) -- two distinct arrays, never one shared
-    pre-dilated mask. The deg -> helper mapping matches this codebase's
-    atlas-rotation convention (rotate:90 is stored 90 CCW, rotate:270 is
-    stored 90 CW). Port of repack-nest.js's rotationVariants."""
-    variants = [
-        {"deg": 0, "w": item["w"], "h": item["h"], "mask": item["footprint"]},
-        {"deg": 90, "w": item["h"], "h": item["w"],
-         "mask": rotate90_ccw(item["footprint"], item["w"], item["h"])},
-        {"deg": 180, "w": item["w"], "h": item["h"],
-         "mask": rotate180(item["footprint"], item["w"], item["h"])},
-        {"deg": 270, "w": item["h"], "h": item["w"],
-         "mask": rotate90_cw(item["footprint"], item["w"], item["h"])},
-    ]
-    for variant in variants:
-        variant["dilated_mask"] = dilate(variant["mask"], variant["w"], variant["h"], gap)
+    pre-dilated mask. Masks are (h, w) uint8 arrays. The deg -> helper
+    mapping matches this codebase's atlas-rotation convention (rotate:90
+    is stored 90 CCW, rotate:270 is stored 90 CW). Port of
+    repack-nest.js's rotationVariants."""
+    base = (_grid(item["footprint"], item["w"], item["h"]) != 0).astype(np.uint8)
+    masks = [base, _rot_ccw_grid(base), _rot_180_grid(base), _rot_cw_grid(base)]
+    variants = []
+    for deg, mask in zip((0, 90, 180, 270), masks):
+        height, width = mask.shape
+        cells_y, cells_x = np.nonzero(mask)
+        # Evenly spaced occupied cells of the mask, in row-major order: each
+        # one landing on an occupied grid cell proves an overlap on its own.
+        picks = np.linspace(0, cells_y.size - 1, num=min(cells_y.size, _PRUNE_SAMPLES)).astype(np.intp) \
+            if cells_y.size else np.zeros(0, dtype=np.intp)
+        variants.append({
+            "deg": deg, "w": width, "h": height, "mask": mask,
+            "solid": bool(mask.all()), "empty": not mask.any(),
+            "samples": (cells_y[picks], cells_x[picks]),
+            "dilated_mask": _dilate_grid(mask, gap),
+        })
     return variants
 
 
-def _fits(occupied: bytes, canvas_w: int, canvas_h: int, gap: int, rot: dict, x: int, y: int) -> bool:
-    """Does `rot` fit at canvas-relative origin (x, y) without exceeding
-    canvas bounds or overlapping the already-dilated occupied grid?
-    `occupied` is (canvas_w + 2*gap) x (canvas_h + 2*gap); logical (lx, ly)
-    sits at physical (ly + gap) * padded_w + (lx + gap). Port of
-    repack-nest.js's fits."""
-    if x + rot["w"] > canvas_w or y + rot["h"] > canvas_h:
-        return False
-    padded_w = canvas_w + 2 * gap
+def _overlaps(occupied: np.ndarray, gap: int, rot: dict, x: int, y: int) -> bool:
+    """Does any occupied cell of `rot`'s mask land on an occupied cell of
+    the grid at canvas-relative origin (x, y)? `occupied` is the padded
+    (canvas_h + 2*gap) x (canvas_w + 2*gap) grid; logical (lx, ly) sits at
+    physical (ly + gap, lx + gap). Tested a block of rows at a time so a
+    collision near the top exits without touching the rest."""
     mask = rot["mask"]
-    for my in range(rot["h"]):
-        for mx in range(rot["w"]):
-            if not mask[my * rot["w"] + mx]:
-                continue
-            if occupied[(y + my + gap) * padded_w + (x + mx + gap)]:
-                return False
-    return True
+    window = occupied[y + gap:y + gap + rot["h"], x + gap:x + gap + rot["w"]]
+    for row in range(0, rot["h"], _OVERLAP_ROW_BLOCK):
+        if (window[row:row + _OVERLAP_ROW_BLOCK] & mask[row:row + _OVERLAP_ROW_BLOCK]).any():
+            return True
+    return False
 
 
-def _find_first_fit(variants: list[dict], occupied: bytes, canvas_w: int, canvas_h: int, gap: int):
+def _prune_by_samples(
+    occupied: np.ndarray, gap: int, rot: dict, keys: np.ndarray, ys: np.ndarray, xs: np.ndarray,
+):
+    """Drop every candidate origin where one of `rot`'s sampled mask cells
+    lands on an occupied cell -- a proven overlap, so it can never be the
+    answer. Only ever removes certain failures; whatever survives still
+    needs the exact test. Vectorized over all candidates at once, shrinking
+    the set after each probe."""
+    sample_y, sample_x = rot["samples"]
+    for dy, dx in zip(sample_y.tolist(), sample_x.tolist()):
+        keep = occupied[ys + (gap + dy), xs + (gap + dx)] == 0
+        keys, ys, xs = keys[keep], ys[keep], xs[keep]
+        if not keys.size:
+            break
+    return keys, ys, xs
+
+
+def _occupied_integral(occupied: np.ndarray) -> np.ndarray:
+    """Inclusive-prefix occupied count with a zero first row and column:
+    result[y, x] = occupied cells in rows [0, y) x columns [0, x). Lets a
+    whole bounding box be counted in O(1)."""
+    integral = np.zeros((occupied.shape[0] + 1, occupied.shape[1] + 1), dtype=np.int32)
+    np.cumsum(np.cumsum(occupied, axis=0, dtype=np.int32), axis=1, dtype=np.int32, out=integral[1:, 1:])
+    return integral
+
+
+def _find_first_fit(variants: list[dict], occupied: np.ndarray, canvas_w: int, canvas_h: int, gap: int):
     """First-fit scan: for each candidate origin (row-major, step
     _SCAN_STEP), try every rotation in order; the first that fits wins.
     Position is the primary axis so the result stays close to a natural
-    top-to-bottom, left-to-right fill. Port of findFirstFit."""
-    for y in range(0, canvas_h, _SCAN_STEP):
-        for x in range(0, canvas_w, _SCAN_STEP):
-            for rot in variants:
-                if _fits(occupied, canvas_w, canvas_h, gap, rot, x, y):
-                    return {"rot": rot, "x": x, "y": y}
-    return None
+    top-to-bottom, left-to-right fill. Port of findFirstFit.
+
+    Same answer as testing every (origin, rotation) pair in order with an
+    exact overlap check, reached cheaper: an integral image counts the
+    occupied cells under every candidate bounding box at once. Zero means
+    the rotation fits outright; a box that is entirely occupied (or any
+    overlap for a solid mask) cannot fit; only the partially-occupied
+    boxes before the first outright fit need the exact mask-vs-grid test."""
+    integral = _occupied_integral(occupied)
+    count = len(variants)
+    per_variant = []
+    first_fast = None  # smallest ordering key at which some rotation fits outright
+    for index, rot in enumerate(variants):
+        width, height = rot["w"], rot["h"]
+        if width > canvas_w or height > canvas_h:
+            continue
+        ys = np.arange(0, canvas_h - height + 1, _SCAN_STEP)
+        xs = np.arange(0, canvas_w - width + 1, _SCAN_STEP)
+        top = (ys + gap)[:, None]
+        left = (xs + gap)[None, :]
+        counts = (
+            integral[top + height, left + width] - integral[top, left + width]
+            - integral[top + height, left] + integral[top, left]
+        )
+        keys = (ys[:, None] * canvas_w + xs[None, :]) * count + index
+        fits_outright = np.ones_like(counts, dtype=bool) if rot["empty"] else counts == 0
+        if fits_outright.any():
+            smallest = int(keys[fits_outright].min())
+            if first_fast is None or smallest < first_fast:
+                first_fast = smallest
+        per_variant.append((index, rot, ys, xs, counts, keys))
+
+    pending = []  # (key, variant index, y, x) of boxes needing the exact test
+    for index, rot, ys, xs, counts, keys in per_variant:
+        if rot["solid"] or rot["empty"]:
+            continue
+        needs_exact = (counts > 0) & (counts < rot["w"] * rot["h"])
+        if first_fast is not None:
+            needs_exact &= keys < first_fast
+        row_index, col_index = np.nonzero(needs_exact)
+        if row_index.size:
+            kept_keys, kept_y, kept_x = _prune_by_samples(
+                occupied, gap, rot, keys[row_index, col_index], ys[row_index], xs[col_index],
+            )
+            if kept_keys.size:
+                pending.append((kept_keys, np.full(kept_keys.size, index), kept_y, kept_x))
+    if pending:
+        keys = np.concatenate([p[0] for p in pending])
+        order = np.argsort(keys, kind="stable")
+        indexes = np.concatenate([p[1] for p in pending])[order]
+        all_y = np.concatenate([p[2] for p in pending])[order]
+        all_x = np.concatenate([p[3] for p in pending])[order]
+        for index, y, x in zip(indexes.tolist(), all_y.tolist(), all_x.tolist()):
+            if not _overlaps(occupied, gap, variants[index], x, y):
+                return {"rot": variants[index], "x": x, "y": y}
+    if first_fast is None:
+        return None
+    cell, index = divmod(first_fast, count)
+    y, x = divmod(cell, canvas_w)
+    return {"rot": variants[index], "x": x, "y": y}
 
 
-def grow_canvas(canvas_w: int, canvas_h: int, occupied: bytes, seed_rot: dict, gap: int) -> dict:
-    """Grow the canvas right or down, whichever keeps the result closer to
-    square, sized to at least fit `seed_rot`'s own dimensions. At
-    canvas_w == 0 both candidates come out identical, and the stable sort
-    keeps "grow right" (listed first) without a special case -- which is
-    why this uses a stable sort with the JS comparator chain rather than a
-    key tuple. Port of repack-nest.js's growCanvas."""
+def _grow_dims(canvas_w: int, canvas_h: int, seed_rot: dict) -> tuple[int, int]:
+    """Pick the grown canvas size: right or down, whichever keeps the
+    result closer to square, sized to at least fit `seed_rot`'s own
+    dimensions. At canvas_w == 0 both candidates come out identical, and
+    the stable sort keeps "grow right" (listed first) without a special
+    case -- which is why this uses a stable sort with the JS comparator
+    chain rather than a key tuple."""
     candidates = [
         {"go_right": True, "w": canvas_w + seed_rot["w"], "h": max(canvas_h, seed_rot["h"])},
         {"go_right": False, "w": max(canvas_w, seed_rot["w"]), "h": canvas_h + seed_rot["h"]},
@@ -332,32 +418,34 @@ def grow_canvas(canvas_w: int, canvas_h: int, occupied: bytes, seed_rot: dict, g
     candidates.sort(
         key=functools.cmp_to_key(lambda a, b: _js_or_chain_cmp(a, b, ("aspect", "area", "w")))
     )
-    new_w = candidates[0]["w"]
-    new_h = candidates[0]["h"]
+    return candidates[0]["w"], candidates[0]["h"]
 
-    new_padded_w = new_w + 2 * gap
-    new_padded_h = new_h + 2 * gap
-    nxt = bytearray(new_padded_w * new_padded_h)
+
+def _grow_grid(canvas_w: int, canvas_h: int, occupied: np.ndarray, seed_rot: dict, gap: int):
+    new_w, new_h = _grow_dims(canvas_w, canvas_h, seed_rot)
+    nxt = np.zeros((new_h + 2 * gap, new_w + 2 * gap), dtype=np.uint8)
     if canvas_w > 0 or canvas_h > 0:
-        old_padded_w = canvas_w + 2 * gap
-        for y in range(canvas_h + 2 * gap):
-            row_start = y * old_padded_w
-            nxt[y * new_padded_w:y * new_padded_w + old_padded_w] = occupied[row_start:row_start + old_padded_w]
-    return {"canvas_w": new_w, "canvas_h": new_h, "occupied": nxt}
+        nxt[:occupied.shape[0], :occupied.shape[1]] = occupied
+    return new_w, new_h, nxt
 
 
-def _stamp_occupied(occupied: bytearray, canvas_w: int, gap: int, rot: dict, x: int, y: int) -> None:
+def grow_canvas(canvas_w: int, canvas_h: int, occupied: bytes, seed_rot: dict, gap: int) -> dict:
+    """Grow the canvas right or down, whichever keeps the result closer to
+    square, sized to at least fit `seed_rot`'s own dimensions. `occupied`
+    is the flat row-major padded grid; the result's `occupied` is the
+    grown one, flat as well. Port of repack-nest.js's growCanvas."""
+    old = _grid(occupied, canvas_w + 2 * gap, canvas_h + 2 * gap)
+    new_w, new_h, nxt = _grow_grid(canvas_w, canvas_h, old, seed_rot, gap)
+    return {"canvas_w": new_w, "canvas_h": new_h, "occupied": bytearray(nxt.tobytes())}
+
+
+def _stamp_occupied(occupied: np.ndarray, gap: int, rot: dict, x: int, y: int) -> None:
     """OR a placed item's dilated mask into `occupied` at its chosen
     origin. The dilated mask's own (0, 0) is logical (x - gap, y - gap) and
     logical-to-physical adds +gap, so the two cancel. Port of
     stampOccupied."""
-    padded_w = canvas_w + 2 * gap
     dilated = rot["dilated_mask"]
-    mask, dw, dh = dilated["mask"], dilated["w"], dilated["h"]
-    for dy in range(dh):
-        for dx in range(dw):
-            if mask[dy * dw + dx]:
-                occupied[(y + dy) * padded_w + (x + dx)] = 1
+    occupied[y:y + dilated.shape[0], x:x + dilated.shape[1]] |= dilated
 
 
 def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
@@ -385,7 +473,7 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
 
     canvas_w = 0
     canvas_h = 0
-    occupied = bytearray(0)
+    occupied = np.zeros((0, 0), dtype=np.uint8)
     placements: list[dict] = []
 
     for item in ordered:
@@ -395,10 +483,9 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
         # canvas_h by at least the unrotated variant's own dimension), so
         # this terminates.
         while spot is None:
-            grown = grow_canvas(canvas_w, canvas_h, occupied, variants[0], gap)
-            canvas_w, canvas_h, occupied = grown["canvas_w"], grown["canvas_h"], grown["occupied"]
+            canvas_w, canvas_h, occupied = _grow_grid(canvas_w, canvas_h, occupied, variants[0], gap)
             spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
-        _stamp_occupied(occupied, canvas_w, gap, spot["rot"], spot["x"], spot["y"])
+        _stamp_occupied(occupied, gap, spot["rot"], spot["x"], spot["y"])
         placements.append({
             "name": item["name"], "x": spot["x"], "y": spot["y"],
             "pw": spot["rot"]["w"], "ph": spot["rot"]["h"], "rotate": spot["rot"]["deg"],
@@ -409,7 +496,6 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
         "canvas_h": round_up_to_multiple(canvas_h),
         "placements": placements,
     }
-
 
 # ─── Occupied footprint from mesh geometry ──────────────────────────────
 
@@ -425,12 +511,10 @@ def union_masks(masks: list[bytearray], w: int, h: int) -> bytearray:
     throughout this codebase. Port of unionMasks."""
     if not masks:
         return solid_mask(w, h)
-    out = bytearray(w * h)
+    out = np.zeros(w * h, dtype=bool)
     for mask in masks:
-        for i, value in enumerate(mask):
-            if value:
-                out[i] = 1
-    return out
+        out |= np.frombuffer(mask, dtype=np.uint8) != 0
+    return bytearray(out.astype(np.uint8).tobytes())
 
 
 def footprint_for_canonical(dedup_names: list[str], ctx: dict) -> bytearray:
