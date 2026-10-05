@@ -14,9 +14,13 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
+    { name = "skel-mesh-parser" },
+]
+
+[package.optional-dependencies]
+app = [
     { name = "pywebview" },
     { name = "requests" },
-    { name = "skel-mesh-parser" },
 ]
 
 [package.dev-dependencies]
@@ -27,11 +31,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
-    { name = "pillow", specifier = "==12.1.1" },
-    { name = "pywebview", specifier = "==6.1" },
-    { name = "requests", specifier = "==2.32.5" },
+    { name = "pillow", specifier = ">=10.0,<13" },
+    { name = "pywebview", marker = "extra == 'app'", specifier = "==6.1" },
+    { name = "requests", marker = "extra == 'app'", specifier = "==2.32.5" },
     { name = "skel-mesh-parser", git = "https://github.com/com55/skel-mesh-parser.git?rev=python" },
 ]
+provides-extras = ["app"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]

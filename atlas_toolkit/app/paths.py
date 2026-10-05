@@ -10,7 +10,7 @@ def app_root() -> Path:
     """Project / install directory containing ``www/``."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def is_source_run() -> bool:
