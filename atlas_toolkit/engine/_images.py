@@ -1,6 +1,8 @@
 """Private raster ownership facade used by :mod:`engine.session`."""
 from __future__ import annotations
 
+import numpy as np
+
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
@@ -44,7 +46,7 @@ class _SessionRaster:
     ) -> None:
         self._backend.composite_destination_in(dest, mask, src_rect)
 
-    def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
+    def read_alpha_mask(self, handle: ImageHandle) -> np.ndarray:
         return self._backend.read_alpha_mask(handle)
 
     def get_pixels(self, handle: ImageHandle) -> bytes:

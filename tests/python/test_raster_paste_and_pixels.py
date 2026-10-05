@@ -172,7 +172,7 @@ def test_get_pixels_and_read_alpha_mask_agree_on_row_major_layout():
     mask = backend.read_alpha_mask(handle)
 
     assert pixels == bytes([1, 1, 1, 10, 2, 2, 2, 20, 3, 3, 3, 30, 4, 4, 4, 40])
-    assert mask == [True, True, True, True]  # all four alphas are nonzero
+    assert mask.tolist() == [True, True, True, True]  # all four alphas are nonzero
     for i in range(4):
         assert mask[i] == (pixels[i * 4 + 3] != 0)
 
@@ -189,7 +189,7 @@ def test_read_alpha_mask_thresholds_at_zero():
 
     mask = backend.read_alpha_mask(handle)
 
-    assert mask == [False, True, True]
+    assert mask.tolist() == [False, True, True]
 
 
 def test_paste_entirely_outside_the_destination_is_a_no_op():

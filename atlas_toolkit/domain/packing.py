@@ -21,6 +21,8 @@ from __future__ import annotations
 import functools
 import math
 
+import numpy as np
+
 from atlas_toolkit.domain.region_ops import round_up_to_multiple
 
 # Deliberate deviation from repacker.py, inherited from the JS (see
@@ -475,7 +477,7 @@ def footprint_for_canonical(dedup_names: list[str], ctx: dict) -> bytearray:
         compatible[name] = sprite_w == w and sprite_h == h
 
     def alpha_mask(handle) -> bytearray:
-        return bytearray(1 if bit else 0 for bit in raster.read_alpha_mask(handle))
+        return bytearray(np.asarray(raster.read_alpha_mask(handle), dtype=np.uint8).tobytes())
 
     masks: list[bytearray] = []
     handled: set[str] = set()

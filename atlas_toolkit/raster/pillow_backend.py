@@ -111,9 +111,9 @@ class PillowRasterBackend:
     def get_pixels(self, handle: ImageHandle) -> bytes:
         return self._images[handle].tobytes()
 
-    def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
+    def read_alpha_mask(self, handle: ImageHandle) -> np.ndarray:
         alpha_channel = self._images[handle].getchannel("A")
-        return [byte != 0 for byte in alpha_channel.tobytes()]
+        return np.frombuffer(alpha_channel.tobytes(), dtype=np.uint8) != 0
 
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
