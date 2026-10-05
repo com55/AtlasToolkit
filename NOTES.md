@@ -102,3 +102,26 @@ Python `repacker.py`) only ever produced `rotate: true`/`false` (0 or 90). This 
 deliberate, confirmed decision (not an oversight): the target Spine runtimes are confirmed to
 accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
 (`repack-nest.js`'s `rotationVariants`) is kept as-is rather than restricted to `[0, 90]`.
+
+## Python port: packaging
+
+The core engine (`atlas_toolkit/{document,domain,engine,mesh,raster}`) needs only
+`numpy`, `pillow` (a range, `>=10.0,<13`; the suite passes on 10.0.1 and 12.x)
+and `skel-mesh-parser`. The desktop shell (`atlas_toolkit.app`,
+`atlas_toolkit.update`) needs `pywebview` and `requests`, which live in the
+`app` extra: `uv sync --extra app`, and `uv export --extra app` in the release
+workflow. `atlas_toolkit/app/paths.py` (was `atlas_toolkit/paths.py`) is
+desktop-only for the same reason.
+
+**Open: `skel-mesh-parser` is a `git+https://` URL dependency.** `micropip`
+cannot install that inside Pyodide, and it also pins whatever the `python`
+branch holds at lock time (`uv.lock` still records the 0.2.0 commit, before
+`hullLength`; push the branch, then `uv lock --upgrade-package
+skel-mesh-parser`). The parser has no dependencies and is pure Python, so a
+`py3-none-any` wheel of it only needs somewhere `micropip` can fetch it from
+(a GitHub release asset, an index, or bundling it into the Worker's
+filesystem). Not done yet.
+
+`numpy>=2.4.6` is also higher than the numpy a given Pyodide release ships;
+the numpy calls used (`cumsum`, `frombuffer`, boolean indexing) are old API,
+so the floor is probably relaxable, but that has not been tested.

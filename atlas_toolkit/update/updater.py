@@ -54,7 +54,7 @@ def is_running_as_exe() -> bool:
 
 def get_current_version() -> str:
     """Read version from VERSION file when running as exe, pyproject.toml when in dev."""
-    from atlas_toolkit.paths import app_root
+    from atlas_toolkit.app.paths import app_root
 
     root = app_root()
     if is_running_as_exe():

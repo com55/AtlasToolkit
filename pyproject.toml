@@ -10,10 +10,16 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.4.6",
-    "pillow==12.1.1",
+    "pillow>=10.0,<13",
+    "skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@python",
+]
+
+[project.optional-dependencies]
+# Desktop shell only (atlas_toolkit.app / atlas_toolkit.update): the core
+# engine imports none of these, so a library or Pyodide install omits them.
+app = [
     "pywebview==6.1",
     "requests==2.32.5",
-    "skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@python",
 ]
 
 [tool.hatch.build.targets.wheel]

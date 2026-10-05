@@ -23,7 +23,7 @@ Once you are inside the project directory, choose your preferred method:
 
 - **Using [uv](https://github.com/astral-sh/uv#installation) (Recommended)**
   ```bash
-  uv sync
+  uv sync --extra app
   uv run python main.py
   ```
 - **Using pip**

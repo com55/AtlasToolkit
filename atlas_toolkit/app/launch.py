@@ -10,7 +10,7 @@ from typing import Optional
 import webview
 
 from atlas_toolkit.app.bridge import Api, setup_drop
-from atlas_toolkit.paths import is_source_run, resource_path
+from atlas_toolkit.app.paths import is_source_run, resource_path
 from atlas_toolkit.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
