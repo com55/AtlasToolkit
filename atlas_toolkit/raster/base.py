@@ -41,6 +41,8 @@ from __future__ import annotations
 
 from typing import NewType, Protocol
 
+import numpy as np
+
 ImageHandle = NewType("ImageHandle", int)
 
 
@@ -124,8 +126,8 @@ class RasterBackend(Protocol):
         `ValueError` on a size mismatch, turning a caller bug into a hard
         error rather than a silently truncated composite."""
 
-    def read_alpha_mask(self, handle: ImageHandle) -> list[bool]:
-        """One bool per pixel, row-major, True where alpha > 0 -- matches
+    def read_alpha_mask(self, handle: ImageHandle) -> np.ndarray:
+        """1-D bool ndarray, one entry per pixel, row-major, True where alpha > 0 -- matches
         repack-nest.js's thresholdAlpha exactly (`data[i*4+3] > 0 ? 1 : 0`,
         repack-nest.js:258). Feeds domain/packing.py's silhouette-based
         placement decisions, a later stage -- this stage only provides the

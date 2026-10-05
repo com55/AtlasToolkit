@@ -388,7 +388,7 @@ def test_facade_all_six_allocators_and_nonallocating_pixel_forwards():
     facade.composite_destination_in(cloned, mask, src_rect=(1, 0, 2, 2))
     expected = PATTERN[:7] + b"\x00" + PATTERN[8:15] + b"\x00"
     assert facade.get_pixels(cloned) == expected
-    assert facade.read_alpha_mask(cloned) == [True, False, True, False]
+    assert facade.read_alpha_mask(cloned).tolist() == [True, False, True, False]
     facade.composite_destination_in(source, cloned)
     assert facade.get_pixels(source) == expected
     assert facade.size(source) == (2, 2)

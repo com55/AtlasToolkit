@@ -32,6 +32,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
+
 from atlas_toolkit.document import AtlasDocument, Region
 from atlas_toolkit.domain.packing import (
     footprint_for_canonical,
@@ -443,10 +445,8 @@ def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
     for a missing crypto.subtle. Neither changes which sprites group
     together, which is the only property parity tests assert -- digest
     STRINGS are never compared across the two runtimes."""
-    pixels = bytearray(raster.get_pixels(handle))
-    for index in range(0, len(pixels), 4):
-        if pixels[index + 3] == 0:
-            pixels[index:index + 3] = b"\x00\x00\x00"
+    pixels = np.frombuffer(raster.get_pixels(handle), dtype=np.uint8).reshape(-1, 4).copy()
+    pixels[pixels[:, 3] == 0, :3] = 0
     return hashlib.sha256(pixels).hexdigest()
 
 
