@@ -22,5 +22,11 @@ def build_mesh_lookup(parsed_skeleton: dict[str, Any]) -> dict[str, dict[str, An
     lookup: dict[str, dict[str, Any]] = {}
     for name, info in parsed_skeleton["attachments"].items():
         if info["type"] == "Mesh":
-            lookup[name] = {"uvs": info["uvs"], "triangles": info["triangles"]}
+            # hull_length: the first N UV pairs are the outline (hull layout).
+            # Missing on older parser output -> None, same as JS undefined.
+            lookup[name] = {
+                "uvs": info["uvs"],
+                "triangles": info["triangles"],
+                "hull_length": info.get("hull_length"),
+            }
     return lookup
