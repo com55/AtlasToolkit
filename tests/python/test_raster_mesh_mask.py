@@ -43,10 +43,11 @@ def test_mesh_sample_matches_js_oracle_closely():
     agree = sum(1 for a, b in zip(alpha, oracle["alpha"]) if (a > 0) == (b > 0))
     ratio = agree / len(alpha)
     assert ratio >= 0.97, f"only {ratio:.4%} pixel agreement with JS oracle"
-    # Interior sanity check independent of the aggregate ratio: a pixel
-    # deep inside the mesh's bounding region must be opaque on both sides.
-    interior_i = (100 * 200) + 100  # (px=100, py=100), well inside SAMPLE_1
-    assert (alpha[interior_i] > 0) == (oracle["alpha"][interior_i] > 0)
+    # Interior sanity check independent of the aggregate ratio: the mesh's
+    # fan centre (uv 0.47, 0.2 -> px 94, py 40) must be opaque on both sides.
+    interior_i = (40 * 200) + 94
+    assert alpha[interior_i] > 0
+    assert oracle["alpha"][interior_i] > 0
 
 
 @_needs_oracle

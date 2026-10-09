@@ -77,7 +77,7 @@ const oracle = await page.evaluate(async (sample) => {
 
   const cases = {};
 
-  // Real mesh, square canvas -- baseline real-geometry case.
+  // Synthetic concave mesh (tests/fixtures/mesh-sample.json), square canvas.
   cases.mesh_sample = toAlphaArray(rasterizeMeshMask(sample.SAMPLE_1.uvs, sample.SAMPLE_1.triangles, 200, 200));
 
   // Single triangle, no cancellation -- simplest possible non-trivial case.
