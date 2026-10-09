@@ -132,7 +132,8 @@ class AtlasProcessor:
             entries.append({
                 "width": width,
                 "height": height,
-                "uvs": mesh["uvs"] if mesh else None,
+                # Copy: the result leaves the session; the lookup must not.
+                "uvs": list(mesh["uvs"]) if mesh else None,
                 "hull_length": mesh.get("hull_length") if mesh else 0,
             })
         return layout_preview_hulls(entries, bool(force_resize))
