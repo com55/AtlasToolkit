@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image, ImageChops
 
 from atlas_toolkit.raster.base import ImageHandle
+from atlas_toolkit.raster.lanczos import lanczos_resize_rgba
 
 
 class PillowRasterBackend:
@@ -75,6 +76,10 @@ class PillowRasterBackend:
 
     def clone(self, handle: ImageHandle) -> ImageHandle:
         return self._store(self._images[handle].copy())
+
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
+        resized = lanczos_resize_rgba(np.asarray(self._images[handle]), width, height)
+        return self._store(Image.frombytes("RGBA", (width, height), resized.tobytes()))
 
     def dispose(self, handle: ImageHandle) -> None:
         del self._images[handle]

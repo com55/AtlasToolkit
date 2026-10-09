@@ -143,5 +143,10 @@ class RasterBackend(Protocol):
         GPU-readback bug; it does not apply to Pillow and is not ported --
         a single get_pixels call is sufficient."""
 
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
+        """New width x height image: Lanczos-3 resample in premultiplied
+        alpha, byte-identical to lanczos-resize.js's CPU lanczosResizeRGBA
+        (see raster/lanczos.py). Used by Forced Resizing in the preview."""
+
     def clone(self, handle: ImageHandle) -> ImageHandle: ...
     def dispose(self, handle: ImageHandle) -> None: ...
