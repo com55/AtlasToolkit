@@ -2,13 +2,33 @@ import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, updateForcedResizingUI, updateMeshHullUI, applyNestGapDistance } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
+import { initOptionsPopover } from './js/options-popover.js';
+import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
-import { previewImg, resetPreview } from './js/preview.js';
+import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
 import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
+import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
+import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
+
+let appVersion = '';
+
+async function resolveAppVersion() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.get_current_version) {
+    try {
+      const v = await window.pywebview.api.get_current_version();
+      if (v) return String(v).replace(/^v/i, '').trim();
+    } catch (_) { /* fall through to the stamped PWA meta tag */ }
+  }
+  return versionFromDocument();
+}
+
+function applyAppTitle(atlasFilename) {
+  document.title = formatAppTitle(appVersion, atlasFilename);
+}
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
@@ -45,8 +65,12 @@ function _waitForPywebviewReady() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await _waitForPywebviewReady();
+  appVersion = await resolveAppVersion();
+  applyAppTitle('');
   initPanelResizer();
   initAppBar();
+  initOptionsPopover({ applyGap: applyNestGapDistance, revertGap: updateNestRegionsUI });
+  initOptionsRowCollapse();
   // Stamp the initial body.mode-extract class setMode()'s CSS-gated
   // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called
   // reactively (entering/exiting modify mode, or on a fresh atlas load
@@ -65,8 +89,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   await AtlasAPI.init_mesh_mask_from_pref();
   await AtlasAPI.init_mesh_aware_repack_from_pref();
   await AtlasAPI.init_nest_regions_from_pref();
+  await AtlasAPI.init_forced_resizing_from_pref();
+  await AtlasAPI.init_mesh_hull_from_pref();
   updateMeshCroppingUI();
   updateNestRegionsUI();
+  updateForcedResizingUI();
+  updateMeshHullUI();
 
   initSaveSplitMenu();
 
@@ -199,6 +227,7 @@ async function _resetUiAfterFreshLoad() {
   state.lastClickIndex = -1;
   previewImg.style.display = 'none';
   resetPreview();
+  clearOverlay();
   updateButtons();
   updateRemoveButtonState();
   updateRenameButtonState();
@@ -206,6 +235,7 @@ async function _resetUiAfterFreshLoad() {
   updateMeshCroppingUI();
   updateNestRegionsUI();
 
+  applyAppTitle(AtlasAPI.get_current_atlas_filename());
   // Native window title (old Python engine's load_atlas() used to do this;
   // the JS engine has no equivalent hook, so it's centralized here instead
   // — covers all three open paths: Open button, drag-drop, CLI/file
@@ -258,6 +288,10 @@ async function openFile() {
  *  .atlas file lives in on disk — threaded through so extract/save dialogs can
  *  default to it, matching the old Python engine. */
 async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, atlasDirectory) {
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
   try {
     const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
     const imageFileMap = {};
@@ -280,6 +314,10 @@ async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, at
 /** Apply a mod image dropped natively onto the currently-selected regions
  *  in Edit mode (native drag-drop delivers a path, not a browser File). */
 async function applyNativeModImageDrop(imagePath) {
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
   if (state.currentMode !== 'modify') {
     showToast('Enter Edit Mode first to drop images.', 'error');
     return false;
@@ -349,3 +387,5 @@ window.AtlasAPI                  = AtlasAPI;
 window.loadAtlasFromNative       = loadAtlasFromNative;
 window.applyNativeModImageDrop   = applyNativeModImageDrop;
 window.applyNativeSkelDrop       = applyNativeSkelDrop;
+window.isBusy                    = isBusy;
+window.noteBusyConflict          = noteBusyConflict;

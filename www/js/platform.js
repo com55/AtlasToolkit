@@ -42,6 +42,35 @@ export function isPortrait() {
   return window.matchMedia('(orientation: portrait), (max-width: 900px)').matches;
 }
 
+export const PREVIEW_TOP_PAD_PX = 10;
+
+/**
+ * Portrait pan-Y: vertically center the scaled image in the current
+ * container, but never let its top edge sit above `PREVIEW_TOP_PAD_PX`.
+ * Tall images therefore pin 10px from the top and overflow the bottom.
+ */
+export function previewTopAnchoredY(containerH, displayedH, padTop = PREVIEW_TOP_PAD_PX) {
+  return Math.max(padTop, (containerH - displayedH) / 2);
+}
+
+/**
+ * Image top-left in preview-container coordinates.
+ * Portrait/mobile is top-anchored (`top: 0`, y is an offset from the top),
+ * so a splitter height change does not by itself move the image; y is
+ * recomputed separately from the current container height. Landscape stays
+ * center-anchored (`top: 50%`, y is an offset from the vertical center).
+ */
+export function previewImageTopLeft(containerW, containerH, imgW, imgH, scale, x, y, topAnchored) {
+  const topLeftX = containerW / 2 + x - imgW * scale / 2;
+  const topLeftY = topAnchored ? y : containerH / 2 + y - imgH * scale / 2;
+  return { x: topLeftX, y: topLeftY };
+}
+
+/** Zoom-to-cursor origin Y: container top when top-anchored, else vertical center. */
+export function previewZoomOriginY(containerH, topAnchored) {
+  return topAnchored ? 0 : containerH / 2;
+}
+
 /**
  * Base64-encode a Blob/string/binary payload — pywebview's `js_api` bridge
  * only accepts JSON-serializable arguments, so file bytes have to cross as
@@ -90,6 +119,49 @@ export function joinNativePath(dir, name) {
 export function nativePathBasename(path) {
   const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : '';
+}
+
+/** Parent directory of a native OS path, or '' when there is none. */
+function nativePathDirname(path) {
+  const raw = String(path || '');
+  const idx = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'));
+  if (idx <= 0) return '';
+  return raw.slice(0, idx);
+}
+
+/**
+ * A filename has an extension when a dot sits strictly inside the name
+ * (`hero.png`, `shot.tar.gz`). A trailing dot (`hero.`) does not count.
+ * The bare name `.png` already is the png extension.
+ */
+function _basenameHasExtension(basename) {
+  const name = String(basename || '');
+  if (!name || name === '.' || name === '..') return false;
+  if (name.toLowerCase() === '.png') return true;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1;
+}
+
+/**
+ * Append `.png` when the last path segment has no extension.
+ * An existing extension of any kind is left as the user typed it.
+ */
+export function ensurePngExtension(pathOrName) {
+  const path = String(pathOrName ?? '');
+  if (!path) return path;
+  const base = nativePathBasename(path);
+  if (!base || _basenameHasExtension(base)) return path;
+  const stem = path.endsWith('.') ? path.slice(0, -1) : path;
+  return `${stem}.png`;
+}
+
+/**
+ * Save-as names: only PNG exports gain a missing extension.
+ * Zip and atlas saves keep whatever the user typed.
+ */
+export function finalizeSaveFilename(suggestedName, chosenPath) {
+  if (!/\.png$/i.test(String(suggestedName || ''))) return chosenPath;
+  return ensurePngExtension(chosenPath);
 }
 
 /**
@@ -233,11 +305,87 @@ export async function pickSaveFolder(defaultDir = '') {
 }
 
 /**
+ * Copy for the overwrite confirm. One dialog lists every name that already
+ * occupies an output path; confirming replaces all of them.
+ */
+export function overwriteConfirmCopy(names) {
+  const lead = names.length === 1
+    ? 'This file already exists and will be replaced:'
+    : 'These files already exist and will be replaced:';
+  return {
+    title: 'Overwrite files?',
+    message: `${lead}\n${names.join('\n')}`,
+  };
+}
+
+/** True when the save may proceed. An empty list never calls `confirm`. */
+export async function confirmOverwrite(names, confirm) {
+  if (!names || names.length === 0) return true;
+  const { title, message } = overwriteConfirmCopy(names);
+  return !!(await confirm(message, title));
+}
+
+/**
+ * Names in `names` that already exist under `target`.
+ * A directory with the same name counts: the write would hit that path.
+ * target: a plain path string (pywebview) or a FileSystemDirectoryHandle.
+ */
+export async function existingOutputNames(target, names) {
+  const list = (Array.isArray(names) ? names : []).filter((name) => typeof name === 'string' && name);
+  if (list.length === 0) return [];
+
+  if (typeof target === 'string') {
+    if (_isPywebview() && window.pywebview.api.existing_output_names) {
+      const found = await window.pywebview.api.existing_output_names(target, list);
+      return Array.isArray(found) ? found : [];
+    }
+    return [];
+  }
+
+  if (target && typeof target.getFileHandle === 'function') {
+    const found = [];
+    for (const name of list) {
+      try {
+        await target.getFileHandle(name, { create: false });
+        found.push(name);
+      } catch (e) {
+        if (e?.name === 'NotFoundError') continue;
+        // The name exists, but as a directory rather than a file.
+        if (e?.name === 'TypeMismatchError') {
+          found.push(name);
+          continue;
+        }
+        throw e;
+      }
+    }
+    return found;
+  }
+
+  return [];
+}
+
+function _saveCancelled() {
+  const error = new Error('Save cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
  * Write a list of {name, data} to a folder.
  * target: a plain path string (pywebview) or a FileSystemDirectoryHandle
  * (browser, from pickSaveFolder).
+ * `confirm(message, title)` is required when any output name already exists.
+ * Declining throws AbortError and writes nothing.
  */
-export async function writeFilesToFolder(target, files) {
+export async function writeFilesToFolder(target, files, confirm) {
+  const existing = await existingOutputNames(target, files.map((item) => item.name));
+  if (existing.length > 0) {
+    if (typeof confirm !== 'function') {
+      throw new Error('writeFilesToFolder: refusing to replace existing files without confirmation');
+    }
+    if (!(await confirmOverwrite(existing, confirm))) throw _saveCancelled();
+  }
+
   if (typeof target === 'string') {
     const sep = target.includes('\\') ? '\\' : '/';
     for (const item of files) {
@@ -266,12 +414,52 @@ export async function writeFilesToFolder(target, files) {
   throw new Error('writeFilesToFolder: invalid target');
 }
 
+async function _confirmReplace(names) {
+  const { title, message } = overwriteConfirmCopy(names);
+  if (typeof window.showConfirm === 'function') return !!(await window.showConfirm(message, title));
+  if (typeof window.confirm === 'function') return !!window.confirm(`${title}\n\n${message}`);
+  return false;
+}
+
+/**
+ * If this PNG save came back without an extension, append `.png`.
+ * When that changes the path onto a file that already exists, confirm
+ * before replacing it — the save dialog's own overwrite prompt covered
+ * the name the user typed, not the name we just adjusted.
+ * Returns null when the user declines.
+ */
+async function _pathAfterPngExtension(chosenPath, suggestedName) {
+  const finalPath = finalizeSaveFilename(suggestedName, chosenPath);
+  if (finalPath === chosenPath) return finalPath;
+  const dir = nativePathDirname(finalPath);
+  const base = nativePathBasename(finalPath);
+  if (dir && base) {
+    const existing = await existingOutputNames(dir, [base]);
+    if (existing.length > 0 && !(await _confirmReplace(existing))) return null;
+  }
+  return finalPath;
+}
+
+async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
+  const finalName = finalizeSaveFilename(suggestedName, fileHandle.name);
+  if (finalName === fileHandle.name || typeof fileHandle.move !== 'function') return fileHandle;
+  try {
+    await fileHandle.move(finalName);
+  } catch (e) {
+    if (e?.name !== 'InvalidModificationError') throw e;
+    if (!(await _confirmReplace([finalName]))) return null;
+    await fileHandle.move(finalName, { overwrite: true });
+  }
+  return fileHandle;
+}
+
 /**
  * Save a single Blob via a Save As dialog (D1 — output pickers route
  * through the native bridge on pywebview, unlike input pickers).
  * Returns a FileSystemFileHandle (browser, truthy — pass back in as
  * `startIn` for the next save), `true` (pywebview — no handle concept), or
  * `null`/`false` if the user cancelled. Never throws on cancel.
+ * PNG saves whose typed name has no extension are stored as `.png`.
  * @param {object} [opts]
  * @param {*} [opts.startIn] Browser File System Access API resume point.
  * @param {string} [opts.defaultDir] pywebview native dialog starting directory
@@ -281,7 +469,9 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
   if (_isPywebview() && window.pywebview.api.pick_save_file) {
     const path = await window.pywebview.api.pick_save_file(filename, defaultDir);
     if (!path) return null;
-    await window.pywebview.api.write_file_bytes(path, await blobToBase64(blob));
+    const finalPath = await _pathAfterPngExtension(path, filename);
+    if (!finalPath) return null;
+    await window.pywebview.api.write_file_bytes(finalPath, await blobToBase64(blob));
     return true;
   }
 
@@ -301,7 +491,11 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
   if (startIn) pickerOptions.startIn = startIn;
 
   try {
-    const fileHandle = await window.showSaveFilePicker(pickerOptions);
+    const fileHandle = await _applyPngExtensionToHandle(
+      await window.showSaveFilePicker(pickerOptions),
+      filename,
+    );
+    if (!fileHandle) return null;
     const writable = await fileHandle.createWritable();
     await writable.write(blob);
     await writable.close();

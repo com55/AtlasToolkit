@@ -163,6 +163,10 @@ class Api:
     def get_pref(self, key: str, default: Any = None) -> Any:
         return self._config.get(key, default)
 
+    def get_current_version(self) -> str:
+        """App version from pyproject.toml (dev) or the packaged VERSION file."""
+        return get_current_version()
+
     def set_pref(self, key: str, value: Any) -> None:
         self._config.set(key, value)
 
@@ -183,6 +187,26 @@ class Api:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(base64.b64decode(base64_data))
+
+    def existing_output_names(self, folder: str, names: list) -> list[str]:
+        """Output names that already occupy a path under `folder`.
+
+        Matches platform.js `existingOutputNames` for the desktop folder
+        save: a file or a directory with that name must be confirmed before
+        `write_file_bytes` replaces it. Empty names are ignored.
+        """
+        parent = Path(folder)
+        found: list[str] = []
+        for name in names or []:
+            if not isinstance(name, str) or not name or name in (".", ".."):
+                continue
+            candidate = parent / name
+            try:
+                if candidate.is_file() or candidate.is_dir():
+                    found.append(name)
+            except OSError:
+                continue
+        return found
 
     def list_sibling_page_images(self, atlas_path: str) -> dict[str, str]:
         """Glob the `.atlas` file's parent directory for `*.png` siblings —
@@ -289,6 +313,25 @@ class Api:
         )
         return result[0] if result else None
 
+    def pick_skel_file(self, default_dir: str = "") -> Optional[str]:
+        """Native single-file Open dialog for a .skel, opened at the atlas
+        folder — same desktop UX as pick_mod_image. The manual .skel button
+        used a browser file input even on pywebview, which cannot start in
+        that folder."""
+        if not self._window:
+            return None
+        file_types = ("Skeleton Files (*.skel)", "All files (*.*)")
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            allow_multiple=False,
+            file_types=file_types,
+            directory=default_dir or "",
+        )
+        path = _dialog_first_path(result)
+        if not path or not path.lower().endswith(".skel"):
+            return None
+        return path
+
     def pick_save_folder(self, default_dir: str = "") -> Optional[str]:
         """Native folder-picker for output (extract-to-folder / save_modified)
         — see platform.js's pickSaveFolder(), Phase 3."""
@@ -304,10 +347,19 @@ class Api:
         "Save Preview As") — see platform.js's saveFileWithDialog(), Phase 3."""
         if not self._window:
             return None
+        dialog_kwargs = {
+            "directory": default_dir or "",
+            "save_filename": default_filename,
+        }
+        # WinForms SaveFileDialog appends the selected filter's extension
+        # when the typed name has none (AddExtension defaults to true) and
+        # its overwrite prompt then applies to that final name. JS still
+        # checks the returned path, for the All-files filter and for browsers.
+        if str(default_filename or "").lower().endswith(".png"):
+            dialog_kwargs["file_types"] = ("PNG image (*.png)", "All files (*.*)")
         result = self._window.create_file_dialog(
             webview.FileDialog.SAVE,
-            directory=default_dir or "",
-            save_filename=default_filename,
+            **dialog_kwargs,
         )
         return result[0] if result else None
 
@@ -598,6 +650,15 @@ class Api:
                     )
                 return
 
+            busy = self._window.evaluate_js(
+                "!!(window.isBusy && window.isBusy())"
+            )
+            if busy:
+                self._window.evaluate_js(
+                    "window.noteBusyConflict && window.noteBusyConflict()"
+                )
+                return
+
             if path_lower.endswith(".atlas"):
                 # Native drops bypass script.js's openFile() entirely (that's
                 # the JS-only "Open" button's own guard), so loading a new
@@ -651,7 +712,8 @@ class Api:
             # Promise wrapper immediately and the caller would think the
             # drop finished before merge/preview even started.
             self._evaluate_js_promise(
-                f"window.applyNativeModImageDrop({json.dumps(path)})"
+                f"window.applyNativeModImageDrop({json.dumps(path)})",
+                timeout=120.0,
             )
         except Exception as e:
             log.error("Native image drop error: %s", e)

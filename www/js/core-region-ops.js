@@ -22,6 +22,7 @@
  * are exercised via a headless-browser pixel test.
  */
 import { rasterizeMeshMask } from './region-mesh-mask.js';
+import { createCanvas } from './canvas-surface.js';
 
 /**
  * Python `round()` parity (banker's rounding): on an exact .5 tie, round to
@@ -88,9 +89,7 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   const cropW = isSwapped ? h : w;
   const cropH = isSwapped ? w : h;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  const canvas = createCanvas(w, h);
   // willReadFrequently: every sprite this produces gets getImageData'd at
   // least once downstream (repack dedup hashing -- atlas-modifier.js's
   // _canvasHash), often twice (its documented priming-read workaround).
@@ -136,6 +135,39 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
   return canvas;
 }
 
+/** Page-scaled region geometry. Output canvas size is `w×h` when there are
+ *  no offsets, otherwise `offsets[2]×offsets[3]`. Rotation does not swap
+ *  that size: cropAndRotate writes the un-rotated sprite into a `w×h` canvas. */
+export function scaledRegionGeometry(region, page = null) {
+  let x = region.x;
+  let y = region.y;
+  let w = region.w;
+  let h = region.h;
+  let offsets = region.offsets ? [...region.offsets] : null;
+  if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
+    const sx = page.scaleX;
+    const sy = page.scaleY;
+    x = roundHalfEven(x * sx);
+    y = roundHalfEven(y * sy);
+    w = roundHalfEven(w * sx);
+    h = roundHalfEven(h * sy);
+    if (offsets) {
+      offsets[0] = roundHalfEven(offsets[0] * sx);
+      offsets[1] = roundHalfEven(offsets[1] * sy);
+      offsets[2] = roundHalfEven(offsets[2] * sx);
+      offsets[3] = roundHalfEven(offsets[3] * sy);
+    }
+  }
+  return { x, y, w, h, offsets };
+}
+
+/** Pixel size of the canvas extractRegionFromPage returns for this region. */
+export function extractedCanvasSize(region, page = null) {
+  const g = scaledRegionGeometry(region, page);
+  if (!g.offsets) return { width: g.w, height: g.h };
+  return { width: g.offsets[2], height: g.offsets[3] };
+}
+
 /**
  * Extract a region from its page image: apply page scale factors, crop and
  * un-rotate, then (if the region has offsets) paste onto an original-size
@@ -157,40 +189,21 @@ export function cropAndRotate(img, x, y, w, h, rotate) {
  * @returns {HTMLCanvasElement}
  */
 export function extractRegionFromPage(pageImage, region, page = null, meshGeometry = null) {
-  let { x, y, w: rawW, h: rawH } = region;
   const rot = region.rotate;
-
-  if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
-    const sx = page.scaleX;
-    const sy = page.scaleY;
-    x = roundHalfEven(x * sx);
-    y = roundHalfEven(y * sy);
-    rawW = roundHalfEven(rawW * sx);
-    rawH = roundHalfEven(rawH * sy);
-  }
+  const { x, y, w: rawW, h: rawH, offsets } = scaledRegionGeometry(region, page);
 
   const sprite = cropAndRotate(pageImage, x, y, rawW, rawH, rot);
   const currentW = sprite.width;
   const currentH = sprite.height;
 
-  if (!region.offsets) {
+  if (!offsets) {
     if (meshGeometry) maskInPlace(sprite, meshGeometry, currentW, currentH);
     return sprite;
   }
 
-  let [offX, offY, origW, origH] = region.offsets;
-  if (page && (page.scaleX !== 1.0 || page.scaleY !== 1.0)) {
-    const sx = page.scaleX;
-    const sy = page.scaleY;
-    offX = roundHalfEven(offX * sx);
-    offY = roundHalfEven(offY * sy);
-    origW = roundHalfEven(origW * sx);
-    origH = roundHalfEven(origH * sy);
-  }
+  const [offX, offY, origW, origH] = offsets;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = origW;
-  canvas.height = origH;
+  const canvas = createCanvas(origW, origH);
   const ctx = canvas.getContext('2d', { willReadFrequently: true }); // see cropAndRotate's comment
   ctx.imageSmoothingEnabled = false;
   const pasteX = offX;

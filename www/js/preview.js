@@ -1,6 +1,7 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
-import { isPortrait } from './platform.js';
+import { isPortrait, previewImageTopLeft, previewTopAnchoredY, previewZoomOriginY } from './platform.js';
+import { hullPolyline } from './atlas-extracter.js';
 
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
@@ -14,10 +15,9 @@ export function setPreviewSrc(url) {
   previewImg.src = url || '';
   _previewObjectUrl = (url && String(url).startsWith('blob:')) ? url : null;
   if (prev && prev !== url) {
-    // get_preview() memoizes blob: URLs. If we revoke one that's still
-    // cached there, Edit→View would set <img src> to a dead blob and
-    // show the broken-image icon (found 2026-08-23).
-    if (AtlasAPI.forget_preview_url) AtlasAPI.forget_preview_url(prev);
+    // PreviewCache holds live blob: URLs. Revoking one it still owns
+    // would break View A→B→A (and Edit page 0→1→0) reuse.
+    if (AtlasAPI.preview_url_is_cached && AtlasAPI.preview_url_is_cached(prev)) return;
     URL.revokeObjectURL(prev);
   }
 }
@@ -42,10 +42,108 @@ export function fitScaleIfOversized(containerW, containerH, imgW, imgH) {
   return (imgW > containerW || imgH > containerH) ? Math.min(containerW / imgW, containerH / imgH) : null;
 }
 
+/** Reset pan/zoom, shrink if oversized, and on portrait place the image. */
+export function applyAutoFit() {
+  resetPreview();
+  const containerW = previewContainer.clientWidth - 40;
+  const containerH = previewContainer.clientHeight - 40;
+  const imgW = previewImg.naturalWidth;
+  const imgH = previewImg.naturalHeight;
+  if (!imgW || !imgH) {
+    applyTransform();
+    return;
+  }
+  const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
+  if (fitScale !== null) state.viewState.scale = fitScale;
+  applyPortraitVerticalAlign();
+  applyTransform();
+}
+
+/** Portrait: center if the scaled image fits, otherwise pin 10px from the top. */
+export function applyPortraitVerticalAlign() {
+  if (!isPortrait()) return;
+  const imgH = previewImg.naturalHeight;
+  if (!imgH) return;
+  void previewContainer.offsetHeight;
+  state.viewState.y = previewTopAnchoredY(
+    previewContainer.clientHeight,
+    imgH * state.viewState.scale,
+  );
+}
+
 export function applyTransform() {
   const { x, y, scale } = state.viewState;
-  previewImg.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
+  const topAnchored = isPortrait();
+  previewImg.style.top = topAnchored ? '0' : '50%';
+  previewImg.style.transformOrigin = topAnchored ? 'top center' : 'center center';
+  previewImg.style.transform = topAnchored
+    ? `translate(calc(-50% + ${x}px), ${y}px) scale(${scale})`
+    : `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
   if (state.currentMode === 'modify') drawRegionOverlay();
+  else drawMeshHullOverlay();
+}
+
+const MESH_HULL_STROKE = 'rgba(80, 140, 255, 0.95)';
+let _meshHullPaths = [];
+
+function setMeshHullLayout(layout) {
+  _meshHullPaths = [];
+  if (!layout) return;
+  for (const item of layout.items) {
+    const pts = hullPolyline(item);
+    if (!pts) continue;
+    const path = new Path2D();
+    path.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) path.lineTo(pts[i].x, pts[i].y);
+    path.closePath();
+    _meshHullPaths.push(path);
+  }
+}
+
+function applyMeshHullFor(names) {
+  setMeshHullLayout(AtlasAPI.get_mesh_hull_layout ? AtlasAPI.get_mesh_hull_layout(names) : null);
+}
+
+/** Rebuild the blue hull from the current selection and paint it. View mode
+ *  only. The preview bitmap is left alone. */
+export function refreshMeshHullOverlay() {
+  if (state.currentMode === 'modify') return;
+  applyMeshHullFor(getSelectedRegions().map((r) => r.key));
+  drawMeshHullOverlay();
+}
+
+export function drawMeshHullOverlay() {
+  const canvas = document.getElementById('region-overlay');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const containerW = previewContainer.clientWidth;
+  const containerH = previewContainer.clientHeight;
+  canvas.width = containerW * dpr;
+  canvas.height = containerH * dpr;
+  canvas.style.width = containerW + 'px';
+  canvas.style.height = containerH + 'px';
+  canvas.style.pointerEvents = 'none';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, containerW, containerH);
+  if (state.currentMode === 'modify' || _meshHullPaths.length === 0) return;
+
+  const imgW = previewImg.naturalWidth, imgH = previewImg.naturalHeight;
+  if (!imgW || !imgH) return;
+
+  const { scale, x, y } = state.viewState;
+  const { x: topLeftX, y: topLeftY } = previewImageTopLeft(
+    containerW, containerH, imgW, imgH, scale, x, y, isPortrait(),
+  );
+  ctx.save();
+  ctx.translate(topLeftX, topLeftY);
+  ctx.scale(scale, scale);
+  ctx.lineWidth = 1.5 / scale;
+  ctx.strokeStyle = MESH_HULL_STROKE;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  for (const path of _meshHullPaths) ctx.stroke(path);
+  ctx.restore();
 }
 
 export function drawRegionOverlay() {
@@ -68,10 +166,9 @@ export function drawRegionOverlay() {
   if (!imgW || !imgH) return;
 
   const { scale, x, y } = state.viewState;
-  const centerX  = containerW / 2 + x;
-  const centerY  = containerH / 2 + y;
-  const topLeftX = centerX - imgW * scale / 2;
-  const topLeftY = centerY - imgH * scale / 2;
+  const { x: topLeftX, y: topLeftY } = previewImageTopLeft(
+    containerW, containerH, imgW, imgH, scale, x, y, isPortrait(),
+  );
   const lineWidth = 3;
 
   const multiPage = state.modifyPages.length > 1;
@@ -112,46 +209,149 @@ export function drawRegionOverlay() {
 }
 
 export function clearOverlay() {
+  // Drop cached hulls and retire any in-flight View preview. resetPreview()
+  // redraws through applyTransform, and a preview job that started against
+  // the previous atlas would otherwise stroke those paths onto the new file.
+  previewGeneration++;
+  if (previewTimer) {
+    clearTimeout(previewTimer);
+    previewTimer = null;
+  }
+  if (settlePreview) {
+    const finish = settlePreview;
+    settlePreview = null;
+    finish();
+  }
+  pendingRegions = null;
+  hidePreviewBusy();
+  _meshHullPaths = [];
   const canvas = document.getElementById('region-overlay');
-  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-export async function updatePreview(regions) {
+// View Mode preview only. Both a click and a held mouse/touch wait 100ms
+// from the last selection change. Releasing the pointer restarts that wait.
+const VIEW_PREVIEW_DEBOUNCE_MS = 100;
+const VIEW_PREVIEW_HELD_DEBOUNCE_MS = 100;
+
+let viewPointerHeld = false;
+let previewTimer = null;
+let previewGeneration = 0;
+let pendingRegions = null;
+let settlePreview = null;
+
+export function setViewPreviewPointerHeld(held) {
+  const was = viewPointerHeld;
+  viewPointerHeld = !!held;
+  if (was && !viewPointerHeld && previewTimer) {
+    armViewPreview(pendingRegions, VIEW_PREVIEW_DEBOUNCE_MS);
+  }
+}
+
+function armViewPreview(regions, delay) {
+  pendingRegions = regions;
+  const gen = ++previewGeneration;
+  if (previewTimer) clearTimeout(previewTimer);
+  if (settlePreview) {
+    const finish = settlePreview;
+    settlePreview = null;
+    finish();
+  }
+  return new Promise((resolve) => {
+    settlePreview = resolve;
+    previewTimer = setTimeout(() => {
+      previewTimer = null;
+      const finish = settlePreview;
+      settlePreview = null;
+      void runViewPreview(regions, gen).finally(() => { if (finish) finish(); });
+    }, delay);
+  });
+}
+
+function showPreviewBusy() {
+  document.getElementById('preview-busy')?.classList.remove('hidden');
+}
+
+function hidePreviewBusy() {
+  document.getElementById('preview-busy')?.classList.add('hidden');
+}
+
+/** Two frames so the spinner paints before synchronous resize work. */
+function yieldForPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+/** Let input queued during the preview call bump previewGeneration first. */
+function yieldToInput() {
+  return new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
+async function runViewPreview(regions, gen) {
   const status = document.getElementById('status-text');
   if (!regions || regions.length === 0) {
+    if (gen !== previewGeneration) return;
+    hidePreviewBusy();
     previewImg.style.display = 'none';
+    applyMeshHullFor([]);
+    drawMeshHullOverlay();
     status.innerText = 'No selection';
     updateSaveMergedButton();
     return;
   }
   const keys = regions.map(r => r.key);
   const labels = regions.map(r => r.label);
-  const base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(keys) : null;
+  const cached = !!(AtlasAPI.preview_is_cached && AtlasAPI.preview_is_cached(keys));
+  if (!cached && gen === previewGeneration) {
+    showPreviewBusy();
+    await yieldForPaint();
+  }
+  let base64Img = null;
+  try {
+    base64Img = AtlasAPI.get_preview ? await AtlasAPI.get_preview(keys) : null;
+  } catch (e) {
+    console.error(e);
+  }
+  await yieldToInput();
+  if (gen !== previewGeneration) return;
+  hidePreviewBusy();
+  applyMeshHullFor(keys);
   if (base64Img) {
+    const previousSrc = previewImg.src;
     setPreviewSrc(base64Img);
+    if (previousSrc === base64Img && previewImg.complete && previewImg.naturalWidth) {
+      drawMeshHullOverlay();
+    }
     previewImg.style.display = 'block';
     status.innerText = labels.length === 1 ? `Previewing: ${labels[0]}` : `Previewing: ${labels.length} regions`;
     previewImg.onload = function () {
-      resetPreview();
-      const containerW = previewContainer.clientWidth - 40;
-      const containerH = previewContainer.clientHeight - 40;
+      if (gen !== previewGeneration) return;
+      applyAutoFit();
       const imgW = previewImg.naturalWidth, imgH = previewImg.naturalHeight;
       status.innerText = labels.length === 1
         ? `Previewing: ${labels[0]} (${imgW}x${imgH})`
         : `Previewing: ${labels.length} regions (${imgW}x${imgH})`;
-      const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-      if (fitScale !== null) {
-        state.viewState.scale = fitScale;
-        applyTransform();
-      }
       updateSaveMergedButton();
       previewImg.onload = null;
     };
   } else {
+    applyMeshHullFor([]);
+    drawMeshHullOverlay();
     previewImg.style.display = 'none';
     status.innerText = 'Preview failed';
     updateSaveMergedButton();
   }
+}
+
+export function updatePreview(regions) {
+  return armViewPreview(
+    regions,
+    viewPointerHeld ? VIEW_PREVIEW_HELD_DEBOUNCE_MS : VIEW_PREVIEW_DEBOUNCE_MS,
+  );
 }
 
 export function updateModifyPreview(names) {
@@ -189,7 +389,7 @@ function onPreviewWheel(e) {
   const newScale = state.viewState.scale + direction * 0.1 * state.viewState.scale;
   if (newScale > 0.1 && newScale < 50) {
     const rect = previewContainer.getBoundingClientRect();
-    const cx = rect.width / 2, cy = rect.height / 2;
+    const cx = rect.width / 2, cy = previewZoomOriginY(rect.height, isPortrait());
     const mx = e.clientX - rect.left - cx, my = e.clientY - rect.top - cy;
     state.viewState.x     = mx - (mx - state.viewState.x) * (newScale / state.viewState.scale);
     state.viewState.y     = my - (my - state.viewState.y) * (newScale / state.viewState.scale);
@@ -254,7 +454,7 @@ previewContainer.addEventListener('touchmove', (e) => {
         x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
         y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
       };
-      const cx = rect.width / 2, cy = rect.height / 2;
+      const cx = rect.width / 2, cy = previewZoomOriginY(rect.height, isPortrait());
       const mx = mid.x - rect.left - cx, my = mid.y - rect.top - cy;
       state.viewState.x     = mx - (mx - state.viewState.x) * (newScale / state.viewState.scale);
       state.viewState.y     = my - (my - state.viewState.y) * (newScale / state.viewState.scale);

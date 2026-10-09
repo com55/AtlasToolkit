@@ -1,5 +1,4 @@
-import { state } from './state.js';
-import { drawRegionOverlay } from './preview.js';
+import { applyPortraitVerticalAlign, applyTransform } from './preview.js';
 import { isPortrait } from './platform.js';
 
 let _applyStoredSplit = null;
@@ -21,9 +20,9 @@ export function initPanelResizer() {
   const mainContent   = document.getElementById('main-content');
   const sidebarHead   = document.getElementById('sidebar-head');
   const advanceToolbar = document.getElementById('advance-toolbar');
-  const optionsRow    = document.getElementById('options-row');
+  const optionsRowWrap = document.getElementById('options-row-wrap');
   const statusBar     = document.getElementById('status-bar');
-  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !optionsRow || !statusBar) return;
+  if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !optionsRowWrap || !statusBar) return;
 
   let dragging  = false;
   let startPos  = 0;
@@ -44,7 +43,7 @@ export function initPanelResizer() {
   // panels. The wide left/right layout is locked to a fixed width, matching
   // the Python app -- it is not user-resizable.
   const minRightHeight = () =>
-    optionsRow.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
+    optionsRowWrap.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
   const maxRightHeight = () => Math.max(
     minRightHeight(),
     mainContent.getBoundingClientRect().height
@@ -82,7 +81,8 @@ export function initPanelResizer() {
       leftPanel.style.removeProperty('flex');
     }
 
-    if (state.currentMode === 'modify') drawRegionOverlay();
+    applyPortraitVerticalAlign();
+    applyTransform();
   };
 
   splitter.addEventListener('pointerdown', (e) => {
@@ -102,7 +102,8 @@ export function initPanelResizer() {
     const maxH  = maxRightHeight();
     rightPanel.style.flex   = 'none';
     rightPanel.style.height = `${clamp(startSize + delta, minH, maxH)}px`;
-    if (state.currentMode === 'modify') drawRegionOverlay();
+    applyPortraitVerticalAlign();
+    applyTransform();
   });
 
   const stopDragging = (e) => {

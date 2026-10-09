@@ -48,6 +48,7 @@ import { footprintForCanonical } from '/www/js/repack-nest.js';
 import { _combineMeshGeometry, _groupNamesBySpriteIdentity, maskCropRectForOffsets, _rotateSpriteForPack } from '/www/js/atlas-modifier.js';
 import { AtlasProcessor } from '/www/js/atlas-extracter.js';
 import { AtlasModifier } from '/www/js/atlas-modifier.js';
+import { runNestPack, jobRunnerOrigin } from '/www/js/job-runner.js';
 
 function solidCanvas(w, h) {
   const c = document.createElement('canvas');
@@ -462,6 +463,12 @@ window.runCase = async (name) => {
     console.log(\`[performance-benchmark] N=\${N} realistic-size regions, Nest Regions on: elapsedMs=\${elapsedMs.toFixed(0)} (spec's provisional budget: 5000ms -- report this number to the user regardless of pass/fail)\`);
     check(\`repack of \${N} realistic-size regions with Nest Regions on completes without a runaway regression (informational vs the provisional 5000ms budget -- see console output for the actual number)\`,
       elapsedMs < 15000, \`elapsedMs=\${elapsedMs.toFixed(0)}\`);
+  } else if (name === 'nestpack-uses-worker') {
+    const fp = new Uint8Array(4).fill(1);
+    const got = await runNestPack([{ name: 'a', w: 2, h: 2, footprint: fp }], { gapDistance: 1 });
+    const origin = jobRunnerOrigin();
+    check('nestPack job ran', Array.isArray(got.placements) && got.placements.length === 1);
+    check('Worker origin is module-url or blob-url (not main-thread)', origin === 'module-url' || origin === 'blob-url', String(origin));
   } else {
     results.push({ label: 'unknown case', ok: false, detail: name });
   }
@@ -492,7 +499,7 @@ page.on('console', (msg) => console.log('[page] ' + msg.text()));
 await page.goto(`http://localhost:${port}/harness`);
 await page.waitForFunction('window.__ready === true');
 
-const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw', 'toggle-off-shelfpack-output-is-correct', 'toggle-on-no-mesh-uses-gap-a-space', 't-shape-wing-never-bleeds', 'gap-distance-respected', 'rotation-mask-pixel-agreement', 'rotate-180-270-pixel-correctness', 'shared-canvas-mod-group-one-combined-footprint', 'performance-benchmark'];
+const cases = ['dimension-mismatch-member-skipped', 'null-meshLookupFn-returns-solid-mask-no-throw', 'toggle-off-shelfpack-output-is-correct', 'toggle-on-no-mesh-uses-gap-a-space', 't-shape-wing-never-bleeds', 'gap-distance-respected', 'rotation-mask-pixel-agreement', 'rotate-180-270-pixel-correctness', 'shared-canvas-mod-group-one-combined-footprint', 'performance-benchmark', 'nestpack-uses-worker'];
 let pass = 0, fail = 0;
 for (const name of cases) {
   const results = await page.evaluate((n) => window.runCase(n), name);
