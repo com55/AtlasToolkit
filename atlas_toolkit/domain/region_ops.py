@@ -46,3 +46,36 @@ def overlay_rect(bounds: list[int], rotate: int) -> list[int]:
     document.py's Region class."""
     x, y, w, h = bounds
     return [x, y, h, w] if rotate in (90, 270) else [x, y, w, h]
+
+
+def scaled_region_geometry(
+    region, scale_x: float = 1.0, scale_y: float = 1.0,
+) -> tuple[int, int, int, int, list[int] | None]:
+    """Page-scaled (x, y, w, h, offsets) of a region -- port of
+    core-region-ops.js's scaledRegionGeometry. `region` needs x/y/w/h and
+    offsets ([left, bottom, originalWidth, originalHeight] or None)."""
+    x, y, w, h = region.x, region.y, region.w, region.h
+    offsets = list(region.offsets) if region.offsets else None
+    if scale_x != 1.0 or scale_y != 1.0:
+        x, w = round_half_even(x * scale_x), round_half_even(w * scale_x)
+        y, h = round_half_even(y * scale_y), round_half_even(h * scale_y)
+        if offsets:
+            offsets = [
+                round_half_even(offsets[0] * scale_x),
+                round_half_even(offsets[1] * scale_y),
+                round_half_even(offsets[2] * scale_x),
+                round_half_even(offsets[3] * scale_y),
+            ]
+    return x, y, w, h, offsets
+
+
+def extracted_canvas_size(
+    region, scale_x: float = 1.0, scale_y: float = 1.0,
+) -> tuple[int, int]:
+    """(width, height) of the image extraction returns for this region:
+    w x h without offsets, else the original size. Rotation does not swap
+    it. Port of core-region-ops.js's extractedCanvasSize."""
+    _x, _y, w, h, offsets = scaled_region_geometry(region, scale_x, scale_y)
+    if not offsets:
+        return w, h
+    return offsets[2], offsets[3]

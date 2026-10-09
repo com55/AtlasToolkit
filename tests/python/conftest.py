@@ -50,3 +50,23 @@ def run_packing_oracle():
         return json.loads(result.stdout)
 
     return run
+
+
+@pytest.fixture(scope="session")
+def run_preview_oracle():
+    """Callable: list of (op, args) pairs -> list of results from the real
+    www/js preview helpers, via gen_js_reference_preview.mjs in plain Node.
+    Skips only the tests that request it when node is absent."""
+    if shutil.which("node") is None:
+        pytest.skip("node not found on PATH")
+
+    def run(cases: list[tuple[str, list]]) -> list:
+        result = subprocess.run(
+            ["node", str(HERE / "gen_js_reference_preview.mjs")],
+            input=json.dumps([{"op": op, "args": args} for op, args in cases]),
+            capture_output=True, text=True, check=True,
+            cwd=HERE.parent.parent,
+        )
+        return json.loads(result.stdout)
+
+    return run

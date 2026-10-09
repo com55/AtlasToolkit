@@ -365,6 +365,14 @@ class AtlasSession:
         finally:
             self._raster.release_except(before)
 
+    def get_mesh_hull_layout(
+        self, region_names: list[str], force_resize: bool = False,
+    ) -> dict:
+        """View Mode hull overlay for these pristine region keys, in the
+        same composite space as the multi-region preview."""
+        self._require_open()
+        return self._processor.preview_hull_layout(list(region_names), force_resize)
+
     def save(self) -> tuple[str, dict[str, bytes]]:
         self._require_open()
         document = self._active.document if self._active is not None else self._document
