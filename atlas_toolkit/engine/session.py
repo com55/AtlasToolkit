@@ -353,14 +353,16 @@ class AtlasSession:
         finally:
             self._raster.release_except(before)
 
-    def get_preview_png(self, region_names: list[str] | None = None) -> bytes:
+    def get_preview_png(
+        self, region_names: list[str] | None = None, force_resize: bool = False,
+    ) -> bytes:
         self._require_open()
         before = self._raster.checkpoint()
         try:
             if region_names is None:
                 image = self._active.image if self._active is not None else self._processor.get_page_image()
             else:
-                image = self._processor.get_preview_image(region_names)
+                image = self._processor.get_preview_image(region_names, force_resize)
             return b"" if image is None else self._raster.encode_png(image)
         finally:
             self._raster.release_except(before)

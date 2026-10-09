@@ -137,7 +137,12 @@ class AtlasProcessor:
             })
         return layout_preview_hulls(entries, bool(force_resize))
 
-    def get_preview_image(self, names: list[str]) -> ImageHandle | None:
+    def get_preview_image(
+        self, names: list[str], force_resize: bool = False,
+    ) -> ImageHandle | None:
+        """Stack the extracted regions, earlier names on top. One image is
+        returned as-is. Forced resizing Lanczos-resizes every image to the
+        largest-area one (renderPreviewCanvases)."""
         images: list[ImageHandle] = []
         composite: ImageHandle | None = None
         try:
@@ -151,11 +156,19 @@ class AtlasProcessor:
             if len(images) == 1:
                 return images.pop()
 
-            max_w = max(self._raster.size(image)[0] for image in images)
-            max_h = max(self._raster.size(image)[1] for image in images)
-            composite = self._raster.create(max_w, max_h)
+            frame = preview_composite_frame(
+                [self._raster.size(image) for image in images], force_resize,
+            )
+            composite = self._raster.create(frame["width"], frame["height"])
             for image in reversed(images):
-                self._raster.paste(composite, image, 0, 0)
+                if not frame["scale"] or self._raster.size(image) == (frame["width"], frame["height"]):
+                    self._raster.paste(composite, image, 0, 0)
+                    continue
+                resized = self._raster.resize_lanczos(image, frame["width"], frame["height"])
+                try:
+                    self._raster.paste(composite, resized, 0, 0)
+                finally:
+                    self._raster.dispose(resized)
             result = composite
             composite = None
             return result

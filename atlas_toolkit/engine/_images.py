@@ -55,6 +55,9 @@ class _SessionRaster:
     def clone(self, handle: ImageHandle) -> ImageHandle:
         return self._track(self._backend.clone(handle))
 
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
+        return self._track(self._backend.resize_lanczos(handle, width, height))
+
     def dispose(self, handle: ImageHandle) -> None:
         if handle in self._owned:
             self._backend.dispose(handle)
