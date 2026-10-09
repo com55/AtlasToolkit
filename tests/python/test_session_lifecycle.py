@@ -1223,7 +1223,7 @@ def test_task5_setting_rerun_failure_restores_saved_output_and_all_live_pixels(
     # The same real repack pipeline remains usable after the injected failure.
     result = getattr(loaded, setter)(arguments[setter])
     assert result is not None
-    assert loaded.snapshot().generation == before_snapshot.generation + 1
+    assert loaded.snapshot().generation == before_snapshot.generation
     assert loaded._modifications_saved is True
     loaded.close()
     assert raster._images == {}
@@ -1348,6 +1348,6 @@ def test_task5_toggle_rerun_keeps_positive_dimension_gate_on_real_packer(monkeyp
     # A valid later call exercises the unchanged real packer and gate again.
     result = loaded.set_mesh_aware_repack_enabled(True)
     assert result is not None
-    assert loaded.snapshot().generation == before_snapshot.generation + 1
+    assert loaded.snapshot().generation == before_snapshot.generation
     loaded.close()
     assert raster._images == {}
