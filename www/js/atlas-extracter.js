@@ -11,7 +11,9 @@
  */
 
 import { AtlasDocument } from './atlas-document.js';
-import { cropAndRotate as coreCropAndRotate, extractRegionFromPage } from './core-region-ops.js';
+import { cropAndRotate as coreCropAndRotate, extractRegionFromPage, extractedCanvasSize } from './core-region-ops.js';
+import { resizeCanvasLanczos } from './lanczos-resize.js';
+import { canvasToPngBlob, createCanvas } from './canvas-surface.js';
 
 class AtlasPage {
   constructor(filename) {
@@ -52,7 +54,7 @@ export class AtlasProcessor {
     this.regions = {};       // name → AtlasRegion (ordered by insertion)
     this._loadedImages = {}; // pageName → HTMLImageElement
     this._pageMap = {};      // pageName → AtlasPage
-    this._meshLookup = null;   // Map<regionName, {uvs, triangles}> | null
+    this._meshLookup = null;   // Map<regionName, {uvs, triangles, hullLength}> | null
     this._maskEnabled = false;
     this._nestEnabled = false;
     this._nestGapDistance = 4;
@@ -217,29 +219,60 @@ export class AtlasProcessor {
    * fix (2026-08-23): a 2k–4k page can take hundreds of ms just to
    * base64-encode, then the <img> has to decode it again.
    */
-  getPreviewDataURL(names) {
+  getPreviewDataURL(names, { forceResize = false } = {}) {
     const images = names
       .filter(n => n in this.regions)
       .map(n => this.extractRegion(n))
       .filter(Boolean);
-
-    if (images.length === 0) return Promise.resolve(null);
-    if (images.length === 1) return canvasToPreviewUrl(images[0]);
-
-    const maxW = Math.max(...images.map(c => c.width));
-    const maxH = Math.max(...images.map(c => c.height));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = maxW;
-    canvas.height = maxH;
-    const ctx = canvas.getContext('2d');
-
-    // Composite in reverse order (last on top matches Python's alpha_composite)
-    for (const img of [...images].reverse()) {
-      ctx.drawImage(img, 0, 0);
-    }
-
+    const canvas = renderPreviewCanvases(images, forceResize);
     return canvasToPreviewUrl(canvas);
+  }
+
+  /** Hull polylines for the View Mode overlay. Ignores the Mesh Cropping
+   *  toggle. Skips a region whose page image is not loaded, matching
+   *  getPreviewDataURL, which also drops that region from the composite. */
+  previewHullLayout(names, forceResize) {
+    const entries = [];
+    for (const name of names) {
+      const region = this.regions[name];
+      if (!region) continue;
+      if (!this._loadedImages[region.pageFilename]) continue;
+      const page = this._pageMap[region.pageFilename];
+      const size = extractedCanvasSize(region, page);
+      const mesh = this._meshAvailableFor(name);
+      entries.push({
+        width: size.width,
+        height: size.height,
+        uvs: mesh ? mesh.uvs : null,
+        hullLength: mesh ? mesh.hullLength : 0,
+      });
+    }
+    return layoutPreviewHulls(entries, !!forceResize);
+  }
+
+  /** Plain data for a preview Worker. Page pixels stay on the caller. */
+  previewJobSpec(names, forceResize) {
+    const regions = [];
+    const pageIds = [];
+    for (const name of names) {
+      const region = this.regions[name];
+      if (!region) continue;
+      if (!pageIds.includes(region.pageFilename)) pageIds.push(region.pageFilename);
+      const page = this._pageMap[region.pageFilename];
+      const mesh = this.getMeshGeometry(name);
+      regions.push({
+        pageId: region.pageFilename,
+        x: region.x,
+        y: region.y,
+        w: region.w,
+        h: region.h,
+        rotate: region.rotate,
+        offsets: region.offsets ? [...region.offsets] : null,
+        page: page ? { scaleX: page.scaleX, scaleY: page.scaleY } : null,
+        mesh: mesh ? { uvs: [...mesh.uvs], triangles: [...mesh.triangles] } : null,
+      });
+    }
+    return { forceResize: !!forceResize, regions, pageIds };
   }
 
   /**
@@ -261,22 +294,107 @@ export class AtlasProcessor {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/** Greatest extracted-canvas area, in name order. An equal area keeps the
+ *  earlier entry. */
+export function pickForceResizeTarget(sizes) {
+  let best = sizes[0];
+  let bestArea = best.width * best.height;
+  for (let i = 1; i < sizes.length; i++) {
+    const area = sizes[i].width * sizes[i].height;
+    if (area > bestArea) {
+      best = sizes[i];
+      bestArea = area;
+    }
+  }
+  return { width: best.width, height: best.height };
+}
+
+/** Stack extracted canvases. One image is returned as-is. */
+export function renderPreviewCanvases(images, forceResize) {
+  if (!images || images.length === 0) return null;
+  if (images.length === 1) return images[0];
+  const frame = previewCompositeFrame(
+    images.map((c) => ({ width: c.width, height: c.height })),
+    forceResize,
+  );
+  const canvas = createCanvas(frame.width, frame.height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  // Reverse order: the earlier list entry is painted last (on top).
+  // Forced resizing enlarges each extracted canvas with Lanczos-3.
+  for (const img of [...images].reverse()) {
+    if (!frame.scale || (img.width === frame.width && img.height === frame.height)) {
+      ctx.drawImage(img, 0, 0);
+      continue;
+    }
+    ctx.drawImage(resizeCanvasLanczos(img, frame.width, frame.height), 0, 0);
+  }
+  return canvas;
+}
+
+/** Place each region's hull in the same composite space as renderPreviewCanvases.
+ *  Forced resizing scales a smaller canvas on both axes to the target frame.
+ *  A canvas already at that size stays 1:1. */
+export function layoutPreviewHulls(entries, forceResize) {
+  if (!entries || entries.length === 0) {
+    return { frame: { width: 0, height: 0, scale: false }, items: [] };
+  }
+  const frame = previewCompositeFrame(
+    entries.map((e) => ({ width: e.width, height: e.height })),
+    forceResize,
+  );
+  const items = entries.map((e) => {
+    const stretch = !!(frame.scale && (e.width !== frame.width || e.height !== frame.height));
+    return {
+      width: e.width,
+      height: e.height,
+      scaleX: stretch ? frame.width / e.width : 1,
+      scaleY: stretch ? frame.height / e.height : 1,
+      uvs: e.uvs || null,
+      hullLength: e.hullLength || 0,
+    };
+  });
+  return { frame, items };
+}
+
+/** Closed hull in composite pixels. The first hullLength UV pairs are Spine's
+ *  outline; later pairs are interior vertices and are not stroked. */
+export function hullPolyline(item) {
+  const n = item.hullLength | 0;
+  if (!item.uvs || n < 3 || item.uvs.length < n * 2) return null;
+  const pts = new Array(n);
+  for (let i = 0; i < n; i++) {
+    pts[i] = {
+      x: item.uvs[i * 2] * item.width * item.scaleX,
+      y: item.uvs[i * 2 + 1] * item.height * item.scaleY,
+    };
+  }
+  return pts;
+}
+
+/** Frame for the View Mode multi-image composite. Forced resizing scales
+ *  every canvas to the single largest area; otherwise the frame is
+ *  max(width) × max(height) and images are drawn unscaled. */
+export function previewCompositeFrame(sizes, forceResize) {
+  const width = Math.max(...sizes.map((s) => s.width));
+  const height = Math.max(...sizes.map((s) => s.height));
+  if (!forceResize || sizes.length < 2) {
+    return { width, height, scale: false };
+  }
+  const target = pickForceResizeTarget(sizes);
+  return { width: target.width, height: target.height, scale: true };
+}
+
 /**
  * Encode a canvas as a `blob:` URL via toBlob() — skips the PNG→base64
  * step that `toDataURL('image/png')` does on the main thread. The preview
  * <img> and getPreviewPngBlob()'s fetch(img.src) both accept blob: URLs.
  */
-export function canvasToPreviewUrl(canvas) {
-  if (!canvas) return Promise.resolve(null);
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('canvas.toBlob failed'));
-        return;
-      }
-      resolve(URL.createObjectURL(blob));
-    }, 'image/png');
-  });
+export async function canvasToPreviewUrl(canvas) {
+  if (!canvas) return null;
+  const blob = await canvasToPngBlob(canvas);
+  if (!blob) return null;
+  return URL.createObjectURL(blob);
 }
 
 /** Load an image from a File object or a URL/data-URL string. */

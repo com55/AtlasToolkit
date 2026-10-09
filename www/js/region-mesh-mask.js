@@ -1,3 +1,5 @@
+import { createCanvas } from './canvas-surface.js';
+
 /**
  * Rasterizes a mesh's texture-space UV polygon into an alpha mask.
  * Pure geometry — takes the exact target width/height as arguments and has
@@ -14,9 +16,7 @@
  * @returns {HTMLCanvasElement}  width×height, opaque inside the polygon
  */
 export function rasterizeMeshMask(uvs, triangles, width, height) {
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#fff';
   ctx.beginPath();

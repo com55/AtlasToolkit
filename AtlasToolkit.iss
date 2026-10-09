@@ -57,6 +57,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Associate .atlas files with {#MyAppName}"; GroupDescription: "File associations:"
 
+[InstallDelete]
+; 0.3.x shipped the UI in {app}\ui; the unified app serves www\ instead.
+Type: filesandordirs; Name: "{app}\ui"
+
 [Files]
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 

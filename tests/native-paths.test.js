@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from '../www/js/platform.js';
+import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename, ensurePngExtension, finalizeSaveFilename } from '../www/js/platform.js';
 
 test('joinNativePath keeps Windows or POSIX separators', () => {
   assert.equal(joinNativePath('C:\\atlas', 'page.png'), 'C:\\atlas\\page.png');
@@ -36,6 +36,28 @@ test('pickSiblingSkelFile finds the matching .skel in a dropped file list', () =
   assert.equal(pickSiblingSkelFile('hero.atlas', [{ name: 'other.skel' }]), null);
   const upper = { name: 'HERO.SKEL' };
   assert.equal(pickSiblingSkelFile('Hero.atlas', [upper]), upper);
+});
+
+test('ensurePngExtension appends .png only when the filename has no extension', () => {
+  assert.equal(ensurePngExtension('hero'), 'hero.png');
+  assert.equal(ensurePngExtension('hero.png'), 'hero.png');
+  assert.equal(ensurePngExtension('hero.PNG'), 'hero.PNG');
+  assert.equal(ensurePngExtension('hero.jpg'), 'hero.jpg');
+  assert.equal(ensurePngExtension('shot.tar.gz'), 'shot.tar.gz');
+  assert.equal(ensurePngExtension('hero.'), 'hero.png');
+  assert.equal(ensurePngExtension('.png'), '.png');
+  assert.equal(ensurePngExtension(''), '');
+  assert.equal(ensurePngExtension('C:\\atlas\\hero'), 'C:\\atlas\\hero.png');
+  assert.equal(ensurePngExtension('C:\\atlas\\hero.png'), 'C:\\atlas\\hero.png');
+  assert.equal(ensurePngExtension('/tmp/atlas/hero'), '/tmp/atlas/hero.png');
+  assert.equal(ensurePngExtension('my.folder/hero'), 'my.folder/hero.png');
+});
+
+test('finalizeSaveFilename appends .png only for PNG saves', () => {
+  assert.equal(finalizeSaveFilename('hero.png', 'C:\\out\\hero'), 'C:\\out\\hero.png');
+  assert.equal(finalizeSaveFilename('Hero.PNG', 'C:\\out\\hero.jpg'), 'C:\\out\\hero.jpg');
+  assert.equal(finalizeSaveFilename('pack.zip', 'C:\\out\\pack'), 'C:\\out\\pack');
+  assert.equal(finalizeSaveFilename('notes.atlas', 'notes'), 'notes');
 });
 
 test('isSkelFilename matches .skel case-insensitively', () => {

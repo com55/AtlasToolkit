@@ -2,16 +2,19 @@ import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';
 import { validateRegionName } from './region-name-validation.js';
 import {
-  previewImg, previewContainer,
-  resetPreview, applyTransform,
+  previewImg,
+  resetPreview,
   drawRegionOverlay, clearOverlay,
   updatePreview, updateModifyPreview, updateSaveMergedButton, setPreviewSrc,
-  fitScaleIfOversized,
+  applyAutoFit, refreshMeshHullOverlay,
 } from './preview.js';
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
+import { withLock, withBusy, isBusy, noteBusyConflict } from './busy-overlay.js';
 import { updateModeToggleUI, updatePageSwitcher, setAdvanceMode } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
+import { syncHelpPopover, hideHelpPopover, closeGapPanel, isGapPanelOpen } from './options-popover.js';
+import { syncOptionsRowOverflow } from './options-row.js';
 
 function setStatus(text) {
   document.getElementById('status-text').innerText = text;
@@ -47,21 +50,17 @@ export function setMode(mode) {
   }
   updateModeToggleUI();
   updatePageSwitcher();
-  // #options-row is always-visible now (round-4-reviewed design decision
-  // -- see the mesh-mask design spec's UI section) and its own height is
-  // fixed (--panel-header-h), unaffected by which of its children show per
-  // mode -- so panel-resizer.js's minRightHeight() (options-row height +
-  // statusBar height) no longer actually changes across a mode switch.
-  // Keeping this call anyway: harmless (a no-op re-clamp to the same
-  // floor), and it stays correct if minRightHeight()'s inputs ever change
-  // again (corrected post-review, Fable, 2026-08-31 -- the previous comment
-  // here claimed #options-row's height still changed, which stopped being
-  // true once this task removed its whole-container .hidden toggle).
-  refreshPanelSplit();
+  hideHelpPopover();
+  closeGapPanel();
   // Picker visibility follows the mode-relevant mesh toggle; refresh so a
   // View↔Edit switch doesn't leave the button stuck on the previous mode.
   updateMeshCroppingUI();
   updateNestRegionsUI();
+  // Wrapping extra <li> groups can change #options-row height when expanded,
+  // so re-measure overflow after the mode-gated children settle, then
+  // re-clamp the stacked-layout split (minRightHeight includes #options-row-wrap).
+  syncOptionsRowOverflow();
+  refreshPanelSplit();
 }
 
 /** Apply a fresh modify-view payload (from enter_modify_mode) to the UI. */
@@ -78,16 +77,7 @@ function applyModifyView(data, statusMsg) {
   setPreviewSrc(data.image);
   previewImg.style.display = 'block';
   previewImg.onload = function () {
-    resetPreview();
-    const containerW = previewContainer.clientWidth - 40;
-    const containerH = previewContainer.clientHeight - 40;
-    const imgW = previewImg.naturalWidth;
-    const imgH = previewImg.naturalHeight;
-    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-    if (fitScale !== null) {
-      state.viewState.scale = fitScale;
-      applyTransform();
-    }
+    applyAutoFit();
     previewImg.onload = null;
   };
 }
@@ -111,6 +101,7 @@ export async function refreshStructuralUi(prevSelectedKeys) {
 }
 
 export async function enterEditMode() {
+  if (isBusy()) { noteBusyConflict(); return; }
   try {
     const data = await AtlasAPI.enter_modify_mode();
     if (data) {
@@ -121,7 +112,7 @@ export async function enterEditMode() {
       // Restore Advance Mode -- persisted across sessions, re-applied on
       // every Edit Mode entry rather than left as transient DOM state.
       // Multi-page atlases never allow it regardless of the saved
-      // preference (loadRegions() already hides #advance-mode-row for
+      // preference (loadRegions() already hides #options-group-advance for
       // them; skip restoring here too so the toolbar can't end up shown
       // for one).
       if (!AtlasAPI.is_multi_page()) {
@@ -137,6 +128,7 @@ export async function enterEditMode() {
 }
 
 export async function exitEditMode() {
+  if (isBusy()) { noteBusyConflict(); return; }
   // Captured before anything below rebuilds state.regionsData, so the
   // reconcile-by-key inside refreshStructuralUi() carries the selection
   // across into View Mode instead of dropping it.
@@ -194,6 +186,7 @@ export async function resetModify() {
 export async function ReplaceSelected() {
   const keys = getSelectedKeys();
   if (keys.length === 0) { showToast('Select at least one region to modify.', 'error'); return; } // matches old ui/js/modify.js
+  if (isBusy()) { noteBusyConflict(); return; }
   try {
     setStatus('Selecting mod image...');
     const result = await AtlasAPI.select_mod_image(keys);
@@ -237,19 +230,12 @@ export async function onModPreviewReceived(data) {
   updateModifyActionButtons();
   refreshModifiedHighlight();
   previewImg.onload = function () {
-    resetPreview();
-    const containerW = previewContainer.clientWidth - 40;
-    const containerH = previewContainer.clientHeight - 40;
     const imgW = previewImg.naturalWidth;
     const imgH = previewImg.naturalHeight;
     // Always the WxH form, regardless of page count — matches old Python
     // engine's ui/js/modify.js exactly (parity fix, 2026-08-23).
     setStatus(`Merged preview (${imgW}x${imgH}). Ready to save.`);
-    const fitScale = fitScaleIfOversized(containerW, containerH, imgW, imgH);
-    if (fitScale !== null) {
-      state.viewState.scale = fitScale;
-    }
-    applyTransform();
+    applyAutoFit();
     previewImg.onload = null;
   };
 }
@@ -327,9 +313,13 @@ export function updateMeshCroppingUI() {
   const repackChk = document.getElementById('chk-mesh-aware-repack');
   repackChk.checked = repackEnabled;
   repackChk.disabled = !available;
-  document.getElementById('mesh-aware-repack-toggle-row').title = repackChk.disabled
+  const meshAwareRow = document.getElementById('mesh-aware-repack-toggle-row');
+  meshAwareRow.dataset.help = repackChk.disabled
     ? 'Requires a usable .skel file.'
-    : 'Mask each region pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.';
+    : "Mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
+  meshAwareRow.removeAttribute('title');
+  syncHelpPopover();
+  updateMeshHullUI();
 
   // Shared .skel picker button -- relevant toggle depends on which mode is
   // currently active: View mode shows Mesh Cropping row, Edit mode shows
@@ -363,29 +353,95 @@ export function updateMeshCroppingUI() {
   }
 }
 
+const MESH_HULL_HELP = "Draw each selected region's mesh silhouette in blue over the preview. The saved image stays unchanged.";
+
+export function updateMeshHullUI() {
+  const chk = document.getElementById('chk-mesh-hull');
+  const row = document.getElementById('mesh-hull-toggle-row');
+  if (!chk || !row) return;
+  const { available } = AtlasAPI.get_mesh_mask_state();
+  chk.checked = AtlasAPI.get_mesh_hull_enabled();
+  chk.disabled = !available;
+  row.dataset.help = available
+    ? MESH_HULL_HELP
+    : 'Requires a usable .skel file with mesh attachments.';
+  row.removeAttribute('title');
+  syncHelpPopover();
+}
+
 /** Syncs the Nest Regions checkbox + gap-distance input from
  *  AtlasAPI.get_nest_options(). Call after anything that can change that
  *  state: the toggle itself, the gap-distance input, or app startup.
  *  Unlike updateMeshCroppingUI(), this is never gated by mesh availability
  *  -- Nest Regions works with no mesh data at all (Gap A space alone). */
-export function updateNestRegionsUI() {
+export function updateNestRegionsUI({ force = false } = {}) {
   const { enabled, gapDistance } = AtlasAPI.get_nest_options();
   document.getElementById('chk-nest-regions').checked = enabled;
   const gapInput = document.getElementById('nest-gap-distance');
+  const slider = document.getElementById('nest-gap-slider');
+  const gear = document.getElementById('btn-nest-settings');
   gapInput.disabled = !enabled;
-  // Don't clobber an in-progress edit if this gets called while the user is
-  // actively typing in the field (e.g. from a toggle elsewhere firing a
-  // broader UI sync).
-  if (document.activeElement !== gapInput) gapInput.value = gapDistance;
+  if (slider) slider.disabled = !enabled;
+  if (gear) gear.disabled = !enabled;
+  const labelText = document.getElementById('nest-regions-label-text');
+  if (labelText) labelText.textContent = `Smart Packing (${gapDistance}px)`;
+  syncOptionsRowOverflow();
+  if (!enabled && isGapPanelOpen()) closeGapPanel();
+  // Don't clobber a draft while the gap panel is open (Confirm is the
+  // apply point) unless the caller just wrote the applied value.
+  if (isGapPanelOpen() && !force) return;
+  gapInput.value = gapDistance;
+  if (slider) {
+    const n = Number(gapDistance);
+    if (Number.isFinite(n) && n >= 1) slider.value = String(Math.min(100, n));
+  }
 }
 
-document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
-  if (structuralOpInFlight) {
+export function updateForcedResizingUI() {
+  document.getElementById('chk-forced-resizing').checked = AtlasAPI.get_forced_resizing();
+}
+
+document.getElementById('chk-mesh-hull').addEventListener('change', async (e) => {
+  if (isBusy()) {
     e.target.checked = !e.target.checked;
-    showToast('Please wait for the current operation to finish.', 'error');
+    noteBusyConflict();
     return;
   }
-  structuralOpInFlight = true;
+  hideHelpPopover();
+  try {
+    await AtlasAPI.set_mesh_hull_enabled(e.target.checked);
+    updateMeshHullUI();
+    refreshMeshHullOverlay();
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Show Mesh Silhouettes.', 'error');
+  }
+});
+
+document.getElementById('chk-forced-resizing').addEventListener('change', async (e) => {
+  if (isBusy()) {
+    e.target.checked = !e.target.checked;
+    noteBusyConflict();
+    return;
+  }
+  hideHelpPopover();
+  try {
+    await AtlasAPI.set_forced_resizing(e.target.checked);
+    updateForcedResizingUI();
+    updatePreview(getSelectedRegions());
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update Forced Resizing.', 'error');
+  }
+});
+
+document.getElementById('chk-mesh-mask').addEventListener('change', async (e) => {
+  if (isBusy()) {
+    e.target.checked = !e.target.checked;
+    noteBusyConflict();
+    return;
+  }
+  hideHelpPopover();
   try {
     const result = await AtlasAPI.set_mesh_mask_enabled(e.target.checked);
     updateMeshCroppingUI();
@@ -394,18 +450,16 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
   } catch (err) {
     console.error(err);
     showToast('Failed to update Mesh Cropping.', 'error');
-  } finally {
-    structuralOpInFlight = false;
   }
 });
 
 document.getElementById('chk-mesh-aware-repack').addEventListener('change', async (e) => {
-  if (structuralOpInFlight) {
+  if (isBusy()) {
     e.target.checked = !e.target.checked;
-    showToast('Please wait for the current operation to finish.', 'error');
+    noteBusyConflict();
     return;
   }
-  structuralOpInFlight = true;
+  hideHelpPopover();
   try {
     const result = await AtlasAPI.set_mesh_aware_repack_enabled(e.target.checked);
     updateMeshCroppingUI();
@@ -415,105 +469,62 @@ document.getElementById('chk-mesh-aware-repack').addEventListener('change', asyn
   } catch (err) {
     console.error(err);
     showToast('Failed to update Mesh-Aware Repack.', 'error');
-  } finally {
-    structuralOpInFlight = false;
   }
 });
 
 document.getElementById('chk-nest-regions').addEventListener('change', async (e) => {
-  // Final whole-branch review finding: the gap-distance debounce timer
-  // (declared below) was not cleared here -- toggling off within its
-  // 400ms window let it fire afterward (a stale repack for a
-  // now-irrelevant setting) or during this op (an error toast for an
-  // action the user already completed, via the structuralOpInFlight
-  // guard in that other handler).
-  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
-  if (structuralOpInFlight) {
+  if (isBusy()) {
     e.target.checked = !e.target.checked;
-    showToast('Please wait for the current operation to finish.', 'error');
+    noteBusyConflict();
     return;
   }
-  structuralOpInFlight = true;
+  hideHelpPopover();
   try {
-    // Final whole-branch review finding: nestPack is fully synchronous and
-    // can take several real seconds on a large atlas (mesh-driven concave
-    // footprints measured ~6.5x slower than the shipped benchmark's
-    // no-mesh case) -- with no status message the tab just hard-freezes,
-    // no spinner would even have a chance to animate. Paint the status
-    // BEFORE the potentially-blocking call, with an explicit yield (a
-    // synchronous DOM write alone isn't guaranteed to reach the screen
-    // before a long synchronous stretch begins).
-    setStatus('Repacking...');
-    await new Promise(requestAnimationFrame);
     const result = await AtlasAPI.set_nest_regions_enabled(e.target.checked);
     updateNestRegionsUI();
     if (result) {
-      await onModPreviewReceived(result); // resets status itself once done
+      await onModPreviewReceived(result);
     } else {
-      setStatus('Ready'); // _maybeRerunRepack no-op'd (no mods yet) -- don't leave 'Repacking...' stuck
+      setStatus('Ready');
     }
   } catch (err) {
     console.error(err);
     showToast('Failed to update Nest Regions.', 'error');
     setStatus('Ready');
-  } finally {
-    structuralOpInFlight = false;
   }
 });
 
-let nestGapDebounceTimer = null;
-
-document.getElementById('nest-gap-distance').addEventListener('input', (e) => {
-  if (nestGapDebounceTimer) clearTimeout(nestGapDebounceTimer);
-  // Don't even schedule an apply for an empty/invalid value -- Number('')
-  // is 0, which normalizeGap (repack-nest.js) silently substitutes 4 for,
-  // with nothing in the UI showing that happened. The blur listener below
-  // resyncs the field to the true applied value once the user leaves it,
-  // whatever state they left it in.
-  if (e.target.value === '' || !e.target.checkValidity()) return;
-  const px = Number(e.target.value);
-  nestGapDebounceTimer = setTimeout(async () => {
-    if (structuralOpInFlight) {
-      // A structural op is mid-flight -- skip this cycle rather than queue
-      // behind it, but resync the field (it may still be showing the typed
-      // value even though nothing was applied) and tell the user, matching
-      // the checkbox handlers' revert+toast pattern above.
-      updateNestRegionsUI();
-      showToast('Please wait for the current operation to finish.', 'error');
-      return;
-    }
-    structuralOpInFlight = true;
-    try {
-      // See the same-purpose comment on the Nest Regions checkbox handler
-      // above -- nestPack is synchronous and can run for real seconds.
-      setStatus('Repacking...');
-      await new Promise(requestAnimationFrame);
-      const result = await AtlasAPI.set_nest_gap_distance(px);
-      updateNestRegionsUI(); // resync the field to the actually-applied (normalized) value
-      if (result) {
-        await onModPreviewReceived(result); // resets status itself once done
-      } else {
-        setStatus('Ready'); // _maybeRerunRepack no-op'd (no mods yet) -- don't leave 'Repacking...' stuck
-      }
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to update gap distance.', 'error');
+/** Apply the gap-distance field. Called from the gap panel Confirm
+ *  button -- slider/number edits are drafts until then. Returns false if
+ *  the value was invalid or another structural op is in flight. */
+export async function applyNestGapDistance(raw) {
+  const gapInput = document.getElementById('nest-gap-distance');
+  if (raw === '' || raw == null || (gapInput && !gapInput.checkValidity())) {
+    return false;
+  }
+  const px = Number(raw);
+  if (!Number.isFinite(px) || px < 1) return false;
+  if (isBusy()) {
+    noteBusyConflict();
+    return false;
+  }
+  try {
+    const result = await AtlasAPI.set_nest_gap_distance(px);
+    closeGapPanel({ revert: false });
+    updateNestRegionsUI({ force: true });
+    if (result) {
+      await onModPreviewReceived(result);
+    } else {
       setStatus('Ready');
-    } finally {
-      structuralOpInFlight = false;
     }
-  }, 400);
-});
-
-// Catch-all: whatever the field is left showing when the user leaves it
-// (cleared, out-of-range, or simply never triggered a debounced apply
-// because the input event above bailed out) must not silently diverge from
-// what the packer is actually using -- resync on blur. updateNestRegionsUI's
-// own activeElement guard means this only takes effect once the field has
-// genuinely lost focus, never mid-edit.
-document.getElementById('nest-gap-distance').addEventListener('blur', () => {
-  updateNestRegionsUI();
-});
+    return true;
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to update gap distance.', 'error');
+    setStatus('Ready');
+    return false;
+  }
+}
 
 document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();
@@ -523,15 +534,10 @@ document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   }
 });
 
-// ─── Rename Region Modal (Task 9) ─────────────────────────────────────────────
-// Shared across every structural confirm handler (Rename now; Add/Remove in
-// Tasks 10-11) -- the risk (two concurrent applyStructuralBatch() calls
-// racing on the same session) isn't scoped to any one modal, so this can't
-// be a per-open local variable the way an earlier fix round tried.
-let structuralOpInFlight = false;
+// ─── Rename / Add / Remove ────────────────────────────────────────────────────
 
 function openRenameModal() {
-  if (structuralOpInFlight) return;
+  if (isBusy()) return;
   const keys = getSelectedKeys();
   // Primary guard is updateRenameButtonState() (enabled only for exactly one
   // selection). Keep a strict click-time check too, in case a stale enabled
@@ -554,7 +560,7 @@ function openRenameModal() {
     const confirmBtn = document.getElementById('rename-confirm-btn');
     if (result.ok) {
       errorEl.classList.add('hidden');
-      confirmBtn.disabled = structuralOpInFlight;
+      confirmBtn.disabled = isBusy();
     } else {
       errorEl.textContent = result.reason;
       errorEl.classList.remove('hidden');
@@ -566,28 +572,27 @@ function openRenameModal() {
   revalidate();
 
   document.getElementById('rename-confirm-btn').onclick = async () => {
-    if (structuralOpInFlight) return;
+    if (isBusy()) return;
     const result = revalidate();
     if (!result.ok) return;
-    structuralOpInFlight = true;
     const confirmBtn = document.getElementById('rename-confirm-btn');
     confirmBtn.disabled = true;
     const prevSelectedKeys = getSelectedKeys();
-    try {
-      const payload = await AtlasAPI.rename_region(key, result.value);
-      document.getElementById('rename-modal').classList.add('hidden');
-      await onModPreviewReceived(payload);
-      await refreshStructuralUi(prevSelectedKeys);
-    } catch (e) {
-      console.error(e);
-      showToast('Failed to rename region.', 'error');
-      confirmBtn.disabled = false;
-    } finally {
-      structuralOpInFlight = false;
-    }
+    document.getElementById('rename-modal').classList.add('hidden');
+    await withBusy(async () => {
+      try {
+        const payload = await AtlasAPI.rename_region(key, result.value);
+        await onModPreviewReceived(payload);
+        await refreshStructuralUi(prevSelectedKeys);
+      } catch (e) {
+        console.error(e);
+        showToast('Failed to rename region.', 'error');
+        confirmBtn.disabled = false;
+      }
+    });
   };
   document.getElementById('rename-cancel-btn').onclick = () => {
-    if (structuralOpInFlight) return; // can't cancel out of a submission that's still in flight
+    if (isBusy()) return; // can't cancel out of a submission that's still in flight
     document.getElementById('rename-modal').classList.add('hidden');
   };
 }
@@ -595,48 +600,47 @@ function openRenameModal() {
 document.getElementById('btn-rename-region').addEventListener('click', openRenameModal);
 
 document.getElementById('btn-add-region').addEventListener('click', () => {
-  if (structuralOpInFlight) return;
+  if (isBusy()) return;
   openAddRegionModal({
     getEffectiveNames: () => state.regionsData.map((r) => r.label),
     onConfirm: async (file, atlasName) => {
-      if (structuralOpInFlight) return;
-      structuralOpInFlight = true;
-      try {
+      if (isBusy()) return;
+      await withBusy(async () => {
         const prevSelectedKeys = getSelectedKeys();
         const payload = await AtlasAPI.add_region(file, atlasName);
         await onModPreviewReceived(payload);
         await refreshStructuralUi(prevSelectedKeys);
-      } finally {
-        structuralOpInFlight = false;
-      }
+      });
     },
   });
 });
 
 document.getElementById('btn-remove-region').addEventListener('click', async () => {
-  if (structuralOpInFlight) return;
+  if (isBusy()) return;
   const keys = getSelectedKeys();
   if (keys.length === 0) return; // button is disabled in this case; defensive no-op
-  structuralOpInFlight = true;
   const btn = document.getElementById('btn-remove-region');
   btn.disabled = true;
   try {
-    const ok = await showConfirm(
-      `Remove ${keys.length} region${keys.length > 1 ? 's' : ''}? This cannot be undone after Save.`,
-      'Remove region' + (keys.length > 1 ? 's' : '') + '?',
-    );
-    if (!ok) return;
-    const prevSelectedKeys = []; // removed regions can't remain selected — start from empty
-    try {
-      const payload = await AtlasAPI.remove_regions(keys);
-      await onModPreviewReceived(payload);
-      await refreshStructuralUi(prevSelectedKeys);
-    } catch (e) {
-      console.error(e);
-      showToast('Failed to remove region(s).', 'error');
-    }
+    await withLock(async () => {
+      const ok = await showConfirm(
+        `Remove ${keys.length} region${keys.length > 1 ? 's' : ''}? This cannot be undone after Save.`,
+        'Remove region' + (keys.length > 1 ? 's' : '') + '?',
+      );
+      if (!ok) return;
+      const prevSelectedKeys = []; // removed regions can't remain selected — start from empty
+      await withBusy(async () => {
+        try {
+          const payload = await AtlasAPI.remove_regions(keys);
+          await onModPreviewReceived(payload);
+          await refreshStructuralUi(prevSelectedKeys);
+        } catch (e) {
+          console.error(e);
+          showToast('Failed to remove region(s).', 'error');
+        }
+      });
+    });
   } finally {
-    structuralOpInFlight = false;
     updateRemoveButtonState();
     updateRenameButtonState();
   }

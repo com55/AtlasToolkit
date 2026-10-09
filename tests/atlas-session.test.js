@@ -81,3 +81,32 @@ test('_hasStructuralBatches() is true iff any batch has type !== "mod"', () => {
   proto.modBatches.push(new AddBatch('b_2', 'b', 'canvas'));
   assert.equal(hasStructural.call(proto), true);
 });
+
+test('clearModifyState does not reset modGeneration (rollback still restores via snapshot)', () => {
+  const processor = { pages: [{ filename: 'a.png' }], regions: {} };
+  const session = new AtlasSession(processor, 'a.png\nsize: 1,1\n', 'a.atlas');
+  session.modGeneration = 4;
+  session.modBatches = [new ModBatch(['arm'], 'x')];
+  session.clearModifyState();
+  assert.equal(session.modGeneration, 4);
+  assert.deepEqual(session.modBatches, []);
+});
+
+test('_restoreSnapshot puts modGeneration back when a transaction fails', async () => {
+  const processor = { pages: [{ filename: 'a.png' }], regions: {} };
+  const session = new AtlasSession(processor, 'a.png\nsize: 1,1\n', 'a.atlas');
+  session.modGeneration = 2;
+  const snap = session._snapshotForTransaction();
+  session.modGeneration = 9;
+  session._restoreSnapshot(snap);
+  assert.equal(session.modGeneration, 2);
+});
+
+test('rerunRepack does not bump modGeneration (option A→B→A reuses pack keys)', async () => {
+  const processor = { pages: [{ filename: 'a.png' }], regions: {} };
+  const session = new AtlasSession(processor, 'a.png\nsize: 1,1\n', 'a.atlas');
+  session.modGeneration = 4;
+  session._rebuildAndBuildResult = async () => ({ image: 'x' });
+  await session.rerunRepack();
+  assert.equal(session.modGeneration, 4);
+});

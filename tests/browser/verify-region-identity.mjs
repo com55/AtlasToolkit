@@ -215,7 +215,7 @@ const readRegionList = (page) => page.evaluate(() => ({
   await page.click('#btn-modal-confirm'); // dismiss the pending-mods guard modal
   await page.waitForTimeout(150);
   await items.nth(idx).click();
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(800); // 300ms view-preview debounce + paint
   const statusText = await page.evaluate(() => document.getElementById('status-text').innerText);
   check('preview status text shows "Previewing: forearm", not "alpha"',
     statusText.includes('forearm') && !statusText.includes('Previewing: alpha'), statusText);

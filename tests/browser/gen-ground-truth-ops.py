@@ -544,6 +544,12 @@ out = {
     "realworldCases": realworld_cases,
 }
 
+# Real-world cases embed pixels and atlas text from local, non-redistributable
+# atlases, so they never go into the committed ground_truth_ops.json. They
+# are written to a gitignored sibling file instead; verify-ops.mjs merges it
+# in when present and skips those cases otherwise.
+LOCAL_PATH = os.path.join(HERE, "ground_truth_ops.local.json")
+
 # Preserve JS-repinned fixture fields (see the NOTE above repack_cases = []):
 # repackCases'/realworldCases' repack-op expected-output fields are golden
 # snapshots of the JS engine's own current behavior, not this script's Python
@@ -558,6 +564,9 @@ preserved = 0
 if os.path.exists(existing_path):
     with open(existing_path) as f:
         existing = json.load(f)
+    if os.path.exists(LOCAL_PATH):
+        with open(LOCAL_PATH) as f:
+            existing["realworldCases"] = json.load(f).get("realworldCases", [])
     existing_by_name = {}
     for group in ("repackCases", "realworldCases"):
         for case in existing.get(group, []):
@@ -585,9 +594,12 @@ else:
           "tests/browser/regen-repack-fixtures.mjs afterward to re-pin them to "
           "the JS engine's actual output.")
 
+with open(LOCAL_PATH, "w") as f:
+    json.dump({"realworldCases": out["realworldCases"]}, f, indent=2)
+out["realworldCases"] = []
 with open(existing_path, "w") as f:
     json.dump(out, f, indent=2)
 
 total = len(cases) + len(merge_cases) + len(repack_cases) + len(realworld_cases)
-print(f"Wrote ground_truth_ops.json: {total} total cases "
+print(f"Wrote ground_truth_ops.json + ground_truth_ops.local.json: {total} total cases "
       f"({len(cases)} extract, {len(merge_cases)} merge, {len(repack_cases)} repack, {len(realworld_cases)} real-world)")
