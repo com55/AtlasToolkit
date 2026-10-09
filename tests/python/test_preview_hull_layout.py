@@ -171,3 +171,18 @@ def test_session_hull_layout_force_resize_stretches_smaller_region():
     assert hull_polyline(forced["items"][1]) == [(0, 0), (8, 0), (8, 4), (0, 4)]
     assert hull_polyline(forced["items"][0]) is None
     session.close()
+
+
+def test_returned_uvs_are_a_copy_of_the_session_mesh_data():
+    raster = PillowRasterBackend()
+    text = "p.png\nsize: 4,4\nr\n bounds: 0,0,4,4\n"
+    session = AtlasSession.load(text, {"p.png": raster.encode_png(image(raster, 4, 4))}, raster)
+    session.set_mesh_data({"r": dict(BOX_MESH, triangles=[0, 1, 2, 0, 2, 3])})
+    session.set_mesh_mask_enabled(True)
+    before = session.extract_regions(["r"])["r"]
+    layout = session.get_mesh_hull_layout(["r"])
+    layout["items"][0]["uvs"][:] = [0.0] * len(layout["items"][0]["uvs"])
+    assert session.extract_regions(["r"])["r"] == before
+    again = session.get_mesh_hull_layout(["r"])
+    assert hull_polyline(again["items"][0]) == [(0, 0), (4, 0), (4, 4), (0, 4)]
+    session.close()
