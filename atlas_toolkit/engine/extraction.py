@@ -5,7 +5,7 @@ from copy import deepcopy
 from math import isfinite
 
 from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.region_ops import round_half_even
+from atlas_toolkit.domain.region_ops import extracted_canvas_size, scaled_region_geometry
 from atlas_toolkit.engine.modifier import js_object_key_order
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
@@ -81,23 +81,11 @@ class AtlasProcessor:
         if source is None:
             return None
         raster = self._raster
-        page = self._page_map[region.page_filename]
-        sx = sy = 1.0
-        if page.size[0] and page.size[1]:
-            width, height = raster.size(source)
-            sx, sy = width / page.size[0], height / page.size[1]
-        scaled = sx != 1.0 or sy != 1.0
-        x, y, w, h = region.x, region.y, region.w, region.h
-        if scaled:
-            x, w = round_half_even(x * sx), round_half_even(w * sx)
-            y, h = round_half_even(y * sy), round_half_even(h * sy)
+        x, y, w, h, offsets = scaled_region_geometry(region, *self._page_scale(region, source))
         output = raster.crop_rotate(source, x, y, w, h, region.rotate)
         try:
-            if region.offsets:
-                left, bottom, original_w, original_h = region.offsets
-                if scaled:
-                    left, original_w = round_half_even(left * sx), round_half_even(original_w * sx)
-                    bottom, original_h = round_half_even(bottom * sy), round_half_even(original_h * sy)
+            if offsets:
+                left, bottom, original_w, original_h = offsets
                 sprite = output
                 # Keep ownership of the crop if allocation fails.
                 output = raster.create(original_w, original_h)
@@ -118,6 +106,36 @@ class AtlasProcessor:
         except BaseException:
             raster.dispose(output)
             raise
+
+    def _page_scale(self, region, source: ImageHandle) -> tuple[float, float]:
+        """Loaded image size / declared page size (1.0 when undeclared)."""
+        page = self._page_map[region.page_filename]
+        if not (page.size[0] and page.size[1]):
+            return 1.0, 1.0
+        width, height = self._raster.size(source)
+        return width / page.size[0], height / page.size[1]
+
+    def preview_hull_layout(self, names: list[str], force_resize: bool) -> dict:
+        """Hull polylines for the View Mode overlay -- port of
+        AtlasProcessor.previewHullLayout. Ignores the Mesh Cropping toggle;
+        skips a region whose page image is not loaded."""
+        entries = []
+        for name in names:
+            region = self.regions.get(name)
+            if region is None:
+                continue
+            source = self.get_page_image(region.page_filename)
+            if source is None:
+                continue
+            width, height = extracted_canvas_size(region, *self._page_scale(region, source))
+            mesh = self._mesh_available_for(name)
+            entries.append({
+                "width": width,
+                "height": height,
+                "uvs": mesh["uvs"] if mesh else None,
+                "hull_length": mesh.get("hull_length") if mesh else 0,
+            })
+        return layout_preview_hulls(entries, bool(force_resize))
 
     def get_preview_image(self, names: list[str]) -> ImageHandle | None:
         images: list[ImageHandle] = []
@@ -146,3 +164,60 @@ class AtlasProcessor:
                 self._raster.dispose(image)
             if composite is not None:
                 self._raster.dispose(composite)
+
+
+def pick_force_resize_target(sizes: list[tuple[int, int]]) -> tuple[int, int]:
+    """Greatest area, in list order; an equal area keeps the earlier entry."""
+    best = sizes[0]
+    for size in sizes[1:]:
+        if size[0] * size[1] > best[0] * best[1]:
+            best = size
+    return best
+
+
+def preview_composite_frame(sizes: list[tuple[int, int]], force_resize: bool) -> dict:
+    """Frame for the multi-image preview composite. Forced resizing scales
+    every image to the single largest area; otherwise max(w) x max(h),
+    images unscaled. Port of atlas-extracter.js's previewCompositeFrame."""
+    width = max(size[0] for size in sizes)
+    height = max(size[1] for size in sizes)
+    if not force_resize or len(sizes) < 2:
+        return {"width": width, "height": height, "scale": False}
+    width, height = pick_force_resize_target(sizes)
+    return {"width": width, "height": height, "scale": True}
+
+
+def layout_preview_hulls(entries: list[dict], force_resize: bool) -> dict:
+    """Place each hull in the composite space of the preview image. Port of
+    atlas-extracter.js's layoutPreviewHulls."""
+    if not entries:
+        return {"frame": {"width": 0, "height": 0, "scale": False}, "items": []}
+    frame = preview_composite_frame([(e["width"], e["height"]) for e in entries], force_resize)
+    items = []
+    for e in entries:
+        stretch = frame["scale"] and (e["width"] != frame["width"] or e["height"] != frame["height"])
+        items.append({
+            "width": e["width"],
+            "height": e["height"],
+            "scale_x": frame["width"] / e["width"] if stretch else 1,
+            "scale_y": frame["height"] / e["height"] if stretch else 1,
+            "uvs": e.get("uvs"),
+            "hull_length": e.get("hull_length") or 0,
+        })
+    return {"frame": frame, "items": items}
+
+
+def hull_polyline(item: dict) -> list[tuple[float, float]] | None:
+    """Closed hull in composite pixels: the first hull_length UV pairs are
+    Spine's outline, later pairs are interior. Port of hullPolyline."""
+    n = int(item["hull_length"] or 0)
+    uvs = item["uvs"]
+    if uvs is None or n < 3 or len(uvs) < n * 2:
+        return None
+    return [
+        (
+            uvs[i * 2] * item["width"] * item["scale_x"],
+            uvs[i * 2 + 1] * item["height"] * item["scale_y"],
+        )
+        for i in range(n)
+    ]
