@@ -114,10 +114,9 @@ workflow. `atlas_toolkit/app/paths.py` (was `atlas_toolkit/paths.py`) is
 desktop-only for the same reason.
 
 **Open: `skel-mesh-parser` is a `git+https://` URL dependency.** `micropip`
-cannot install that inside Pyodide, and it also pins whatever the `python`
-branch holds at lock time (`uv.lock` still records the 0.2.0 commit, before
-`hullLength`; push the branch, then `uv lock --upgrade-package
-skel-mesh-parser`). The parser has no dependencies and is pure Python, so a
+cannot install that inside Pyodide. It is pinned to the tag `py-v0.3.0` (the
+`python` branch's release that returns `hull_length`; Python tags are `py-v*`,
+JS tags `js-v*`). The parser has no dependencies and is pure Python, so a
 `py3-none-any` wheel of it only needs somewhere `micropip` can fetch it from
 (a GitHub release asset, an index, or bundling it into the Worker's
 filesystem). Not done yet.
