@@ -512,7 +512,9 @@ class AtlasSession:
             self._mod_batches,
             self._modded_sprites,
             candidate,
-            self._generation + 1,
+            # v0.4.0 JS rerunRepack() keeps modGeneration: callers key option
+            # changes by pack signature, not generation.
+            self._generation,
             self._modifications_saved,
         )
         return result
@@ -523,7 +525,8 @@ class AtlasSession:
         self._modded_sprites = {}
         self._active = None
         self._modifications_saved = False
-        self._generation = 0
+        # generation is not reset (v0.4.0 JS clearModifyState): a later
+        # mod must never reuse a generation already seen before the clear.
         self._raster.release_except(self._roots)
 
     def close(self) -> None:

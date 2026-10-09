@@ -253,7 +253,8 @@ def test_generation_saved_state_preview_and_repack_prepare_once(monkeypatch):
     monkeypatch.setattr(AtlasModifier, "prepare_mod_image", count_prepare)
     first_result = loaded.repack()
     first_result_size = raster.size(first_result.image)
-    assert loaded.snapshot().generation == 2
+    # repack() reruns the same batches: generation is unchanged (v0.4.0 JS).
+    assert loaded.snapshot().generation == 1
     text, pages = loaded.save()
     assert not loaded.snapshot().has_pending_modifications
     preview = decoded(loaded.get_preview_png())
@@ -263,7 +264,7 @@ def test_generation_saved_state_preview_and_repack_prepare_once(monkeypatch):
     assert decoded(pristine).tobytes() == decoded(_pattern_png(8, 2, 11)).crop((0, 0, 2, 2)).tobytes()
 
     second_result = loaded.repack()
-    assert loaded.snapshot().generation == 3
+    assert loaded.snapshot().generation == 1
     assert not loaded.snapshot().has_pending_modifications
     assert len(calls) == 0
     assert raster.size(second_result.image) == first_result_size
@@ -391,7 +392,8 @@ def test_repack_reuses_prepared_mod_and_clear_close_preserve_foreign_handles(mon
     assert raster.get_pixels(second.image) == first_pixels
     assert decoded(loaded.extract_regions(["a"])["a"]).tobytes() == pristine
     loaded.clear_modify_state()
-    assert loaded.snapshot().generation == 0
+    # clear keeps the counter so a later mod never reuses a seen generation.
+    assert loaded.snapshot().generation == 1
     assert decoded(loaded.extract_regions(["a"])["a"]).tobytes() == pristine
     loaded.close()
     assert raster.size(foreign) == (1, 1)
@@ -444,7 +446,7 @@ b
         assert actual.getpixel((0, 0)) == expected.getpixel((0, 0))
     loaded.clear_modify_state()
     assert [(r.key, r.label) for r in loaded.snapshot().regions] == [("a", "a"), ("b", "b")]
-    assert loaded.snapshot().generation == 0 and not loaded.snapshot().has_output
+    assert loaded.snapshot().generation == 3 and not loaded.snapshot().has_output
     loaded.close()
 
 
@@ -813,7 +815,7 @@ def test_task5_rerun_setters_repack_pixel_and_structural_batches_once(setter, ro
     result = getattr(loaded, setter)(arguments[setter])
     assert isinstance(result, RepackResult)
     after = loaded.snapshot()
-    assert after.generation == before.generation + 1
+    assert after.generation == before.generation
     assert len(loaded._mod_batches) == batch_count
     assert after.has_pending_modifications is False
     assert loaded._modifications_saved is True
@@ -835,7 +837,7 @@ def test_task5_attach_does_not_repack_pending_batch_and_clear_keeps_options():
     loaded.set_nest_gap_distance("7")
     loaded.clear_modify_state()
     snapshot = loaded.snapshot()
-    assert snapshot.generation == 0 and snapshot.has_output is False
+    assert snapshot.generation == before.generation and snapshot.has_output is False
     assert snapshot.mesh_available is True
     assert snapshot.mesh_mask_enabled is True
     assert snapshot.mesh_aware_repack_enabled is True
