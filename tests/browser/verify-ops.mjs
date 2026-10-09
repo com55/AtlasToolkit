@@ -23,8 +23,10 @@
  *     (expected output re-pinned to JS engine output, not Python -- see the
  *     EXCEPTION note above).
  *   - realworldCases: extract + multi-page-repack spot-checks against real
- *     the sprite atlases in .workspaces/ (tolerance-compared, not
+ *     sprite atlases in .workspaces/ (tolerance-compared, not
  *     exact -- see gen-ground-truth-ops.py's premultiply-alpha rationale).
+ *     Kept out of git: they live in the gitignored
+ *     ground_truth_ops.local.json, written by gen-ground-truth-ops.py.
  *     SELF-SKIPS (case-by-case, not the whole script) if .workspaces/ isn't
  *     present in this environment, since it's untracked local data.
  *
@@ -95,6 +97,12 @@ if (!fs.existsSync(groundTruthPath)) {
   process.exit(0);
 }
 const gt = JSON.parse(fs.readFileSync(groundTruthPath, 'utf8'));
+// Real-world cases live in a gitignored sibling (they embed local,
+// non-redistributable atlas data); merge them in when this machine has it.
+const localTruthPath = path.join(HERE, 'ground_truth_ops.local.json');
+if (fs.existsSync(localTruthPath)) {
+  gt.realworldCases = JSON.parse(fs.readFileSync(localTruthPath, 'utf8')).realworldCases || [];
+}
 console.log(`Loaded ground_truth_ops.json (pinned oracle: main@${gt.pinnedSha}; repack-op fixtures are JS-native, not from this oracle -- see verify-ops.mjs header)`);
 
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
