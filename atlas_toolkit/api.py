@@ -19,6 +19,7 @@ from PIL import Image
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.packing import normalize_gap
+from atlas_toolkit.domain.nest_frontier import CanvasTooLargeError
 from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
@@ -26,6 +27,7 @@ from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MultiPageNotSupported", "MissingPageImage", "SkeletonUnavailable",
+    "CanvasTooLarge",
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
@@ -70,6 +72,21 @@ class SkeletonUnavailable(AtlasError):
     def __init__(self, reason: str) -> None:
         super().__init__(f"mesh data unavailable: {reason}")
         self.reason = reason
+
+
+class CanvasTooLarge(AtlasError, ValueError):
+    """The fast nest packer (nest + mesh_aware) would need a canvas side
+    over its limit. build(..., fast_nest=False) uses the legacy packer,
+    which has no limit."""
+
+    def __init__(self, width: int, height: int, limit: int) -> None:
+        super().__init__(
+            f"packing needs a {width}x{height} canvas, over the {limit} px per side limit; "
+            "build with fast_nest=False to use the legacy packer, which has no limit"
+        )
+        self.width = width
+        self.height = height
+        self.limit = limit
 
 
 @dataclass(frozen=True)
@@ -445,25 +462,38 @@ class SpineAtlas:
             and (self._allowed is None or key in self._allowed)
         )
 
-    def _pack(self, nest: bool, gap: int | None, mesh_aware: bool) -> tuple[str, dict]:
+    def _pack(self, nest: bool, gap: int | None, mesh_aware: bool, fast: bool | None) -> tuple[str, dict]:
         session = self._session
         try:
+            session.set_fast_mesh_nest_enabled(fast is not False)
             session.set_nest_regions_enabled(nest)
             if nest:
                 session.set_nest_gap_distance(gap)
             session.set_mesh_aware_repack_enabled(mesh_aware)
             return session.pack_pending()
+        except CanvasTooLargeError as error:
+            raise CanvasTooLarge(error.width, error.height, error.limit) from None
         finally:
             session.set_nest_regions_enabled(False)
             session.set_nest_gap_distance(4)
             session.set_mesh_aware_repack_enabled(False)
+            session.set_fast_mesh_nest_enabled(True)
 
-    def build(self, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False) -> "SpineAtlas":
+    def build(
+        self, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False, fast_nest: bool = True,
+    ) -> "SpineAtlas":
+        """Pack the recorded edits into a new SpineAtlas; this one is unchanged.
+
+        `fast_nest` matters only when `nest` and `mesh_aware` are both on: True
+        (default) uses the fast packer, whose layouts differ from the app's
+        and whose canvas is capped at 10000 px per side (CanvasTooLarge);
+        False uses the legacy packer, identical to the app and uncapped."""
         if mesh_aware:
             self._require_mesh()
         if not self.has_changes:
             return SpineAtlas._create(self._text, self._session.export_pages(), self._skeleton, self._allowed)
-        options = (bool(nest), normalize_gap(gap) if nest else None, bool(mesh_aware))
+        fast = bool(fast_nest) if nest and mesh_aware else None
+        options = (bool(nest), normalize_gap(gap) if nest else None, bool(mesh_aware), fast)
         if self._build_cache is None or self._build_cache[0] != options:
             text, pages = self._pack(*options)
             self._build_cache = (options, text, pages, self._child_allowed())
@@ -471,9 +501,9 @@ class SpineAtlas:
         return SpineAtlas._create(text, pages, self._skeleton, allowed)
 
     def save(
-        self, atlas_path: str | os.PathLike, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False,
+        self, atlas_path: str | os.PathLike, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False, fast_nest: bool = True,
     ) -> None:
-        target = self.build(nest=nest, gap=gap, mesh_aware=mesh_aware)
+        target = self.build(nest=nest, gap=gap, mesh_aware=mesh_aware, fast_nest=fast_nest)
         text, pngs = target._session.save()
         path = Path(atlas_path)
         root = path.parent.resolve()
