@@ -55,6 +55,12 @@ class _SessionRaster:
     def clone(self, handle: ImageHandle) -> ImageHandle:
         return self._track(self._backend.clone(handle))
 
+    def adopt(self, native: object) -> ImageHandle:
+        return self._track(self._backend.adopt(native))
+
+    def export(self, handle: ImageHandle) -> object:
+        return self._backend.export(handle)
+
     def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
         return self._track(self._backend.resize_lanczos(handle, width, height))
 

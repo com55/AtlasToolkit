@@ -148,5 +148,14 @@ class RasterBackend(Protocol):
         alpha, byte-identical to lanczos-resize.js's CPU lanczosResizeRGBA
         (see raster/lanczos.py). Used by Forced Resizing in the preview."""
 
+    def adopt(self, native: object) -> ImageHandle:
+        """Store a COPY of a backend-native in-memory image (a PIL.Image for
+        PillowRasterBackend), converted to RGBA. The caller keeps its object;
+        later changes to it never reach the handle."""
+
+    def export(self, handle: ImageHandle) -> object:
+        """Return a COPY of the handle's image as a backend-native object
+        the caller owns (a PIL.Image for PillowRasterBackend)."""
+
     def clone(self, handle: ImageHandle) -> ImageHandle: ...
     def dispose(self, handle: ImageHandle) -> None: ...
