@@ -606,7 +606,13 @@ class AtlasModifier:
         reproduce it; the page's real value is carried through. Because of
         this, no parity case may use a `pma: true` page -- it would fail
         against the oracle for the right reason. A non-parity test pins the
-        behaviour instead."""
+        behaviour instead.
+
+        DELIBERATE DEVIATION on page extra lines (`scale:` and any other
+        unknown page key, kept in Page.extra_pairs): JS's fromRebuildArgs
+        never receives them, so every repack drops them -- a known app bug.
+        This port forwards copies. No parity case may use a page with extra
+        lines; tests/python/test_page_extra_lines.py pins the behaviour."""
         page = next(page for page in self.document.pages if page.filename == self.target_page)
         return {
             "page": page.filename,
@@ -614,6 +620,7 @@ class AtlasModifier:
             "filter": f"{page.filter[0]}, {page.filter[1]}",
             "repeat": page.repeat,
             "pma": page.pma,
+            "extra_pairs": [(key, list(values)) for key, values in page.extra_pairs],
         }
 
     def _pack_and_emit(

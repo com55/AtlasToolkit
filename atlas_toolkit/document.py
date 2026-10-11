@@ -382,7 +382,7 @@ class AtlasDocument:
     ) -> "AtlasDocument":
         """Build a full fresh single-page AtlasDocument from scratch
         (used after a complete repack). `page_info` may contain
-        'page'/'format'/'filter'/'repeat'/'pma' keys; any ABSENT or None
+        'page'/'format'/'filter'/'repeat'/'pma'/'extra_pairs' keys; any ABSENT or None
         key falls back to the same default atlas-document.js's
         fromRebuildArgs uses -- a PRESENT-but-falsy value (e.g. "") is
         used as-is, matching JS's getOr(obj,key,def) exactly (only
@@ -416,6 +416,10 @@ class AtlasDocument:
             filter=_parse_filter(page_info.get("filter")),
             repeat=str(_get_or(page_info, "repeat", "none")),
             pma=bool(page_info.get("pma")),
+            extra_pairs=[
+                (str(key), [str(value) for value in values])
+                for key, values in (page_info.get("extra_pairs") or [])
+            ],
         )
 
         regions = []
