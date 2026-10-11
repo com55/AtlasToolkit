@@ -77,6 +77,14 @@ class PillowRasterBackend:
     def clone(self, handle: ImageHandle) -> ImageHandle:
         return self._store(self._images[handle].copy())
 
+    def adopt(self, native: Image.Image) -> ImageHandle:
+        # convert() returns a copy even when the mode is already RGBA, so the
+        # stored object is never the caller's (_store's no-aliasing invariant).
+        return self._store(native.convert("RGBA"))
+
+    def export(self, handle: ImageHandle) -> Image.Image:
+        return self._images[handle].copy()
+
     def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
         resized = lanczos_resize_rgba(np.asarray(self._images[handle]), width, height)
         return self._store(Image.frombytes("RGBA", (width, height), resized.tobytes()))
