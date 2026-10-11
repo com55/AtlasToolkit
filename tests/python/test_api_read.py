@@ -25,7 +25,7 @@ HALF_MESH = {"uvs": [0, 0, 0.5, 0, 0.5, 1, 0, 1], "triangles": [0, 1, 2, 0, 2, 3
 def page(width=16, height=8):
     return Image.frombytes(
         "RGBA", (width, height),
-        bytes(v for y in range(height) for x in range(width) for v in (x * 15 % 256, y * 30, 100, 255)),
+        bytes(v for y in range(height) for x in range(width) for v in (x * 15 % 256, y * 30 % 256, 100, 255)),
     )
 
 
@@ -136,13 +136,13 @@ def test_declared_size_space_differs_from_image():
 
 
 def test_extract_to_files(tmp_path):
-    atlas = SpineAtlas.load(ATLAS + "a b\n bounds: 0,0,2,2\na/b\n bounds: 0,0,2,2\na:b\n bounds: 0,0,2,2\n", page())
+    atlas = SpineAtlas.load(ATLAS + "a b\n bounds: 0,0,2,2\na/b\n bounds: 0,0,2,2\na*b\n bounds: 0,0,2,2\n", page())
     atlas.extract_to("Head", tmp_path / "one" / "h.png")
     assert same(Image.open(tmp_path / "one" / "h.png"), atlas.extract("Head"))
     atlas.extract_to(["Head", "a b"], tmp_path / "many")
     assert sorted(p.name for p in (tmp_path / "many").iterdir()) == ["Head.png", "a b.png"]
     with pytest.raises(AtlasError):
-        atlas.extract_to(["a/b", "a:b"], tmp_path / "clash")
+        atlas.extract_to(["a/b", "a*b"], tmp_path / "clash")
     assert not (tmp_path / "clash").exists()
     with pytest.raises(AtlasError):
         atlas.extract_all_to(tmp_path / "all")
