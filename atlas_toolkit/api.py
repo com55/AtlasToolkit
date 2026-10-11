@@ -18,7 +18,7 @@ from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
-from atlas_toolkit.engine.session import AtlasSession
+from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
@@ -120,6 +120,13 @@ def _open_image(value: object) -> Image.Image:
         with Image.open(value) as img:
             return img.convert("RGBA")
     raise TypeError(f"expected a PIL.Image or a path, got {type(value).__name__}")
+
+
+def _edit_image(value: object) -> Image.Image:
+    image = _open_image(value)
+    if image.width == 0 or image.height == 0:
+        raise AtlasError("image has zero width or height")
+    return image
 
 
 def _skeleton_bytes(value: object) -> bytes | None:
@@ -356,3 +363,65 @@ class SpineAtlas:
         directory.mkdir(parents=True, exist_ok=True)
         for name, file_name in zip(names, files):
             images[name].save(directory / file_name, format="PNG")
+
+    # -- edits -------------------------------------------------------------
+
+    def _require_editable(self) -> None:
+        if len(self._document.pages) > 1:
+            raise MultiPageNotSupported("editing multi-page atlases is not supported")
+
+    def _edited(self) -> None:
+        self._build_cache = None
+        self._refresh_names()
+
+    def replace(self, images: Mapping[str, ImageLike]) -> None:
+        self._require_editable()
+        entries = [(self._built_key(name), _edit_image(image)) for name, image in images.items()]
+        try:
+            for key, image in entries:
+                self._session.apply_mod_image(image, [key])
+        finally:
+            self._edited()
+
+    def replace_composite(self, names: list[str], image: ImageLike) -> None:
+        self._require_editable()
+        keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
+        picture = _edit_image(image)
+        if not keys:
+            return
+        try:
+            self._session.apply_mod_image(picture, keys)
+        finally:
+            self._edited()
+
+    def add_region(self, name: str, image: ImageLike) -> None:
+        self._require_editable()
+        picture = _edit_image(image)
+        try:
+            self._session.add_region(picture, name)
+        except RegionNameError as error:
+            raise InvalidRegionName(error.reason) from None
+        finally:
+            self._edited()
+
+    def rename_region(self, name: str, new_name: str) -> None:
+        self._require_editable()
+        key = self._key(name)
+        try:
+            self._session.rename_region(key, new_name)
+        except RegionNameError as error:
+            raise InvalidRegionName(error.reason) from None
+        finally:
+            self._edited()
+
+    def remove_region(self, names: str | list[str]) -> None:
+        self._require_editable()
+        keys = [self._key(name) for name in ([names] if isinstance(names, str) else names)]
+        if not keys:
+            return
+        try:
+            self._session.remove_regions(keys)
+        except RemoveAllRegionsError as error:
+            raise AtlasError(str(error)) from None
+        finally:
+            self._edited()
