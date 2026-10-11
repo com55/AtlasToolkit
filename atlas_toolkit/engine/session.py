@@ -69,6 +69,7 @@ class AtlasSession:
 
     def __init__(
         self, document: AtlasDocument, page_images: dict[str, ImageHandle], raster: _SessionRaster,
+        *, defer_repack: bool = False,
     ) -> None:
         self._document = document
         self._page_images = dict(page_images)
@@ -81,9 +82,29 @@ class AtlasSession:
         self._modded_sprites: dict[str, ImageHandle] = {}
         self._active: PackResult | None = None
         self._closed = False
+        self._defer_repack = bool(defer_repack)
 
     @classmethod
-    def load(cls, atlas_text: str, page_images: dict[str, bytes], raster: RasterBackend) -> "AtlasSession":
+    def load(
+        cls, atlas_text: str, page_images: dict[str, bytes], raster: RasterBackend,
+        *, defer_repack: bool = False,
+    ) -> "AtlasSession":
+        return cls._load(atlas_text, page_images, raster, "decode_png", defer_repack)
+
+    @classmethod
+    def load_images(
+        cls, atlas_text: str, page_images: dict[str, object], raster: RasterBackend,
+        *, defer_repack: bool = False,
+    ) -> "AtlasSession":
+        """Like load(), but pages are backend-native in-memory images
+        (PIL.Image for PillowRasterBackend), adopted as copies."""
+        return cls._load(atlas_text, page_images, raster, "adopt", defer_repack)
+
+    @classmethod
+    def _load(
+        cls, atlas_text: str, page_images: dict, raster: RasterBackend,
+        allocate: str, defer_repack: bool,
+    ) -> "AtlasSession":
         document = AtlasDocument.parse(auto_convert_atlas(atlas_text))
         if not document.pages:
             raise ValueError("atlas must declare at least one page")
@@ -92,12 +113,13 @@ class AtlasSession:
         if missing:
             raise ValueError(f"missing page images: {', '.join(missing)}")
         owned = _SessionRaster(raster)
+        allocate_page = getattr(owned, allocate)
         decoded: dict[str, ImageHandle] = {}
         try:
             for filename in filenames:
                 if filename not in decoded:
-                    decoded[filename] = owned.decode_png(page_images[filename])
-            return cls(document, decoded, owned)
+                    decoded[filename] = allocate_page(page_images[filename])
+            return cls(document, decoded, owned, defer_repack=defer_repack)
         except BaseException:
             owned.release_except(frozenset())
             raise
@@ -185,6 +207,12 @@ class AtlasSession:
         return AtlasModifier(
             self._document, self._page_images[page.filename], self._raster, page.filename,
         )
+
+    def _load_source(self, image: object) -> ImageHandle:
+        """PNG bytes are decoded; anything else is a backend-native image, adopted."""
+        if isinstance(image, (bytes, bytearray, memoryview)):
+            return self._raster.decode_png(bytes(image))
+        return self._raster.adopt(image)
 
     def _raw_effective_model(self) -> dict:
         names = js_object_key_order(list(self._processor.regions))
@@ -367,6 +395,41 @@ class AtlasSession:
         finally:
             self._raster.release_except(before)
 
+    def extract_images(self, names: list[str]) -> dict[str, object]:
+        """extract_regions() without PNG: backend-native copies, keyed by name."""
+        self._require_open()
+        before = self._raster.checkpoint()
+        try:
+            result: dict[str, object] = {}
+            for name in names:
+                image = self._processor.extract_region(name)
+                if image is not None:
+                    try:
+                        result[name] = self._raster.export(image)
+                    finally:
+                        self._raster.dispose(image)
+            return result
+        finally:
+            self._raster.release_except(before)
+
+    def get_preview_image(self, region_names: list[str], force_resize: bool = False) -> object | None:
+        """get_preview_png(region_names, ...) without PNG: a backend-native copy."""
+        self._require_open()
+        before = self._raster.checkpoint()
+        try:
+            image = self._processor.get_preview_image(list(region_names), force_resize)
+            return None if image is None else self._raster.export(image)
+        finally:
+            self._raster.release_except(before)
+
+    def export_pages(self) -> dict[str, object]:
+        """Copies of the pristine page images, in page order."""
+        self._require_open()
+        return {
+            page.filename: self._raster.export(self._page_images[page.filename])
+            for page in self._document.pages
+        }
+
     def get_mesh_hull_layout(
         self, region_names: list[str], force_resize: bool = False,
     ) -> dict:
@@ -391,7 +454,7 @@ class AtlasSession:
         return text, pages
 
     def apply_mod_image(
-        self, image_bytes: bytes, selected_names: list[str],
+        self, image: bytes | object, selected_names: list[str],
     ) -> RepackResult | None:
         self._require_open()
         names = list(selected_names)
@@ -402,7 +465,7 @@ class AtlasSession:
 
         before = self._raster.checkpoint()
         try:
-            source = self._raster.decode_png(image_bytes)
+            source = self._load_source(image)
             prepare_modifier = self._fresh_modifier()
             ordered_names = [name for name in names if name in prepare_modifier.regions]
             ordered_names.extend(name for name in names if name not in prepare_modifier.regions)
@@ -455,7 +518,7 @@ class AtlasSession:
             False,
         )
 
-    def add_region(self, image_bytes: bytes, name: str) -> None:
+    def add_region(self, image: bytes | object, name: str) -> None:
         self._require_open()
         self._require_single_page_structural()
         atlas_name = self._validated_name(name)
@@ -473,7 +536,7 @@ class AtlasSession:
 
         before = self._raster.checkpoint()
         try:
-            source = self._raster.decode_png(image_bytes)
+            source = self._load_source(image)
             candidate_batches = [
                 *self._mod_batches,
                 {"type": "add", "internal_key": internal_key, "atlas_name": atlas_name, "source": source},
