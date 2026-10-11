@@ -204,9 +204,46 @@ def test_every_region_renamed_masks_nothing_without_raising(monkeypatch):
     atlas = with_mesh(monkeypatch, {"Head": LEFT, "Body": RIGHT, "Arm": LEFT})
     for old, new in (("Head", "a"), ("Body", "b"), ("Arm", "c")):
         atlas.rename_region(old, new)
+    assert atlas.extract("a", mesh_crop=True).getpixel((5, 2))[3] == 0  # control: masked before build
     built = atlas.build()
     assert built.extract("a", mesh_crop=True).getpixel((5, 2))[3] == 255
     built.build(mesh_aware=True)
+
+
+EDITS = {
+    "replace": lambda a: a.replace({"Arm": sprite(5, 3, 7)}),
+    "replace_composite": lambda a: a.replace_composite(["Arm", "Body"], sprite(5, 3, 8)),
+    "add_region": lambda a: a.add_region("New", sprite(2, 2, 9)),
+    "rename_region": lambda a: a.rename_region("Arm", "A2"),
+    "remove_region": lambda a: a.remove_region("Arm"),
+}
+
+
+@pytest.mark.parametrize("edit", list(EDITS))
+def test_every_edit_drops_the_build_cache(monkeypatch, edit):
+    atlas = SpineAtlas.load(ATLAS, page())
+    atlas.replace({"Head": sprite(6, 5, 1)})
+    calls = []
+    original = AtlasSession.pack_pending
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: calls.append(1) or original(self))
+    first = atlas.build(nest=True)
+    batches = len(atlas._session._mod_batches)
+    EDITS[edit](atlas)
+    assert len(atlas._session._mod_batches) > batches  # the edit landed
+    second = atlas.build(nest=True)
+    assert len(calls) == 2
+    assert second.atlas_text != first.atlas_text or second.pages["page.png"].tobytes() != first.pages["page.png"].tobytes()
+
+
+def test_saved_pages_carry_no_colour_profile(tmp_path):
+    tagged = page()
+    tagged.info["icc_profile"] = b"not-a-real-profile"
+    atlas = SpineAtlas.load(ATLAS, tagged)
+    assert "icc_profile" not in atlas.pages["page.png"].info
+    assert "icc_profile" not in atlas.extract("Head").info
+    atlas.save(tmp_path / "a.atlas")
+    with Image.open(tmp_path / "page.png") as saved:
+        assert "icc_profile" not in saved.info
 
 
 def test_save_keeps_page_files_inside_the_atlas_folder(tmp_path):

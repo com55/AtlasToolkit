@@ -382,7 +382,9 @@ class AtlasDocument:
     ) -> "AtlasDocument":
         """Build a full fresh single-page AtlasDocument from scratch
         (used after a complete repack). `page_info` may contain
-        'page'/'format'/'filter'/'repeat'/'pma'/'extra_pairs' keys; any ABSENT or None
+        'page'/'format'/'filter'/'repeat'/'pma' keys, plus 'extra_pairs' (no JS
+        counterpart -- a deliberate divergence; absent or None means []); any
+        ABSENT or None
         key falls back to the same default atlas-document.js's
         fromRebuildArgs uses -- a PRESENT-but-falsy value (e.g. "") is
         used as-is, matching JS's getOr(obj,key,def) exactly (only

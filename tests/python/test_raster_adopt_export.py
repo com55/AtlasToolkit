@@ -1,4 +1,6 @@
 """adopt/export: in-memory images in and out of the raster backend, always copied."""
+import io
+
 from PIL import Image
 
 from atlas_toolkit.engine._images import _SessionRaster
@@ -43,6 +45,22 @@ def test_palette_transparency_survives_adopt():
     exported = raster.export(raster.adopt(palette))
     assert exported.getpixel((0, 0))[3] == 0
     assert exported.getpixel((1, 0)) == (0, 255, 0, 255)
+
+
+def test_decode_and_adopt_drop_image_metadata():
+    backend = PillowRasterBackend()
+    tagged = patterned()
+    tagged.info["icc_profile"] = b"not-a-real-profile"
+    buffer = io.BytesIO()
+    tagged.save(buffer, format="PNG", icc_profile=tagged.info["icc_profile"])
+    with Image.open(io.BytesIO(buffer.getvalue())) as check:
+        assert "icc_profile" in check.info  # the fixture really carries iCCP
+    decoded = backend.decode_png(buffer.getvalue())
+    with Image.open(io.BytesIO(backend.encode_png(decoded))) as encoded:
+        assert "icc_profile" not in encoded.info
+    adopted = backend.adopt(tagged)
+    assert backend.export(adopted).info == {}
+    assert tagged.info["icc_profile"] == b"not-a-real-profile"  # caller's object untouched
 
 
 def test_export_is_a_copy():

@@ -1,4 +1,6 @@
 """SpineAtlas: open/load, data accessors, extraction and file export."""
+import ntpath
+import posixpath
 import subprocess
 import sys
 
@@ -196,6 +198,16 @@ def test_non_ascii_names_keep_their_letters_in_file_names(tmp_path):
     atlas.extract_to(["頭", "café", "Head"], tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted(["頭.png", "café.png", "Head.png"])
     assert same(Image.open(tmp_path / "頭.png"), atlas.extract("頭"))
+
+
+def test_extract_to_refuses_names_that_differ_only_in_case_on_windows(tmp_path, monkeypatch):
+    atlas = SpineAtlas.load(ATLAS + "head\n bounds: 6,5,2,2\n", page())
+    monkeypatch.setattr(api.os.path, "normcase", posixpath.normcase)
+    atlas.extract_to(["Head", "head"], tmp_path / "posix")  # distinct files on a case-sensitive system
+    monkeypatch.setattr(api.os.path, "normcase", ntpath.normcase)
+    with pytest.raises(AtlasError):
+        atlas.extract_to(["Head", "head"], tmp_path / "win")
+    assert not (tmp_path / "win").exists()
 
 
 def test_empty_composite_and_page_less_atlas_are_refused():
