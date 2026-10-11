@@ -166,9 +166,9 @@ def test_renamed_region_keeps_mesh_in_its_own_build(monkeypatch):
     h2 = built.extract("H2")
     # mesh-aware repack masks the sprite with Head's LEFT mesh (key unchanged by the rename)
     assert h2.getpixel((1, 2))[3] == 255
-    assert min(h2.getchannel("A").getdata()) == 0
+    assert h2.getchannel("A").getextrema()[0] == 0
     plain = atlas.build().extract("H2")
-    assert min(plain.getchannel("A").getdata()) == 255
+    assert plain.getchannel("A").getextrema()[0] == 255
 
 
 def test_swap_rename_gets_no_mesh_after_build(monkeypatch):
@@ -219,3 +219,28 @@ def test_save_keeps_page_files_inside_the_atlas_folder(tmp_path):
     nested.save(tmp_path / "n" / "a.atlas")
     reopened = SpineAtlas.open(tmp_path / "n" / "a.atlas")
     assert pixels(reopened.pages["sub/page.png"]) == pixels(page())
+
+
+def test_edited_second_build_still_withholds_a_swapped_mesh(monkeypatch):
+    # The parent-allowed clause of _child_allowed: generation 2 is built from an
+    # EDITED generation 1, so it goes through _child_allowed, not the pass-through.
+    atlas = with_mesh(monkeypatch, {"Head": LEFT, "Body": RIGHT, "Arm": LEFT})
+    atlas.rename_region("Body", "X")
+    atlas.rename_region("Head", "Body")
+    first = atlas.build()
+    first.replace({"Arm": sprite(5, 3, 4)})
+    second = first.build()
+    assert second.extract("Body", mesh_crop=True).getpixel((0, 2))[3] == 255
+    arm = second.extract("Arm", mesh_crop=True)
+    assert arm.getpixel((0, 1))[3] == 255 and arm.getpixel((4, 1))[3] == 0
+
+
+def test_added_region_named_like_a_skeleton_mesh_gets_no_mesh(monkeypatch):
+    # The pristine-key clause of _child_allowed: "New" is not in the atlas, so its
+    # key equals its name, and only the pristine check keeps the mesh away.
+    atlas = with_mesh(monkeypatch, {"New": LEFT, "Arm": LEFT})
+    atlas.add_region("New", sprite(4, 4, 9))
+    built = atlas.build()
+    assert built.extract("New", mesh_crop=True).getpixel((3, 1))[3] == 255
+    arm = built.extract("Arm", mesh_crop=True)
+    assert arm.getpixel((0, 1))[3] == 255 and arm.getpixel((4, 1))[3] == 0
