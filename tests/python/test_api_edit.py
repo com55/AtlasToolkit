@@ -153,7 +153,6 @@ def test_multi_page_edits_raise_at_the_call():
     assert atlas.extract("Tail").size == (4, 4)
 
 
-@pytest.mark.skip(reason="needs build(), Task 7")
 def test_edit_images_are_copied():
     atlas = SpineAtlas.load(ATLAS, page())
     added, replaced = page(3, 3), page(6, 5)
