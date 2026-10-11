@@ -1,6 +1,8 @@
 """AtlasSession with in-memory (PIL) pages: same results as the PNG paths, no PNG work."""
 import io
 
+import pytest
+
 from PIL import Image
 
 from atlas_toolkit.engine.session import AtlasSession
@@ -83,10 +85,9 @@ def test_reads_release_their_temporaries_and_close_disposes_adopted_pages():
 def test_load_images_failure_releases_adopted_pages():
     raster = PillowRasterBackend()
     text = "p.png\nsize: 8,4\na\n bounds: 0,0,4,4\n\nq.png\nsize: 4,4\nb\n bounds: 0,0,4,4\n"
-    try:
-        AtlasSession.load_images(text, {"p.png": page()}, raster)
-    except ValueError as error:
-        assert "q.png" in str(error)
+    with pytest.raises(AttributeError):
+        # p.png is adopted first; q.png is not an image, so the second adopt raises.
+        AtlasSession.load_images(text, {"p.png": page(), "q.png": object()}, raster)
     assert raster._images == {}
 
 
