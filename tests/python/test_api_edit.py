@@ -163,6 +163,7 @@ def test_edit_images_are_copied():
     replaced.putpixel((0, 0), (9, 9, 9, 9))
     out = atlas.build()
     assert out.extract("New").tobytes() == want_added.tobytes()
+    # belt-and-braces: prepare_mod_image clones the source, so only the add path can expose a missing copy
     assert out.extract("Head").tobytes() == want_replaced.tobytes()
 
 
