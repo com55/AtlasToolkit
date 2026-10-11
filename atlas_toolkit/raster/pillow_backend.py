@@ -15,6 +15,13 @@ from atlas_toolkit.raster.base import ImageHandle
 from atlas_toolkit.raster.lanczos import lanczos_resize_rgba
 
 
+def _without_metadata(img: Image.Image) -> Image.Image:
+    """Drop Image.info (icc_profile, dpi, ...): stored images are plain RGBA
+    data, and the app's canvas output never carries a colour profile."""
+    img.info.clear()
+    return img
+
+
 class PillowRasterBackend:
     def __init__(self) -> None:
         self._images: dict[ImageHandle, Image.Image] = {}
@@ -23,7 +30,7 @@ class PillowRasterBackend:
     def _store(self, img: Image.Image) -> ImageHandle:
         # INVARIANT: never store an Image object that is already reachable
         # from another handle. Every caller here passes a freshly-created
-        # object (Image.open/new, .crop, .transpose, .copy), so this holds
+        # object (Image.open/new, .convert, .crop, .transpose, .copy), so this holds
         # today -- but `paste` now mutates its destination IN PLACE rather
         # than replacing the registry entry, so two handles sharing one
         # object would mean a paste into one silently corrupting the other.
@@ -38,7 +45,7 @@ class PillowRasterBackend:
     def decode_png(self, data: bytes) -> ImageHandle:
         img = Image.open(io.BytesIO(data))
         img.load()  # force decode while the BytesIO buffer is still alive
-        return self._store(img.convert("RGBA"))
+        return self._store(_without_metadata(img.convert("RGBA")))
 
     def encode_png(self, handle: ImageHandle) -> bytes:
         buf = io.BytesIO()
@@ -80,7 +87,7 @@ class PillowRasterBackend:
     def adopt(self, native: Image.Image) -> ImageHandle:
         # convert() returns a copy even when the mode is already RGBA, so the
         # stored object is never the caller's (_store's no-aliasing invariant).
-        return self._store(native.convert("RGBA"))
+        return self._store(_without_metadata(native.convert("RGBA")))
 
     def export(self, handle: ImageHandle) -> Image.Image:
         return self._images[handle].copy()

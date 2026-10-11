@@ -360,7 +360,7 @@ class SpineAtlas:
 
     def _write_many(self, names: list[str], directory: Path, mesh_crop: bool) -> None:
         files = [_file_name(name) for name in names]
-        clashes = sorted(name for name, count in Counter(files).items() if count > 1)
+        clashes = sorted(name for name, count in Counter(os.path.normcase(f) for f in files).items() if count > 1)
         if clashes:
             raise AtlasError(f"region names map to the same file name: {', '.join(clashes)}")
         images = self.extract(names, mesh_crop=mesh_crop)
