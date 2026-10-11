@@ -189,3 +189,19 @@ def test_lazy_import():
         "assert 'PIL' in sys.modules and 'atlas_toolkit.engine.session' in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_non_ascii_names_keep_their_letters_in_file_names(tmp_path):
+    atlas = SpineAtlas.load(ATLAS + "頭\n bounds: 0,0,2,2\ncafé\n bounds: 2,0,2,2\n", page())
+    atlas.extract_to(["頭", "café", "Head"], tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(["頭.png", "café.png", "Head.png"])
+    assert same(Image.open(tmp_path / "頭.png"), atlas.extract("頭"))
+
+
+def test_empty_composite_and_page_less_atlas_are_refused():
+    atlas = SpineAtlas.load(ATLAS, page())
+    with pytest.raises(TypeError):
+        atlas.extract_composite([])
+    for pages in (page(), {"page.png": page()}):
+        with pytest.raises(AtlasError):
+            SpineAtlas.load("Head\n bounds: 0,0,1,1\n", pages)

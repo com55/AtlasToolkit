@@ -131,7 +131,10 @@ def _skeleton_bytes(value: object) -> bytes | None:
 
 
 def _file_name(name: str) -> str:
-    """The app's extract file name (atlas-api.js extract_files)."""
+    r"""The app's extract file name (atlas-api.js extract_files), except that
+    \w here is Unicode: non-ASCII letters are kept (頭 -> 頭.png) where the
+    app's ASCII \w maps them to '_'. Deliberate divergence -- with ASCII \w
+    every CJK-named atlas would collide on _.png."""
     return re.sub(r"[^\w.\- ]", "_", name) + ".png"
 
 
@@ -140,6 +143,8 @@ def _page_filenames(atlas_text: str) -> list[str]:
 
 
 def _page_mapping(filenames: list[str], images: object, fallback_dir: Path | None) -> dict[str, Image.Image]:
+    if not filenames:
+        raise AtlasError("atlas text declares no pages")
     if isinstance(images, (Image.Image, str, os.PathLike)):
         if len(filenames) != 1:
             raise MissingPageImage(
@@ -314,6 +319,8 @@ class SpineAtlas:
         self, names: str | list[str], *, force_resize: bool = False, mesh_crop: bool = False,
     ) -> Image.Image:
         wanted = [names] if isinstance(names, str) else list(names)
+        if not wanted:
+            raise TypeError("extract_composite() needs at least one region name")
         keys = [self._built_key(name) for name in wanted]
         with self._mesh_crop(mesh_crop):
             return self._session.get_preview_image(keys, force_resize)
