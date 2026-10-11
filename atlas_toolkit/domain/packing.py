@@ -266,6 +266,7 @@ def normalize_gap(value: object) -> int:
 _SCAN_STEP = 4  # px -- fixed-step raster scan, not per-pixel (performance)
 _OVERLAP_ROW_BLOCK = 64  # rows tested per numpy call in the exact overlap check
 _PRUNE_SAMPLES = 64  # mask cells probed across ALL candidate origins before the exact test
+_FIRST_FIT_CHUNK_ROWS = 64  # grid rows (x _SCAN_STEP px) per band of the first-fit search
 
 
 def _rotation_variants(item: dict, gap: int) -> list[dict]:
@@ -326,15 +327,6 @@ def _prune_by_samples(
     return keys, ys, xs
 
 
-def _occupied_integral(occupied: np.ndarray) -> np.ndarray:
-    """Inclusive-prefix occupied count with a zero first row and column:
-    result[y, x] = occupied cells in rows [0, y) x columns [0, x). Lets a
-    whole bounding box be counted in O(1)."""
-    integral = np.zeros((occupied.shape[0] + 1, occupied.shape[1] + 1), dtype=np.int32)
-    np.cumsum(np.cumsum(occupied, axis=0, dtype=np.int32), axis=1, dtype=np.int32, out=integral[1:, 1:])
-    return integral
-
-
 def _find_first_fit(variants: list[dict], occupied: np.ndarray, canvas_w: int, canvas_h: int, gap: int):
     """First-fit scan: for each candidate origin (row-major, step
     _SCAN_STEP), try every rotation in order; the first that fits wins.
@@ -342,50 +334,32 @@ def _find_first_fit(variants: list[dict], occupied: np.ndarray, canvas_w: int, c
     top-to-bottom, left-to-right fill. Port of findFirstFit.
 
     Same answer as testing every (origin, rotation) pair in order with an
-    exact overlap check, reached cheaper: an integral image counts the
-    occupied cells under every candidate bounding box at once. Zero means
-    the rotation fits outright; a box that is entirely occupied (or any
-    overlap for a solid mask) cannot fit; only the partially-occupied
-    boxes before the first outright fit need the exact mask-vs-grid test."""
-    integral = _occupied_integral(occupied)
+    exact overlap check, reached cheaper: origins are walked in horizontal
+    bands of _FIRST_FIT_CHUNK_ROWS grid rows. Within a band every
+    rotation's origins are built at once, the ones where a sampled mask
+    cell lands on an occupied cell are dropped (a proven overlap), and the
+    survivors of all rotations are exact-tested in ordering-key order.
+    Keys only grow from one band to the next, so the first fit found is
+    the global first fit, and the search stops there instead of
+    materializing every origin of a large canvas."""
     count = len(variants)
-    per_variant = []
-    first_fast = None  # smallest ordering key at which some rotation fits outright
-    for index, rot in enumerate(variants):
-        width, height = rot["w"], rot["h"]
-        if width > canvas_w or height > canvas_h:
+    band_px = _FIRST_FIT_CHUNK_ROWS * _SCAN_STEP  # read per call: tests shrink it
+    for band_top in range(0, canvas_h, band_px):
+        pending = []  # (keys, variant index, ys, xs) that survived pruning
+        for index, rot in enumerate(variants):
+            width, height = rot["w"], rot["h"]
+            if width > canvas_w or band_top > canvas_h - height:
+                continue
+            band_ys = np.arange(band_top, min(band_top + band_px, canvas_h - height + 1), _SCAN_STEP)
+            band_xs = np.arange(0, canvas_w - width + 1, _SCAN_STEP)
+            ys = np.repeat(band_ys, band_xs.size)
+            xs = np.tile(band_xs, band_ys.size)
+            keys = (ys * canvas_w + xs) * count + index
+            keys, ys, xs = _prune_by_samples(occupied, gap, rot, keys, ys, xs)
+            if keys.size:
+                pending.append((keys, np.full(keys.size, index), ys, xs))
+        if not pending:
             continue
-        ys = np.arange(0, canvas_h - height + 1, _SCAN_STEP)
-        xs = np.arange(0, canvas_w - width + 1, _SCAN_STEP)
-        top = (ys + gap)[:, None]
-        left = (xs + gap)[None, :]
-        counts = (
-            integral[top + height, left + width] - integral[top, left + width]
-            - integral[top + height, left] + integral[top, left]
-        )
-        keys = (ys[:, None] * canvas_w + xs[None, :]) * count + index
-        fits_outright = np.ones_like(counts, dtype=bool) if rot["empty"] else counts == 0
-        if fits_outright.any():
-            smallest = int(keys[fits_outright].min())
-            if first_fast is None or smallest < first_fast:
-                first_fast = smallest
-        per_variant.append((index, rot, ys, xs, counts, keys))
-
-    pending = []  # (key, variant index, y, x) of boxes needing the exact test
-    for index, rot, ys, xs, counts, keys in per_variant:
-        if rot["solid"] or rot["empty"]:
-            continue
-        needs_exact = (counts > 0) & (counts < rot["w"] * rot["h"])
-        if first_fast is not None:
-            needs_exact &= keys < first_fast
-        row_index, col_index = np.nonzero(needs_exact)
-        if row_index.size:
-            kept_keys, kept_y, kept_x = _prune_by_samples(
-                occupied, gap, rot, keys[row_index, col_index], ys[row_index], xs[col_index],
-            )
-            if kept_keys.size:
-                pending.append((kept_keys, np.full(kept_keys.size, index), kept_y, kept_x))
-    if pending:
         keys = np.concatenate([p[0] for p in pending])
         order = np.argsort(keys, kind="stable")
         indexes = np.concatenate([p[1] for p in pending])[order]
@@ -394,11 +368,7 @@ def _find_first_fit(variants: list[dict], occupied: np.ndarray, canvas_w: int, c
         for index, y, x in zip(indexes.tolist(), all_y.tolist(), all_x.tolist()):
             if not _overlaps(occupied, gap, variants[index], x, y):
                 return {"rot": variants[index], "x": x, "y": y}
-    if first_fast is None:
-        return None
-    cell, index = divmod(first_fast, count)
-    y, x = divmod(cell, canvas_w)
-    return {"rot": variants[index], "x": x, "y": y}
+    return None
 
 
 def _grow_dims(canvas_w: int, canvas_h: int, seed_rot: dict) -> tuple[int, int]:
