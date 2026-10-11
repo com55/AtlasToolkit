@@ -19,6 +19,18 @@ from atlas_toolkit.engine.modifier import (
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
+class RegionNameError(ValueError):
+    """An add/rename name rejected by validate_region_name; `.reason` is its message."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class RemoveAllRegionsError(ValueError):
+    """A deferred remove that would leave the atlas with no regions."""
+
+
 @dataclass(frozen=True)
 class RegionSummary:
     key: str
@@ -134,7 +146,7 @@ class AtlasSession:
         previous_nest_enabled: bool,
         previous_nest_gap_distance: object,
     ) -> RepackResult | None:
-        if not self._mod_batches:
+        if self._defer_repack or not self._mod_batches:
             return None
         try:
             return self.repack()
@@ -214,13 +226,13 @@ class AtlasSession:
             return self._raster.decode_png(bytes(image))
         return self._raster.adopt(image)
 
-    def _raw_effective_model(self) -> dict:
+    def _raw_effective_model(self, batches: list[dict] | None = None) -> dict:
         names = js_object_key_order(list(self._processor.regions))
         pristine = {
             key: region_meta(self._processor.regions[key])
             for key in names
         }
-        return derive_effective_model(pristine, self._mod_batches)
+        return derive_effective_model(pristine, self._mod_batches if batches is None else batches)
 
     def _validated_name(self, candidate: str, exclude_key: str | None = None) -> str:
         effective = self._raw_effective_model()
@@ -233,7 +245,7 @@ class AtlasSession:
             )
         result = validate_region_name(candidate, labels)
         if not result.ok:
-            raise ValueError(result.reason)
+            raise RegionNameError(result.reason)
         return result.value
 
     def _build_repack(
@@ -296,6 +308,17 @@ class AtlasSession:
             pages=tuple(pack.document.page_filenames()),
         )
 
+    def _keep_set(self, batches: list[dict], sprites: dict[str, ImageHandle]) -> set[ImageHandle]:
+        keep = set(self._roots)
+        for batch in batches:
+            batch_type = batch.get("type")
+            if batch_type in ("mod", "add"):
+                keep.add(batch["source"])
+            if batch_type == "mod":
+                keep.add(batch["prepared"].image)
+        keep.update(sprites.values())
+        return keep
+
     def _publish(
         self,
         batches: list[dict],
@@ -309,17 +332,17 @@ class AtlasSession:
         self._active = active
         self._generation = generation
         self._modifications_saved = modifications_saved
-
-        keep = set(self._roots)
-        for batch in batches:
-            batch_type = batch.get("type")
-            if batch_type in ("mod", "add"):
-                keep.add(batch["source"])
-            if batch_type == "mod":
-                keep.add(batch["prepared"].image)
-        keep.update(sprites.values())
+        keep = self._keep_set(batches, sprites)
         keep.add(active.image)
         self._raster.release_except(frozenset(keep))
+
+    def _record(self, batches: list[dict], sprites: dict[str, ImageHandle]) -> None:
+        """Deferred mode: store the candidate batches without packing."""
+        self._mod_batches = batches
+        self._modded_sprites = sprites
+        self._generation += 1
+        self._modifications_saved = False
+        self._raster.release_except(frozenset(self._keep_set(batches, sprites)))
 
     def snapshot(self) -> SessionSnapshot:
         self._require_open()
@@ -481,12 +504,16 @@ class AtlasSession:
             candidate_sprites = dict(self._modded_sprites)
             for name in names:
                 candidate_sprites[name] = prepared.image
-            candidate = self._build_repack(candidate_batches, candidate_sprites)
-            result = self._make_result(candidate)
+            if not self._defer_repack:
+                candidate = self._build_repack(candidate_batches, candidate_sprites)
+                result = self._make_result(candidate)
         except BaseException:
             self._raster.release_except(before)
             raise
 
+        if self._defer_repack:
+            self._record(candidate_batches, candidate_sprites)
+            return None
         self._publish(
             candidate_batches,
             candidate_sprites,
@@ -503,6 +530,9 @@ class AtlasSession:
     ) -> None:
         if before is None:
             before = self._raster.checkpoint()
+        if self._defer_repack:
+            self._record(candidate_batches, dict(self._modded_sprites))
+            return
         try:
             candidate_sprites = dict(self._modded_sprites)
             candidate = self._build_repack(candidate_batches, candidate_sprites)
@@ -566,10 +596,14 @@ class AtlasSession:
             *self._mod_batches,
             *({"type": "remove", "target_key": key} for key in targets),
         ]
+        if self._defer_repack and not self._raw_effective_model(candidate_batches)["region_names"]:
+            raise RemoveAllRegionsError("cannot remove every region")
         self._apply_structural_batches(candidate_batches)
 
     def repack(self) -> RepackResult:
         self._require_open()
+        if self._defer_repack:
+            raise RuntimeError("repack() is not available in deferred mode; use pack_pending()")
         if len(self._document.pages) > 1:
             raise NotImplementedError("pixel modifications are not supported for multi-page atlases")
 
@@ -591,6 +625,32 @@ class AtlasSession:
             self._modifications_saved,
         )
         return result
+
+    def pack_pending(self) -> tuple[str, dict[str, object]]:
+        """Pack the recorded batches once and return (text, {page: native image}).
+        Never publishes: batches, sprites, pristine pages and snapshot are
+        unchanged, and every handle the call allocated is released."""
+        self._require_open()
+        if not self._mod_batches:
+            return self._document.serialize(), self.export_pages()
+        before = self._raster.checkpoint()
+        try:
+            candidate = self._build_repack(self._mod_batches, self._modded_sprites)
+            self._make_result(candidate)
+            page = candidate.document.pages[0]
+            return candidate.document.serialize(), {page.filename: self._raster.export(candidate.image)}
+        finally:
+            self._raster.release_except(before)
+
+    def region_labels(self) -> list[tuple[str, str]]:
+        """(key, current label) for the effective model, in order."""
+        self._require_open()
+        effective = self._raw_effective_model()
+        return [(key, effective["labels"].get(key, key)) for key in effective["region_names"]]
+
+    @property
+    def has_pending_edits(self) -> bool:
+        return bool(self._mod_batches)
 
     def clear_modify_state(self) -> None:
         self._require_open()
