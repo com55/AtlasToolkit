@@ -254,6 +254,7 @@ def test_structural_transaction_sequence_matches_real_browser(case_id):
     params, expected = CASES[case_id]["params"], CASES[case_id]["output"]
     raster = PillowRasterBackend()
     session = AtlasSession.load(params["atlas"], {"p.png": _record_png(params["source"])}, raster)
+    session.set_fast_mesh_nest_enabled(False)  # JS parity: never the frontier packer
     # Existing processor seam exercises both packers without adding Task5 APIs.
     session._processor.set_nest_options(params["nest"], 4)
     try:
@@ -334,6 +335,7 @@ def test_mesh_nest_sequence_matches_real_browser(case_id):
     params, expected = CASES[case_id]["params"], CASES[case_id]["output"]
     raster = PillowRasterBackend()
     session = AtlasSession.load(params["atlas"], {"p.png": _record_png(params["source"])}, raster)
+    session.set_fast_mesh_nest_enabled(False)  # JS parity: never the frontier packer
     setters = {
         "data": "set_mesh_data", "crop": "set_mesh_mask_enabled",
         "mesh": "set_mesh_aware_repack_enabled", "nest": "set_nest_regions_enabled",
