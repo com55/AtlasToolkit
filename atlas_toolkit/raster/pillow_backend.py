@@ -6,6 +6,7 @@ composite_destination_in) added in the "mesh" stage.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 
 import numpy as np
@@ -22,10 +23,29 @@ def _without_metadata(img: Image.Image) -> Image.Image:
     return img
 
 
+_MESH_CACHE_MAX_BYTES = 64 * 1024 * 1024  # mask alpha bytes kept per backend
+
+
+def _mesh_key(uvs: list[float], triangles: list[int], width: int, height: int) -> bytes:
+    """Cache key for one mesh mask: the output size, the two list lengths
+    (so moving values between uvs and triangles can never collide), then
+    the exact uv floats and triangle indices. Geometry, never a region
+    name: two regions sharing a mesh at the same size share one entry."""
+    digest = hashlib.sha256()
+    digest.update(np.array([width, height, len(uvs), len(triangles)], dtype=np.int64).tobytes())
+    digest.update(np.asarray(uvs, dtype=np.float64).tobytes())
+    digest.update(np.asarray(triangles, dtype=np.int32).tobytes())
+    return digest.digest()
+
+
 class PillowRasterBackend:
     def __init__(self) -> None:
         self._images: dict[ImageHandle, Image.Image] = {}
         self._next_handle = 1
+        # Mesh-mask alpha by _mesh_key. Owned by this backend and gone with
+        # it; a full cache stops taking entries rather than evicting.
+        self._mesh_cache: dict[bytes, bytes] = {}
+        self._mesh_cache_bytes = 0
 
     def _store(self, img: Image.Image) -> ImageHandle:
         # INVARIANT: never store an Image object that is already reachable
@@ -138,6 +158,31 @@ class PillowRasterBackend:
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
     ) -> ImageHandle:
+        # Repacks rasterize the same mesh at the same size several times
+        # (masking a modded sprite, then its footprint), and repeated
+        # builds of one atlas redo all of it, so the alpha is cached. A hit
+        # and a miss both build a brand-new image from the same alpha
+        # bytes, so callers cannot tell them apart and no two handles ever
+        # share an Image object (see _store's invariant).
+        key = _mesh_key(uvs, triangles, width, height)
+        alpha = self._mesh_cache.get(key)
+        if alpha is None:
+            alpha = self._rasterize_alpha(uvs, triangles, width, height).tobytes()
+            if self._mesh_cache_bytes + len(alpha) <= _MESH_CACHE_MAX_BYTES:
+                self._mesh_cache[key] = alpha
+                self._mesh_cache_bytes += len(alpha)
+        rgba = np.empty((height, width, 4), dtype=np.uint8)
+        rgba[:, :, 0:3] = 255
+        rgba[:, :, 3] = np.frombuffer(alpha, dtype=np.uint8).reshape(height, width)
+        return self._store(Image.fromarray(rgba, mode="RGBA"))
+
+    def clear_mesh_cache(self) -> None:
+        self._mesh_cache.clear()
+        self._mesh_cache_bytes = 0
+
+    def _rasterize_alpha(
+        self, uvs: list[float], triangles: list[int], width: int, height: int,
+    ) -> np.ndarray:
         # Pixel-center nonzero-winding-rule polygon fill -- Pillow's
         # ImageDraw has no compound-path winding-rule fill primitive, so
         # this is a from-scratch rasterizer, algorithm validated by the
@@ -186,12 +231,7 @@ class PillowRasterBackend:
                 contributes = crosses & (cross_x > cx)
                 winding += np.where(contributes, direction, 0).astype(np.int32)
 
-        alpha = np.where(winding != 0, 255, 0).astype(np.uint8)
-        rgba = np.empty((height, width, 4), dtype=np.uint8)
-        rgba[:, :, 0:3] = 255
-        rgba[:, :, 3] = alpha
-        img = Image.fromarray(rgba, mode="RGBA")
-        return self._store(img)
+        return np.where(winding != 0, 255, 0).astype(np.uint8)
 
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
