@@ -1,4 +1,6 @@
 """SpineAtlas edits: recorded, validated at the call, addressed by current name."""
+import io
+
 import pytest
 from PIL import Image
 
@@ -110,12 +112,31 @@ def test_unknown_names_raise_region_not_found():
     atlas = SpineAtlas.load(ATLAS, page())
     for call in (
         lambda: atlas.replace({"Nope": sprite()}),
+        lambda: atlas.replace({"Head": sprite(6, 5), "Nope": sprite()}),
         lambda: atlas.rename_region("Nope", "X"),
         lambda: atlas.remove_region(["Head", "Nope"]),
     ):
         with pytest.raises(RegionNotFound):
             call()
     assert not atlas.has_changes
+
+
+def test_failing_replace_records_nothing():
+    atlas = SpineAtlas.load(ATLAS, page())
+    buffer = io.BytesIO()
+    page(6, 5).save(buffer, format="PNG")
+    truncated = Image.open(io.BytesIO(buffer.getvalue()[:60]))  # lazily decoded, fails on load
+    for bad in (Image.new("RGBA", (0, 3)), truncated, b"not an image"):
+        with pytest.raises((AtlasError, OSError, TypeError)):
+            atlas.replace({"Head": sprite(6, 5), "Body": bad})
+    with pytest.raises(TypeError):
+        atlas.replace([("Head", sprite(6, 5))])
+    assert not atlas.has_changes
+    atlas.add_region("New", sprite())
+    batches = len(atlas._session._mod_batches)
+    with pytest.raises(AtlasError):
+        atlas.replace({"Head": sprite(6, 5), "New": sprite()})
+    assert len(atlas._session._mod_batches) == batches
 
 
 def test_multi_page_edits_raise_at_the_call():
@@ -135,11 +156,15 @@ def test_multi_page_edits_raise_at_the_call():
 @pytest.mark.skip(reason="needs build(), Task 7")
 def test_edit_images_are_copied():
     atlas = SpineAtlas.load(ATLAS, page())
-    image = sprite(6, 5)
-    atlas.replace({"Head": image})
-    image.putpixel((0, 0), (9, 9, 9, 9))
+    added, replaced = page(3, 3), page(6, 5)
+    want_added, want_replaced = added.copy(), replaced.copy()
+    atlas.add_region("New", added)
+    atlas.replace({"Head": replaced})
+    added.putpixel((0, 0), (9, 9, 9, 9))
+    replaced.putpixel((0, 0), (9, 9, 9, 9))
     out = atlas.build()
-    assert out.extract("Head").getpixel((0, 0)) == (1, 2, 3, 255)
+    assert out.extract("New").tobytes() == want_added.tobytes()
+    assert out.extract("Head").tobytes() == want_replaced.tobytes()
 
 
 def test_rejected_zero_area_edit_leaves_the_session_packable_with_nest():

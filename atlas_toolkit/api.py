@@ -123,7 +123,10 @@ def _open_image(value: object) -> Image.Image:
 
 
 def _edit_image(value: object) -> Image.Image:
-    image = _open_image(value)
+    """An edit image, decoded and copied now: a lazily loaded or broken file
+    fails here, before anything is recorded, and later changes to the
+    caller's object never reach the edit."""
+    image = _open_image(value).convert("RGBA")
     if image.width == 0 or image.height == 0:
         raise AtlasError("image has zero width or height")
     return image
@@ -375,8 +378,14 @@ class SpineAtlas:
         self._refresh_names()
 
     def replace(self, images: Mapping[str, ImageLike]) -> None:
+        """Replace each named region's pixels. Every name and image is checked
+        before anything is recorded, so a failing call records nothing."""
         self._require_editable()
+        if not isinstance(images, Mapping):
+            raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
         entries = [(self._built_key(name), _edit_image(image)) for name, image in images.items()]
+        if not entries:
+            return
         try:
             for key, image in entries:
                 self._session.apply_mod_image(image, [key])
@@ -384,15 +393,16 @@ class SpineAtlas:
             self._edited()
 
     def replace_composite(self, names: list[str], image: ImageLike) -> None:
+        """Replace several regions with one image. Each region's whole canvas
+        becomes the image at the image's own size (offsets are dropped), as in
+        the app; the regions share that one sprite."""
         self._require_editable()
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
         if not keys:
             return
-        try:
-            self._session.apply_mod_image(picture, keys)
-        finally:
-            self._edited()
+        self._session.apply_mod_image(picture, keys)
+        self._edited()
 
     def add_region(self, name: str, image: ImageLike) -> None:
         self._require_editable()
@@ -401,8 +411,7 @@ class SpineAtlas:
             self._session.add_region(picture, name)
         except RegionNameError as error:
             raise InvalidRegionName(error.reason) from None
-        finally:
-            self._edited()
+        self._edited()
 
     def rename_region(self, name: str, new_name: str) -> None:
         self._require_editable()
@@ -411,8 +420,7 @@ class SpineAtlas:
             self._session.rename_region(key, new_name)
         except RegionNameError as error:
             raise InvalidRegionName(error.reason) from None
-        finally:
-            self._edited()
+        self._edited()
 
     def remove_region(self, names: str | list[str]) -> None:
         self._require_editable()
@@ -423,5 +431,4 @@ class SpineAtlas:
             self._session.remove_regions(keys)
         except RemoveAllRegionsError as error:
             raise AtlasError(str(error)) from None
-        finally:
-            self._edited()
+        self._edited()
