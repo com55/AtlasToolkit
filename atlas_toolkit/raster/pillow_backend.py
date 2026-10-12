@@ -191,7 +191,7 @@ class PillowRasterBackend:
         # agreement, full winding-cancellation parity. No antialiasing
         # (hard edges) -- Canvas's fill is antialiased; that difference is
         # confined to polygon edges, not the interior, and is expected
-        # (see this method's docstring in raster/base.py).
+        # (see rasterize_mesh_mask's docstring in raster/base.py).
         edges: list[tuple[float, float, float, float, int]] = []
         for i in range(0, len(triangles), 3):
             ia, ib, ic = triangles[i] * 2, triangles[i + 1] * 2, triangles[i + 2] * 2

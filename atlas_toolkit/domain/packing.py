@@ -374,7 +374,14 @@ def _find_first_fit(variants: list[dict], occupied: np.ndarray, canvas_w: int, c
     survivors of all rotations are exact-tested in ordering-key order.
     Keys only grow from one band to the next, so the first fit found is
     the global first fit, and the search stops there instead of
-    materializing every origin of a large canvas."""
+    materializing every origin of a large canvas.
+
+    Known trade-off: the old whole-canvas integral rejected a SOLID mask
+    over any occupied cell in one step; the samples here can miss small
+    obstacles between them, leaving survivors for the exact test. A large
+    solid item facing a field of tiny obstacles can therefore be slower
+    than before (a 300x300 item among 3000 dots: 3 s -> 10 s), while every
+    measured real and synthetic atlas got faster (1.3-4.5x)."""
     count = len(variants)
     band_px = _FIRST_FIT_CHUNK_ROWS * _SCAN_STEP  # read per call: tests shrink it
     for band_top in range(0, canvas_h, band_px):

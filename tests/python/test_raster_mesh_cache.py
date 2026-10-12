@@ -66,9 +66,9 @@ def test_key_separates_uvs_from_triangles():
 
 
 def test_entries_over_the_budget_are_not_stored(counted, monkeypatch):
-    monkeypatch.setattr(pillow_backend, "_MESH_CACHE_MAX_BYTES", 23 * 17 + 10)
+    monkeypatch.setattr(pillow_backend, "_MESH_CACHE_MAX_BYTES", 23 * 17)
     raster = PillowRasterBackend()
-    raster.rasterize_mesh_mask(UVS, TRIS, 23, 17)  # 391 bytes: fits
+    raster.rasterize_mesh_mask(UVS, TRIS, 23, 17)  # 391 bytes: exactly fits
     raster.rasterize_mesh_mask(UVS, TRIS, 30, 30)  # 900 more: over budget
     raster.rasterize_mesh_mask(UVS, TRIS, 30, 30)
     raster.rasterize_mesh_mask(UVS, TRIS, 23, 17)
@@ -87,3 +87,14 @@ def test_cache_is_per_backend(counted):
     PillowRasterBackend().rasterize_mesh_mask(UVS, TRIS, 23, 17)
     PillowRasterBackend().rasterize_mesh_mask(UVS, TRIS, 23, 17)
     assert len(counted) == 2
+
+
+def test_transposed_size_is_a_miss(counted):
+    """Same byte count, other shape: sharing a key would reshape the cached
+    alpha into a scrambled mask without any error."""
+    raster = PillowRasterBackend()
+    raster.rasterize_mesh_mask(UVS, TRIS, 23, 17)
+    swapped = raster.rasterize_mesh_mask(UVS, TRIS, 17, 23)
+    assert len(counted) == 2
+    fresh = PillowRasterBackend()
+    assert raster.get_pixels(swapped) == fresh.get_pixels(fresh.rasterize_mesh_mask(UVS, TRIS, 17, 23))
