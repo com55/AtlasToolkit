@@ -40,7 +40,6 @@ from atlas_toolkit.domain.packing import (
     nest_pack,
     shelf_pack,
 )
-from atlas_toolkit.domain.nest_frontier import nest_pack_frontier
 from atlas_toolkit.domain.region_ops import round_half_even
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
@@ -642,13 +641,8 @@ class AtlasModifier:
         `regions` values are in region_meta()'s JS shape (camelCase), the
         same shape domain/effective_model.py emits. `nest_options` is
         {"enabled": bool, "gap_distance": int} -- snake_case, unlike the
-        JS options bag -- plus an optional "packer": "frontier", which
-        AtlasSession adds for nest + mesh-aware repacks. DELIBERATE
-        DEVIATION: "frontier" packs with domain/nest_frontier.py, whose
-        layouts differ from the JS app's; without the key this is the JS
-        port's nest_pack. No JS-parity case may pass "frontier". A name in
-        `region_names` with no sprite is dropped from the output entirely,
-        as in JS.
+        JS options bag. A name in `region_names` with no sprite is dropped
+        from the output entirely, as in JS.
 
         Departures from the JS signature: `page_info` is derived from this
         modifier's own target page rather than passed in (JS passes it
@@ -700,8 +694,7 @@ class AtlasModifier:
                         "mask_crop_rect_for_offsets": mask_crop_rect_for_offsets,
                     }),
                 })
-            packer = nest_pack_frontier if nest_options.get("packer") == "frontier" else nest_pack
-            packed = packer(items, gap_distance=nest_options.get("gap_distance", 4))
+            packed = nest_pack(items, gap_distance=nest_options.get("gap_distance", 4))
         else:
             items = []
             for name in unique_names:
