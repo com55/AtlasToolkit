@@ -86,7 +86,7 @@ const FIXTURE_SERIALIZED = [
   '  bounds: 0, 0, 5, 5',
   'regionB',
   '  bounds: 5, 0, 5, 5',
-].join('\n');
+].join('\n') + '\n';
 
 test('parse -> serialize round-trip matches hand-computed (Python-cross-checked) output', () => {
   const doc = AtlasDocument.parse(FIXTURE);
@@ -197,7 +197,7 @@ bounds: 0, 0, 10, 10
     '  rotate: true',
     '  bounds: 5, 5, 20, 20',
     '  offsets: 1, 1, 25, 25',
-  ].join('\n');
+  ].join('\n') + '\n';
   assert.equal(updated.serialize(), expected);
 
   // Original document must be unaffected (withUpdates returns a new doc).
@@ -241,7 +241,7 @@ test('fromRebuildArgs builds a fresh document whose serialize() matches a hand-c
     '  origin: 5, 5',
     'bar',
     '  bounds: 10, 0, 15, 15',
-  ].join('\n');
+  ].join('\n') + '\n';
   assert.equal(doc.serialize(), expected);
 });
 
@@ -380,7 +380,8 @@ withOffsets
 dupeA
   bounds: 20, 0, 6, 6
 dupeB
-  bounds: 26, 0, 6, 6`;
+  bounds: 26, 0, 6, 6
+`;
   assert.equal(got, expected);
 });
 
@@ -403,6 +404,14 @@ test('fixtures/tie-rounding/fixture-tie.atlas parse->serialize matches live-Pyth
 size: 14,14
 tieRegion
   bounds: 0, 0, 6, 6
-  offsets: 0, 0, 7, 7`;
+  offsets: 0, 0, 7, 7
+`;
   assert.equal(got, expected);
+});
+
+test('serialize ends with a newline like Spine exports (spine-cpp reads past an unterminated last line); an empty document stays empty', () => {
+  const text = AtlasDocument.parse('p.png\nsize: 4,4\nA\n  bounds: 0, 0, 2, 2').serialize();
+  assert.ok(text.endsWith('  bounds: 0, 0, 2, 2\n'), JSON.stringify(text));
+  assert.ok(!text.endsWith('\n\n'));
+  assert.equal(AtlasDocument.parse('').serialize(), '');
 });

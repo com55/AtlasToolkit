@@ -4,6 +4,13 @@ All notable changes to AtlasToolkit. Versions match the Git tags and the
 [GitHub Releases](https://github.com/com55/AtlasToolkit/releases), which carry
 the full notes and screenshots.
 
+## [0.4.1] - 2026-10-12
+
+### Fixed
+- Saved `.atlas` files now end with a newline, like Spine's own exporter.
+  Without it, runtimes built on spine-cpp could read past the end of the file
+  text when loading an edited atlas.
+
 ## [0.4.0] - 2026-10-09
 
 The desktop app and the web app now share one interface and one engine.
@@ -128,6 +135,7 @@ The desktop app and the web app now share one interface and one engine.
 - Multi-monitor window centring and header text wrapping.
 - Release automation: tagging now triggers the build workflow.
 
+[0.4.1]: https://github.com/com55/AtlasToolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/com55/AtlasToolkit/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/com55/AtlasToolkit/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/com55/AtlasToolkit/compare/v0.3.2...v0.3.3

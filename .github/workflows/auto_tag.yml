@@ -62,5 +62,8 @@ jobs:
     needs: create-tag
     if: needs.create-tag.outputs.should_build == 'true'
     uses: ./.github/workflows/build_release.yml
+    # A called workflow sees no repository secrets unless they are passed on:
+    # without this the vendor pull fails and code signing is skipped.
+    secrets: inherit
     with:
       tag_name: ${{ needs.create-tag.outputs.tag_name }}
