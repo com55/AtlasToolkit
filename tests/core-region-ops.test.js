@@ -76,7 +76,7 @@ test('updateAtlasText with a targetPage rewrites only that page size + named reg
     'size: 50,50', // NON-target page size must be preserved
     'legR',
     '  bounds: 0, 0, 5, 5',
-  ].join('\n');
+  ].join('\n') + '\n';
   assert.equal(out, expected);
 });
 
@@ -115,7 +115,7 @@ test('rebuildAtlasText builds canonical text and bridges extraPairs from {key,va
     'bar',
     '  bounds: 10, 0, 15, 15',
     '  offsets: 1, 1, 15, 15',
-  ].join('\n');
+  ].join('\n') + '\n';
   assert.equal(out, expected);
 });
 
