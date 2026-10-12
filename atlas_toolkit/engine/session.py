@@ -95,7 +95,6 @@ class AtlasSession:
         self._active: PackResult | None = None
         self._closed = False
         self._defer_repack = bool(defer_repack)
-        self._fast_mesh_nest = True
 
     @classmethod
     def load(
@@ -209,16 +208,6 @@ class AtlasSession:
         )
         return self._repack_after_option_change(*previous)
 
-    def set_fast_mesh_nest_enabled(self, enabled: bool) -> None:
-        """Pick the packer for nest + mesh-aware repacks: True (the default)
-        uses domain/nest_frontier.py's fast packer, whose layouts
-        deliberately differ from the JS app's; False uses nest_pack, the
-        JS-parity port. JS-parity tests set False. This never repacks by
-        itself, so in an immediate (non-deferred) session set it before the
-        option change or edit that should use it."""
-        self._require_open()
-        self._fast_mesh_nest = bool(enabled)
-
     def _require_single_page_structural(self) -> None:
         if len(self._document.pages) > 1:
             raise NotImplementedError(
@@ -271,10 +260,6 @@ class AtlasSession:
         modifier = self._fresh_modifier()
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         nest_options = self._processor.get_nest_options()
-        # get_nest_options keeps the JS port's shape; the packer choice is
-        # this session's, so it is added here and only for the modifier.
-        if nest_options["enabled"] and self._processor._repack_mask_enabled and self._fast_mesh_nest:
-            nest_options = {**nest_options, "packer": "frontier"}
         if any(batch.get("type") != "mod" for batch in batches):
             pristine_names = js_object_key_order(modifier.region_names)
             pristine_regions = {
