@@ -300,7 +300,8 @@ class AtlasDocument:
          - Omit offsets: whenever offsets are absent OR equal to
            (0,0,w,h).
          - Pages after the first are separated by a blank line; no other
-           blank-line logic."""
+           blank-line logic.
+         - The text ends with a newline (none for an empty document)."""
         lines: list[str] = []
         for page_idx, page in enumerate(self.pages):
             if page_idx > 0:
@@ -319,7 +320,10 @@ class AtlasDocument:
                 lines.append(f"{key}: {', '.join(values)}")
             for region in page.regions:
                 lines.extend(_serialize_region(region))
-        return "\n".join(lines)
+        # End with a newline like Spine's own exporter (JS v0.4.1): spine-cpp's
+        # atlas reader runs past the end of a buffer whose last line is
+        # unterminated.
+        return "\n".join(lines) + "\n" if lines else ""
 
     def with_updates(
         self,
