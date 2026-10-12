@@ -53,6 +53,16 @@ def test_nest_oversized_item_raises_before_allocating(monkeypatch, allocations):
 
 
 def test_nest_growth_never_allocates_past_the_limit(monkeypatch, allocations):
+    grows = []
+    real_grow = packing._grow_grid
+
+    def counted_grow(*args):
+        grows.append(1)
+        if len(grows) > 50:  # growth that stops growing must fail, not hang
+            raise RuntimeError("canvas growth did not terminate")
+        return real_grow(*args)
+
+    monkeypatch.setattr(packing, "_grow_grid", counted_grow)
     monkeypatch.setattr(packing, "MAX_CANVAS", 39)
     with pytest.raises(CanvasTooLargeError):
         nest_pack([solid("a", 20, 20), solid("b", 20, 20)], 4)
@@ -132,3 +142,49 @@ def test_shelf_raises_when_no_candidate_fits(monkeypatch):
     with pytest.raises(CanvasTooLargeError) as raised:
         shelf_pack([solid("big", 41, 5)])
     assert raised.value.limit == 40
+
+
+def shelf_items(seed, count):
+    rng = np.random.default_rng(seed)
+    return [{"name": f"i{n:02d}", "w": int(w), "h": int(h)} for n, (w, h) in enumerate(rng.integers(4, 60, size=(count, 2)))]
+
+
+def assert_shelf_layout_fits(result, items, limit):
+    assert result["canvas_w"] <= limit and result["canvas_h"] <= limit
+    boxes = [(p["x"], p["y"], p["pw"], p["ph"]) for p in result["placements"]]
+    assert len(boxes) == len(items)
+    for i, (x, y, w, h) in enumerate(boxes):
+        assert x + w <= result["canvas_w"] and y + h <= result["canvas_h"]
+        for x2, y2, w2, h2 in boxes[i + 1:]:
+            assert x + w <= x2 or x2 + w2 <= x or y + h <= y2 or y2 + h2 <= y
+
+
+def test_shelf_tries_a_strip_as_wide_as_the_limit(monkeypatch):
+    """Seed 1: at a 160 px limit every one of the app's fixed strip widths
+    overflows, but a 160 px strip packs into 148x144."""
+    items = shelf_items(1, 12)
+    monkeypatch.setattr(packing, "MAX_CANVAS", 160)
+    result = shelf_pack(items)
+    assert (result["canvas_w"], result["canvas_h"]) == (148, 144)
+    assert_shelf_layout_fits(result, items, 160)
+
+
+def test_shelf_fallback_keeps_the_area_budget(monkeypatch):
+    """Seed 7 at a 244 px limit: the squarest fitting candidate is 160x156,
+    but 168x128 is over 15% smaller, so the app's rule (squarest within 15%
+    of the smallest area) picks it."""
+    items = shelf_items(7, 12)
+    monkeypatch.setattr(packing, "MAX_CANVAS", 244)
+    result = shelf_pack(items)
+    assert (result["canvas_w"], result["canvas_h"]) == (168, 128)
+    assert_shelf_layout_fits(result, items, 244)
+
+
+def test_nest_rejects_more_cells_than_the_limit_holds_up_front(monkeypatch, allocations):
+    """Three solid 30x30 squares (2700 cells) cannot fit a 50x50 canvas
+    (2500 cells) however they interlock: raise before any grid exists."""
+    monkeypatch.setattr(packing, "MAX_CANVAS", 50)
+    with pytest.raises(CanvasTooLargeError) as raised:
+        nest_pack([solid(f"s{n}", 30, 30) for n in range(3)], 4)
+    assert (raised.value.width, raised.value.height) == (50, 54)
+    assert allocations == []
