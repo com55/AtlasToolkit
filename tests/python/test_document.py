@@ -71,7 +71,7 @@ FIXTURE_SERIALIZED = "\n".join([
     "  bounds: 0, 0, 5, 5",
     "regionB",
     "  bounds: 5, 0, 5, 5",
-])
+]) + "\n"
 
 
 def test_parse_serialize_round_trip_matches_hand_computed_output():
@@ -253,7 +253,7 @@ def test_fixture_opaque_transparent_matches_live_js_oracle_output():
         "  bounds: 20, 0, 6, 6",
         "dupeB",
         "  bounds: 26, 0, 6, 6",
-    ])
+    ]) + "\n"
     assert got == expected
 
 
@@ -266,7 +266,7 @@ def test_fixture_tie_rounding_matches_live_js_oracle_output():
         "tieRegion",
         "  bounds: 0, 0, 6, 6",
         "  offsets: 0, 0, 7, 7",
-    ])
+    ]) + "\n"
     assert got == expected
 
 
@@ -288,7 +288,7 @@ def test_with_updates_replaces_bounds_offsets_rotate_and_applies_page_size():
         "  rotate: true",
         "  bounds: 5, 5, 20, 20",
         "  offsets: 1, 1, 25, 25",
-    ])
+    ]) + "\n"
     assert updated.serialize() == expected
 
     # Original document must be unaffected (with_updates returns a new doc).
@@ -332,7 +332,7 @@ def test_from_rebuild_args_builds_fresh_document_matching_hand_computed_expectat
         "  origin: 5, 5",
         "bar",
         "  bounds: 10, 0, 15, 15",
-    ])
+    ]) + "\n"
     assert doc.serialize() == expected
 
 
@@ -375,3 +375,10 @@ def test_png_names_for_save_uses_atlas_page_lines_not_the_stem():
 
 def test_png_names_for_save_keeps_multi_page_names_in_order():
     assert png_names_for_save(FIXTURE, 2, "pack.atlas") == ["page1.png", "page2.png"]
+
+
+def test_serialize_ends_with_a_newline_like_spine_exports():
+    """spine-cpp's atlas reader runs past an unterminated last line (JS v0.4.1)."""
+    text = AtlasDocument.parse("p.png\nsize: 4,4\nA\n  bounds: 0, 0, 2, 2").serialize()
+    assert text.endswith("  bounds: 0, 0, 2, 2\n") and not text.endswith("\n\n")
+    assert AtlasDocument.parse("").serialize() == ""

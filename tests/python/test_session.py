@@ -73,7 +73,7 @@ def test_load_snapshot_extract_preview_save_and_close_are_pristine():
     assert decoded(loaded.get_preview_png()).size == (4, 3)
     assert decoded(loaded.get_preview_png(["same", "10"])).size == (2, 1)
     text, pages = loaded.save()
-    assert text == "first.png\nsize: 4,3\n10\n  bounds: 0, 0, 2, 1\nsame\n  bounds: 2, 0, 2, 1\n\nsecond.png\nsize: 2,5\nsame\n  bounds: 0, 1, 2, 2"
+    assert text == "first.png\nsize: 4,3\n10\n  bounds: 0, 0, 2, 1\nsame\n  bounds: 2, 0, 2, 1\n\nsecond.png\nsize: 2,5\nsame\n  bounds: 0, 1, 2, 2\n"
     assert list(pages) == ["first.png", "second.png"]
     assert decoded(pages["first.png"]).getpixel((0, 0)) == (255, 0, 0, 255)
     assert loaded.snapshot().has_output is False
