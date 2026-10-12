@@ -409,6 +409,7 @@ export class AtlasDocument {
    *  - Omit `offsets:` whenever offsets are absent OR equal to (0,0,w,h).
    *  - Pages after the first are separated by a blank line; no other
    *    blank-line logic.
+   *  - The text ends with a newline (none for an empty document).
    * @returns {string}
    */
   serialize() {
@@ -430,7 +431,9 @@ export class AtlasDocument {
         lines.push(...serializeRegion(region));
       }
     });
-    return lines.join('\n');
+    // End with a newline like Spine's own exporter: spine-cpp's atlas
+    // reader runs past the end of a buffer whose last line is unterminated.
+    return lines.length ? `${lines.join('\n')}\n` : '';
   }
 }
 
