@@ -30,6 +30,26 @@ from atlas_toolkit.domain.region_ops import round_up_to_multiple
 # up to 15% more area than the minimum in exchange for a squarer canvas.
 _SQUARENESS_AREA_TOLERANCE = 1.15
 
+# Largest canvas side shelf_pack and nest_pack may produce. DELIBERATE
+# DEVIATION from the JS app, which has no cap of its own (only the
+# browser's canvas limit, somewhere past 16384 px, eventually stops it):
+# without one, an oversized input keeps growing the canvas until the process
+# runs out of memory. Every layout that fits inside it is unchanged; only
+# inputs that would otherwise exceed it behave differently from JS. Read at
+# call time, so tests can lower it.
+MAX_CANVAS = 10000
+
+
+class CanvasTooLargeError(ValueError):
+    """Packing would need a canvas side over MAX_CANVAS. Raised before the
+    oversized canvas or occupancy grid is allocated."""
+
+    def __init__(self, width: int, height: int, limit: int) -> None:
+        super().__init__(f"packing needs a {width}x{height} canvas, over the {limit} px per side limit")
+        self.width = width
+        self.height = height
+        self.limit = limit
+
 
 def _js_or_chain_cmp(a: dict, b: dict, keys: tuple[str, ...]) -> int:
     """Port of JS's `(a.k1 - b.k1) || (a.k2 - b.k2) || ...` comparator
@@ -140,6 +160,19 @@ def shelf_pack(items: list[dict]) -> dict:
         )
     )
     best = within_budget[0]
+    limit = MAX_CANVAS
+    if best["canvas_w"] > limit or best["canvas_h"] > limit:
+        # Only reached when the app's own choice is too big (see MAX_CANVAS):
+        # take the squarest candidate that fits, ignoring the area budget.
+        fitting = [c for c in candidates if c["canvas_w"] <= limit and c["canvas_h"] <= limit]
+        if not fitting:
+            raise CanvasTooLargeError(best["canvas_w"], best["canvas_h"], limit)
+        fitting.sort(
+            key=functools.cmp_to_key(
+                lambda a, b: _js_or_chain_cmp(a, b, ("aspect", "area", "canvas_w"))
+            )
+        )
+        best = fitting[0]
 
     return {
         "canvas_w": round_up_to_multiple(best["canvas_w"]),
@@ -391,8 +424,33 @@ def _grow_dims(canvas_w: int, canvas_h: int, seed_rot: dict) -> tuple[int, int]:
     return candidates[0]["w"], candidates[0]["h"]
 
 
-def _grow_grid(canvas_w: int, canvas_h: int, occupied: np.ndarray, seed_rot: dict, gap: int):
-    new_w, new_h = _grow_dims(canvas_w, canvas_h, seed_rot)
+def _grow_dims_within(canvas_w: int, canvas_h: int, seed_rot: dict, limit: int) -> tuple[int, int]:
+    """_grow_dims kept inside `limit` (see MAX_CANVAS). While the usual,
+    squarer choice fits, it is returned unchanged, so every layout that fits
+    stays identical to the app's. Past the limit, try the other direction,
+    then each choice clamped to the limit -- growing by a whole item side
+    can overshoot a canvas that would still have fit -- and raise only when
+    none of them grows the canvas any more."""
+    preferred = _grow_dims(canvas_w, canvas_h, seed_rot)
+    right = (canvas_w + seed_rot["w"], max(canvas_h, seed_rot["h"]))
+    down = (max(canvas_w, seed_rot["w"]), canvas_h + seed_rot["h"])
+    other = down if preferred == right else right
+    clamped = [(min(w, limit), min(h, limit)) for w, h in (preferred, other)]
+    for new_w, new_h in (preferred, other, *clamped):
+        if new_w <= limit and new_h <= limit and (new_w, new_h) != (canvas_w, canvas_h):
+            return new_w, new_h
+    raise CanvasTooLargeError(preferred[0], preferred[1], limit)
+
+
+def _grow_grid(
+    canvas_w: int, canvas_h: int, occupied: np.ndarray, seed_rot: dict, gap: int, limit: int | None = None,
+):
+    """Grow the canvas (and its padded occupancy grid) for `seed_rot`;
+    `limit` None means uncapped, as grow_canvas's JS port needs."""
+    if limit is None:
+        new_w, new_h = _grow_dims(canvas_w, canvas_h, seed_rot)
+    else:
+        new_w, new_h = _grow_dims_within(canvas_w, canvas_h, seed_rot, limit)
     nxt = np.zeros((new_h + 2 * gap, new_w + 2 * gap), dtype=np.uint8)
     if canvas_w > 0 or canvas_h > 0:
         nxt[:occupied.shape[0], :occupied.shape[1]] = occupied
@@ -438,6 +496,10 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
                 f'nest_pack: item "{item["name"]}" has non-positive dimensions '
                 f'({item["w"]}x{item["h"]})'
             )
+    limit = MAX_CANVAS
+    for item in items:
+        if max(item["w"], item["h"]) > limit:  # too big in every rotation
+            raise CanvasTooLargeError(item["w"], item["h"], limit)
 
     ordered = sorted(items, key=lambda item: -max(item["w"], item["h"]))
 
@@ -450,10 +512,10 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
         variants = _rotation_variants(item, gap)
         spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap) if canvas_w > 0 else None
         # Growth is monotonic (each call strictly increases canvas_w or
-        # canvas_h by at least the unrotated variant's own dimension), so
-        # this terminates.
+        # canvas_h) and capped at `limit` per side, after which it raises,
+        # so this terminates.
         while spot is None:
-            canvas_w, canvas_h, occupied = _grow_grid(canvas_w, canvas_h, occupied, variants[0], gap)
+            canvas_w, canvas_h, occupied = _grow_grid(canvas_w, canvas_h, occupied, variants[0], gap, limit)
             spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
         _stamp_occupied(occupied, gap, spot["rot"], spot["x"], spot["y"])
         placements.append({

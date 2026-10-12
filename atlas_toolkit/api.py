@@ -18,7 +18,7 @@ from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
-from atlas_toolkit.domain.packing import normalize_gap
+from atlas_toolkit.domain.packing import CanvasTooLargeError, normalize_gap
 from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
@@ -26,6 +26,7 @@ from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MultiPageNotSupported", "MissingPageImage", "SkeletonUnavailable",
+    "CanvasTooLarge",
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
@@ -70,6 +71,19 @@ class SkeletonUnavailable(AtlasError):
     def __init__(self, reason: str) -> None:
         super().__init__(f"mesh data unavailable: {reason}")
         self.reason = reason
+
+
+class CanvasTooLarge(AtlasError, ValueError):
+    """Packing the edits would need a canvas side over the packers' limit
+    (atlas_toolkit.domain.packing.MAX_CANVAS, 10000 px). Raised by build()
+    and save() before the oversized page is allocated; the atlas and its
+    recorded edits are unchanged."""
+
+    def __init__(self, width: int, height: int, limit: int) -> None:
+        super().__init__(f"packing needs a {width}x{height} canvas, over the {limit} px per side limit")
+        self.width = width
+        self.height = height
+        self.limit = limit
 
 
 @dataclass(frozen=True)
@@ -453,6 +467,8 @@ class SpineAtlas:
                 session.set_nest_gap_distance(gap)
             session.set_mesh_aware_repack_enabled(mesh_aware)
             return session.pack_pending()
+        except CanvasTooLargeError as error:
+            raise CanvasTooLarge(error.width, error.height, error.limit) from None
         finally:
             session.set_nest_regions_enabled(False)
             session.set_nest_gap_distance(4)
