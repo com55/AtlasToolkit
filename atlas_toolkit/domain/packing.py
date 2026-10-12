@@ -36,16 +36,18 @@ _SQUARENESS_AREA_TOLERANCE = 1.15
 # without one, an oversized input keeps growing the canvas until the process
 # runs out of memory. Every layout that fits inside it is unchanged; only
 # inputs that would otherwise exceed it behave differently from JS. Read at
-# call time, so tests can lower it.
+# call time, so tests can lower it. Keep it a multiple of 4: canvases are
+# rounded up to one, and 10000 rounds to itself.
 MAX_CANVAS = 10000
 
 
 class CanvasTooLargeError(ValueError):
     """Packing would need a canvas side over MAX_CANVAS. Raised before the
-    oversized canvas or occupancy grid is allocated."""
+    oversized canvas or occupancy grid is allocated. `width`/`height` are
+    the packer's estimate of the layout it could not fit, not a minimum."""
 
     def __init__(self, width: int, height: int, limit: int) -> None:
-        super().__init__(f"packing needs a {width}x{height} canvas, over the {limit} px per side limit")
+        super().__init__(f"the packed layout would be about {width}x{height}, over the {limit} px per side limit")
         self.width = width
         self.height = height
         self.limit = limit
@@ -112,6 +114,20 @@ def _pack_with_width(items: list[dict], strip_w: int, allow_rotate: bool) -> tup
     return used_w, shelf_y + shelf_h, placements
 
 
+def _squarest_within_budget(candidates: list[dict]) -> dict:
+    """The squarest candidate whose area is within _SQUARENESS_AREA_TOLERANCE
+    of the smallest, tie-broken by smaller area then smaller width -- the
+    app's choice rule."""
+    best_area = min(candidate["area"] for candidate in candidates)
+    within_budget = [c for c in candidates if c["area"] <= best_area * _SQUARENESS_AREA_TOLERANCE]
+    within_budget.sort(
+        key=functools.cmp_to_key(
+            lambda a, b: _js_or_chain_cmp(a, b, ("aspect", "area", "canvas_w"))
+        )
+    )
+    return within_budget[0]
+
+
 def shelf_pack(items: list[dict]) -> dict:
     """Shelf bin-packer: try a fixed set of candidate strip widths with and
     without rotation, then pick the squarest layout whose area is within
@@ -140,39 +156,33 @@ def shelf_pack(items: list[dict]) -> dict:
     }
     candidate_widths.update(max_single * (i + 1) for i in range(5))
 
-    candidates: list[dict] = []
-    for strip_w in sorted(candidate_widths):
-        for allow_rotate in (False, True):
-            used_w, canvas_h, placements = _pack_with_width(items, strip_w, allow_rotate)
-            candidates.append({
-                "canvas_w": used_w,
-                "canvas_h": canvas_h,
-                "placements": placements,
-                "area": used_w * canvas_h,
-                "aspect": _aspect(used_w, canvas_h),
-            })
+    def attempt(strip_w: int, allow_rotate: bool) -> dict:
+        used_w, canvas_h, placements = _pack_with_width(items, strip_w, allow_rotate)
+        return {
+            "canvas_w": used_w,
+            "canvas_h": canvas_h,
+            "placements": placements,
+            "area": used_w * canvas_h,
+            "aspect": _aspect(used_w, canvas_h),
+        }
 
-    best_area = min(candidate["area"] for candidate in candidates)
-    within_budget = [c for c in candidates if c["area"] <= best_area * _SQUARENESS_AREA_TOLERANCE]
-    within_budget.sort(
-        key=functools.cmp_to_key(
-            lambda a, b: _js_or_chain_cmp(a, b, ("aspect", "area", "canvas_w"))
-        )
-    )
-    best = within_budget[0]
+    candidates = [
+        attempt(strip_w, allow_rotate)
+        for strip_w in sorted(candidate_widths)
+        for allow_rotate in (False, True)
+    ]
+    best = _squarest_within_budget(candidates)
     limit = MAX_CANVAS
     if best["canvas_w"] > limit or best["canvas_h"] > limit:
-        # Only reached when the app's own choice is too big (see MAX_CANVAS):
-        # take the squarest candidate that fits, ignoring the area budget.
+        # Only reached when the app's own choice is too big (see MAX_CANVAS).
+        # The fixed widths can all overflow together, so also try strips
+        # exactly as wide as the limit, then apply the app's own rule to
+        # the candidates that fit.
+        candidates += [attempt(limit, allow_rotate) for allow_rotate in (False, True)]
         fitting = [c for c in candidates if c["canvas_w"] <= limit and c["canvas_h"] <= limit]
         if not fitting:
             raise CanvasTooLargeError(best["canvas_w"], best["canvas_h"], limit)
-        fitting.sort(
-            key=functools.cmp_to_key(
-                lambda a, b: _js_or_chain_cmp(a, b, ("aspect", "area", "canvas_w"))
-            )
-        )
-        best = fitting[0]
+        best = _squarest_within_budget(fitting)
 
     return {
         "canvas_w": round_up_to_multiple(best["canvas_w"]),
@@ -507,6 +517,11 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
     for item in items:
         if max(item["w"], item["h"]) > limit:  # too big in every rotation
             raise CanvasTooLargeError(item["w"], item["h"], limit)
+    # Silhouettes may interlock but never overlap, so more occupied cells
+    # than limit^2 can never fit: fail now instead of growing to the limit.
+    cells = sum(int(np.count_nonzero(_grid(item["footprint"], item["w"], item["h"]))) for item in items)
+    if cells > limit * limit:
+        raise CanvasTooLargeError(limit, -(-cells // limit), limit)
 
     ordered = sorted(items, key=lambda item: -max(item["w"], item["h"]))
 

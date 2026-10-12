@@ -80,7 +80,7 @@ class CanvasTooLarge(AtlasError, ValueError):
     recorded edits are unchanged."""
 
     def __init__(self, width: int, height: int, limit: int) -> None:
-        super().__init__(f"packing needs a {width}x{height} canvas, over the {limit} px per side limit")
+        super().__init__(f"the packed layout would be about {width}x{height}, over the {limit} px per side limit")
         self.width = width
         self.height = height
         self.limit = limit
