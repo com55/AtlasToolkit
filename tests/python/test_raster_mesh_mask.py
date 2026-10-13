@@ -114,3 +114,51 @@ def test_result_is_rgba_opaque_white_where_filled():
     # Pixel (2,2) sits inside the triangle spanning u,v in [0,1] on a 10x10
     # canvas -- must be opaque white, not just nonzero alpha.
     assert img.getpixel((2, 2)) == (255, 255, 255, 255)
+
+
+def _reference_alpha(uvs, triangles, width, height):
+    """The original full-canvas edge loop, kept as the oracle for the banded
+    rasterizer: every edge tested against every pixel centre."""
+    import numpy as np
+
+    winding = np.zeros((height, width), dtype=np.int32)
+    cy = (np.arange(height, dtype=np.float64) + 0.5)[:, np.newaxis]
+    cx = (np.arange(width, dtype=np.float64) + 0.5)[np.newaxis, :]
+    for i in range(0, len(triangles), 3):
+        ia, ib, ic = triangles[i] * 2, triangles[i + 1] * 2, triangles[i + 2] * 2
+        pts = [(uvs[ia] * width, uvs[ia + 1] * height), (uvs[ib] * width, uvs[ib + 1] * height),
+               (uvs[ic] * width, uvs[ic + 1] * height)]
+        for k in range(3):
+            x0, y0 = pts[k]
+            x1, y1 = pts[(k + 1) % 3]
+            if y0 == y1:
+                continue
+            direction = 1 if y1 > y0 else -1
+            if y0 > y1:
+                x0, y0, x1, y1 = x1, y1, x0, y0
+            crosses = (cy >= y0) & (cy < y1)
+            cross_x = x0 + (cy - y0) / (y1 - y0) * (x1 - x0)
+            winding += np.where(crosses & (cross_x > cx), direction, 0).astype(np.int32)
+    return np.where(winding != 0, 255, 0).astype(np.uint8)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_banded_rasterizer_matches_the_full_canvas_reference(seed):
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    width, height = [(37, 23), (64, 64), (101, 7), (5, 90)][seed % 4]
+    n = 3 * int(rng.integers(1, 9))
+    if seed % 3 == 0:
+        # Vertices exactly on pixel edges and pixel centres, where a band
+        # computed in floats is most likely to be off by one row.
+        uvs = [float(v) for v in (rng.integers(-4, 2 * max(width, height) + 4, 2 * n) / (2.0 * np.array([width, height] * n)))]
+    else:
+        uvs = [float(v) for v in rng.uniform(-0.3, 1.3, 2 * n)]  # partly off-canvas
+    triangles = [int(v) for v in rng.permutation(n)]
+    if seed % 4 == 1:
+        triangles += triangles[::-1]  # reversed twins: winding cancellation
+    backend = PillowRasterBackend()
+    mask = backend.rasterize_mesh_mask(uvs, triangles, width, height)
+    got = np.asarray(backend.export(mask))[..., 3]
+    assert np.array_equal(got, _reference_alpha(uvs, triangles, width, height))
