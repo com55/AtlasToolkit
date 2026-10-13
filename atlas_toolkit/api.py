@@ -416,8 +416,9 @@ class SpineAtlas:
         image is instead taken as the inverse of
         extract_composite(force_resize=True): it is stored at its own size,
         cut into one mesh-owned piece per region, and pixels outside every
-        mesh hull are dropped. A group with a region that has no mesh, or a
-        nine-patch region, keeps the default behaviour."""
+        mesh hull are dropped. A group keeps the default behaviour when any of
+        its regions has no mesh, is a nine-patch, or has malformed offsets (a
+        zero-size canvas)."""
         self._require_editable()
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)

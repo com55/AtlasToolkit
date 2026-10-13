@@ -842,7 +842,7 @@ class AtlasModifier:
         `added_sprites` is an AddBatch source that never existed in the
         pristine parse.
 
-        TWO CALLER PRECONDITIONS:
+        CALLER NOTES:
 
         1. The caller orders the INITIAL pristine map with js_object_key_order()
            before deriving the effective model, then supplies the resulting
