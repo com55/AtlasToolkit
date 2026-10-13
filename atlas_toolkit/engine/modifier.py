@@ -827,6 +827,7 @@ class AtlasModifier:
         full_canvas_regions: Optional[set[str]] = None,
         mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
         nest_options: Optional[dict] = None,
+        piece_sprites: Optional[dict[str, object]] = None,
     ) -> PackResult:
         """Repack from the effective (pristine union structural-batch)
         region model -- the Add/Remove/Rename path. Mirrors
@@ -852,12 +853,29 @@ class AtlasModifier:
            in `added_sprites` is also excluded from the pristine-masking
            pass (mirrors atlas-modifier.js:871-889's third guard clause --
            an AddBatch sprite never had a pristine region to look mesh
-           geometry up for)."""
+           geometry up for).
+
+        3. `piece_sprites` maps a name to a pre-cut piece (`.image`,
+           `.offsets`; engine/composite_split.py's Piece): the piece is
+           used instead of extracting from the page, is not masked again
+           (it is already cut to its hull), and its offsets replace the
+           region's in a copied meta. Spec 2026-10-13-composite-split §3.5."""
+        pieces = piece_sprites or {}
+        if pieces:
+            # Spec 2026-10-13 §3.5: copy the mapping, then give each piece a
+            # NEW meta dict with a NEW offsets list -- region_meta hands out
+            # the Region's own list, and the build cache repeats builds.
+            effective_regions = dict(effective_regions)
+            for name, piece in pieces.items():
+                effective_regions[name] = {**effective_regions[name], "offsets": list(piece.offsets)}
         _pristine_names, pristine_regions = self._scoped_region_meta()
         sprites: dict[str, ImageHandle] = {}
         for name, meta in pristine_regions.items():
             if name not in effective_regions:
                 continue  # dropped by a RemoveBatch
+            if name in pieces:
+                sprites[name] = pieces[name].image  # already cut to its hull
+                continue
             sprites[name] = extract_raw_sprite(self.raster, self.base_image, meta)
             if mesh_lookup_fn is not None and name not in (modded_sprites or {}) and name not in (added_sprites or {}):
                 geom = mesh_lookup_fn(name)
