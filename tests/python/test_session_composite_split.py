@@ -103,3 +103,13 @@ def test_split_build_leaves_session_sprites_untouched(monkeypatch):
     fresh = loaded(monkeypatch)
     fresh.replace_composite(["A", "C"], composite())
     assert pack(atlas, False).atlas_text == pack(fresh, False).atlas_text
+
+
+def test_member_with_a_zero_size_canvas_falls_back(monkeypatch):
+    # Malformed offsets (canvas 0x0) cannot be scaled: the group keeps the
+    # old behaviour instead of raising ZeroDivisionError.
+    monkeypatch.setattr(api, "_parse_skeleton", lambda data: {"attachments": MESHES})
+    text = ATLAS.replace(" offsets: 2,0,32,16\n", " offsets: 2,0,0,0\n")
+    atlas = SpineAtlas.load(text, page(), skeleton=b"x")
+    atlas.replace_composite(["A", "C"], composite())
+    assert pack(atlas, True).atlas_text == pack(atlas, False).atlas_text
