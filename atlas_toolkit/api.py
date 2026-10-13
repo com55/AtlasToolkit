@@ -408,9 +408,16 @@ class SpineAtlas:
             self._edited()
 
     def replace_composite(self, names: list[str], image: ImageLike) -> None:
-        """Replace several regions with one image. Each region's whole canvas
-        becomes the image at the image's own size (offsets are dropped), as in
-        the app; the regions share that one sprite."""
+        """Replace several regions with one image.
+
+        By default each region's whole canvas becomes the image at the image's
+        own size (offsets are dropped), as in the app; the regions share that
+        one sprite. With build(mesh_aware=True, split_composite=True) the
+        image is instead taken as the inverse of
+        extract_composite(force_resize=True): it is stored at its own size,
+        cut into one mesh-owned piece per region, and pixels outside every
+        mesh hull are dropped. A group with a region that has no mesh, or a
+        nine-patch region, keeps the default behaviour."""
         self._require_editable()
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
@@ -459,13 +466,15 @@ class SpineAtlas:
             and (self._allowed is None or key in self._allowed)
         )
 
-    def _pack(self, nest: bool, gap: int | None, mesh_aware: bool) -> tuple[str, dict]:
+    def _pack(self, nest: bool, gap: int | None, mesh_aware: bool, split_composite: bool = False) -> tuple[str, dict]:
         session = self._session
         try:
             session.set_nest_regions_enabled(nest)
             if nest:
                 session.set_nest_gap_distance(gap)
             session.set_mesh_aware_repack_enabled(mesh_aware)
+            if split_composite:
+                return session.pack_pending(split_composite=True)
             return session.pack_pending()
         except CanvasTooLargeError as error:
             raise CanvasTooLarge(error.width, error.height, error.limit) from None
@@ -474,12 +483,16 @@ class SpineAtlas:
             session.set_nest_gap_distance(4)
             session.set_mesh_aware_repack_enabled(False)
 
-    def build(self, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False) -> "SpineAtlas":
+    def build(
+        self, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False, split_composite: bool = False,
+    ) -> "SpineAtlas":
+        if split_composite and not mesh_aware:
+            raise ValueError("split_composite=True needs mesh_aware=True")
         if mesh_aware:
             self._require_mesh()
         if not self.has_changes:
             return SpineAtlas._create(self._text, self._session.export_pages(), self._skeleton, self._allowed)
-        options = (bool(nest), normalize_gap(gap) if nest else None, bool(mesh_aware))
+        options = (bool(nest), normalize_gap(gap) if nest else None, bool(mesh_aware), bool(split_composite))
         if self._build_cache is None or self._build_cache[0] != options:
             text, pages = self._pack(*options)
             self._build_cache = (options, text, pages, self._child_allowed())
@@ -488,8 +501,9 @@ class SpineAtlas:
 
     def save(
         self, atlas_path: str | os.PathLike, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False,
+        split_composite: bool = False,
     ) -> None:
-        target = self.build(nest=nest, gap=gap, mesh_aware=mesh_aware)
+        target = self.build(nest=nest, gap=gap, mesh_aware=mesh_aware, split_composite=split_composite)
         text, pngs = target._session.save()
         path = Path(atlas_path)
         root = path.parent.resolve()
