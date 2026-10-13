@@ -220,3 +220,17 @@ def test_save_passes_the_switch(monkeypatch, tmp_path):
     atlas.save(tmp_path / "o.atlas", mesh_aware=True, split_composite=True)
     text = (tmp_path / "o.atlas").read_text(encoding="utf-8")
     assert text == atlas.build(mesh_aware=True, split_composite=True).atlas_text
+
+
+def test_force_resize_masks_at_the_target_size(monkeypatch):
+    # A region stored at a lower scale is resized first and masked with its
+    # mesh at the target size, so nothing spills past its hull (masking
+    # first and then resizing let Lanczos smear the edge outside it), and
+    # the composite round-trips through split_composite with no loss.
+    atlas = load(monkeypatch, MIXED, MIXED_MESH)
+    comp = atlas.extract_composite(["D", "E"], force_resize=True, mesh_crop=True)
+    inside = union(32, 16, [(0, 0, 16, 8), (8, 4, 24, 16)])
+    assert np.array_equal(np.asarray(comp)[..., 3] > 0, inside)
+    atlas.replace_composite(["D", "E"], comp)
+    built = atlas.build(mesh_aware=True, split_composite=True)
+    assert_round_trip(built.extract_composite(["D", "E"], force_resize=True, mesh_crop=True), np.asarray(comp), inside)
