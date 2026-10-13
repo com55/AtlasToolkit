@@ -72,8 +72,10 @@ class AtlasProcessor:
             "gap_distance": gap if valid_gap else 4,
         }
 
-    def extract_region(self, name: str) -> ImageHandle | None:
-        """Return a fresh caller-owned image, or None for an unresolved key/page."""
+    def extract_region(self, name: str, mask: bool = True) -> ImageHandle | None:
+        """Return a fresh caller-owned image, or None for an unresolved key/page.
+        mask=False skips the mesh crop (get_preview_image applies it itself
+        after a forced resize)."""
         region = self.regions.get(name)
         if region is None:
             return None
@@ -93,19 +95,25 @@ class AtlasProcessor:
                     raster.paste(output, sprite, left, original_h - bottom - h)
                 finally:
                     raster.dispose(sprite)
-            geometry = self.get_mesh_geometry(name)
-            if geometry is not None:
-                mask = raster.rasterize_mesh_mask(
-                    geometry["uvs"], geometry["triangles"], *raster.size(output),
-                )
-                try:
-                    raster.composite_destination_in(output, mask)
-                finally:
-                    raster.dispose(mask)
+            if mask:
+                self._mask_to_mesh(name, output)
             return output
         except BaseException:
             raster.dispose(output)
             raise
+
+    def _mask_to_mesh(self, name: str, image: ImageHandle) -> None:
+        """Crop `image` in place to the region's mesh, rasterized at the
+        image's own size (no-op when Mesh Cropping gives no geometry)."""
+        geometry = self.get_mesh_geometry(name)
+        if geometry is None:
+            return
+        raster = self._raster
+        mask = raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], *raster.size(image))
+        try:
+            raster.composite_destination_in(image, mask)
+        finally:
+            raster.dispose(mask)
 
     def _page_scale(self, region, source: ImageHandle) -> tuple[float, float]:
         """Loaded image size / declared page size (1.0 when undeclared)."""
@@ -143,30 +151,44 @@ class AtlasProcessor:
     ) -> ImageHandle | None:
         """Stack the extracted regions, earlier names on top. One image is
         returned as-is. Forced resizing Lanczos-resizes every image to the
-        largest-area one (renderPreviewCanvases)."""
+        largest-area one (renderPreviewCanvases).
+
+        DELIBERATE DIVERGENCE from JS (user ruling 2026-10-13): with Mesh
+        Cropping, a region that forced resizing stretches is resized
+        UNMASKED and then masked with its mesh at the target size. Masking
+        first let the Lanczos kernel smear the edge past the hull; this way
+        the composite stops exactly at every hull, so replace_composite with
+        split_composite round-trips it without loss. Unstretched regions and
+        force_resize=False are unchanged."""
         images: list[ImageHandle] = []
+        image_names: list[str] = []
         composite: ImageHandle | None = None
         try:
             for name in names:
                 if name in self.regions:
-                    image = self.extract_region(name)
+                    image = self.extract_region(name, mask=False)
                     if image is not None:
                         images.append(image)
+                        image_names.append(name)
             if not images:
                 return None
             if len(images) == 1:
-                return images.pop()
+                image = images.pop()
+                self._mask_to_mesh(image_names[0], image)
+                return image
 
             frame = preview_composite_frame(
                 [self._raster.size(image) for image in images], force_resize,
             )
             composite = self._raster.create(frame["width"], frame["height"])
-            for image in reversed(images):
+            for image, name in zip(reversed(images), reversed(image_names)):
                 if not frame["scale"] or self._raster.size(image) == (frame["width"], frame["height"]):
+                    self._mask_to_mesh(name, image)
                     self._raster.paste(composite, image, 0, 0)
                     continue
                 resized = self._raster.resize_lanczos(image, frame["width"], frame["height"])
                 try:
+                    self._mask_to_mesh(name, resized)
                     self._raster.paste(composite, resized, 0, 0)
                 finally:
                     self._raster.dispose(resized)
