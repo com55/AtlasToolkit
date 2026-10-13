@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 
 import numpy as np
 from PIL import Image, ImageChops
@@ -227,12 +228,21 @@ class PillowRasterBackend:
             cy = (np.arange(height, dtype=np.float64) + 0.5)[:, np.newaxis]  # (H,1)
             cx = (np.arange(width, dtype=np.float64) + 0.5)[np.newaxis, :]   # (1,W)
             for x0, y0, x1, y1, direction in edges:
-                # Canonical order guarantees y1 > y0 always now.
-                crosses = (cy >= y0) & (cy < y1)
-                t = (cy - y0) / (y1 - y0)
+                # Canonical order guarantees y1 > y0 always now. An edge can
+                # only cross the rows whose centres lie in [y0, y1), so work
+                # on that band alone (one spare row each side absorbs float
+                # rounding; the exact test below still decides every row) --
+                # same result as scanning the whole canvas, far less work.
+                r0 = max(0, math.floor(y0 - 0.5))
+                r1 = min(height, math.ceil(y1 - 0.5) + 1)
+                if r0 >= r1:
+                    continue
+                band = cy[r0:r1]
+                crosses = (band >= y0) & (band < y1)
+                t = (band - y0) / (y1 - y0)
                 cross_x = x0 + t * (x1 - x0)
                 contributes = crosses & (cross_x > cx)
-                winding += np.where(contributes, direction, 0).astype(np.int32)
+                winding[r0:r1] += np.where(contributes, direction, 0).astype(np.int32)
 
         return np.where(winding != 0, 255, 0).astype(np.uint8)
 
