@@ -262,3 +262,11 @@ def _pixel(raster: PillowRasterBackend, handle, x: int, y: int) -> tuple[int, in
     w, _h = raster.size(handle)
     i = (y * w + x) * 4
     return tuple(raster.get_pixels(handle)[i:i + 4])
+
+
+def test_from_pixels_round_trips_rgba_bytes():
+    raster = PillowRasterBackend()
+    data = bytes(range(2 * 3 * 4))
+    handle = raster.from_pixels(2, 3, data)
+    assert raster.size(handle) == (2, 3)
+    assert raster.get_pixels(handle) == data

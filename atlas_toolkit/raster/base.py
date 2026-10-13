@@ -51,6 +51,9 @@ class RasterBackend(Protocol):
     def encode_png(self, handle: ImageHandle) -> bytes: ...
     def create(self, width: int, height: int) -> ImageHandle: ...
     def size(self, handle: ImageHandle) -> tuple[int, int]: ...
+    def from_pixels(self, width: int, height: int, data: bytes) -> ImageHandle:
+        """New width x height image from raw RGBA bytes, row-major (4 bytes/
+        pixel) -- the inverse of get_pixels."""
 
     def crop_rotate(
         self, handle: ImageHandle, x: int, y: int, w: int, h: int, rotate: int
