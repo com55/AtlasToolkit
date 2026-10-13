@@ -28,6 +28,7 @@ array/object is truthy, its Python equivalent is falsy."""
 from __future__ import annotations
 
 import hashlib
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
@@ -447,7 +448,11 @@ def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
     STRINGS are never compared across the two runtimes."""
     pixels = np.frombuffer(raster.get_pixels(handle), dtype=np.uint8).reshape(-1, 4).copy()
     pixels[pixels[:, 3] == 0, :3] = 0
-    return hashlib.sha256(pixels).hexdigest()
+    width, height = raster.size(handle)
+    # DELIBERATE DIVERGENCE from JS (user ruling 2026-10-13): the size is
+    # hashed too, so equal bytes in different shapes (flat 4x2 vs 2x4) no
+    # longer dedup into one sprite whose bounds then read a neighbour.
+    return hashlib.sha256(struct.pack(">II", width, height) + pixels.tobytes()).hexdigest()
 
 
 def extract_raw_sprite(raster: RasterBackend, image: ImageHandle, region: dict) -> ImageHandle:

@@ -281,3 +281,13 @@ def test_added_region_named_like_a_skeleton_mesh_gets_no_mesh(monkeypatch):
     assert built.extract("New", mesh_crop=True).getpixel((3, 1))[3] == 255
     arm = built.extract("Arm", mesh_crop=True)
     assert arm.getpixel((0, 1))[3] == 255 and arm.getpixel((4, 1))[3] == 0
+
+
+def test_flat_sprites_of_different_shape_get_their_own_bounds():
+    atlas = SpineAtlas.load("page.png\nsize: 16,8\nP\n bounds: 0,0,4,2\nQ\n bounds: 4,0,2,4\n", page())
+    atlas.replace({"P": Image.new("RGBA", (4, 2), (200, 10, 10, 255)),
+                   "Q": Image.new("RGBA", (2, 4), (200, 10, 10, 255))})
+    built = atlas.build()
+    p, q = built.region("P").bounds, built.region("Q").bounds
+    assert (p[2], p[3]) == (4, 2) and (q[2], q[3]) == (2, 4)
+    assert (p[0], p[1]) != (q[0], q[1])

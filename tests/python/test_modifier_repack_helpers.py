@@ -204,3 +204,19 @@ def test_region_meta_carries_the_js_shape():
     assert meta["split"] == [1, 2, 3, 4]
     assert meta["pad"] is None
     assert meta["extraPairs"] == []
+
+
+def _flat(raster, w, h, rgba):
+    buf = io.BytesIO()
+    Image.new("RGBA", (w, h), rgba).save(buf, format="PNG")
+    return raster.decode_png(buf.getvalue())
+
+
+def test_canvas_hash_separates_flat_sprites_of_different_shape():
+    # Same bytes (8 identical pixels), different shape: must not dedup together.
+    raster = PillowRasterBackend()
+    wide = _flat(raster, 4, 2, (200, 10, 10, 255))
+    tall = _flat(raster, 2, 4, (200, 10, 10, 255))
+    assert raster.get_pixels(wide) == raster.get_pixels(tall)
+    assert canvas_hash(raster, wide) != canvas_hash(raster, tall)
+    assert canvas_hash(raster, wide) == canvas_hash(raster, _flat(raster, 4, 2, (200, 10, 10, 255)))
