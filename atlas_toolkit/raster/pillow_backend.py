@@ -75,6 +75,9 @@ class PillowRasterBackend:
     def create(self, width: int, height: int) -> ImageHandle:
         return self._store(Image.new("RGBA", (width, height), (0, 0, 0, 0)))
 
+    def from_pixels(self, width: int, height: int, data: bytes) -> ImageHandle:
+        return self._store(Image.frombytes("RGBA", (width, height), bytes(data)))
+
     def size(self, handle: ImageHandle) -> tuple[int, int]:
         return self._images[handle].size
 

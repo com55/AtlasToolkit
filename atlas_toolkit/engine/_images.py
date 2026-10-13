@@ -26,6 +26,9 @@ class _SessionRaster:
     def create(self, width: int, height: int) -> ImageHandle:
         return self._track(self._backend.create(width, height))
 
+    def from_pixels(self, width: int, height: int, data: bytes) -> ImageHandle:
+        return self._track(self._backend.from_pixels(width, height, data))
+
     def size(self, handle: ImageHandle) -> tuple[int, int]:
         return self._backend.size(handle)
 
