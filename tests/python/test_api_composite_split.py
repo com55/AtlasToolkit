@@ -142,16 +142,20 @@ def test_later_replace_on_one_member(monkeypatch):
     assert a[0, 0].tolist() == [9, 9, 9, 255]
 
 
-def test_empty_piece_is_one_pixel(monkeypatch):
+@pytest.mark.parametrize("nest", [False, True])
+def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, nest):
+    # In game the mesh maps the whole canvas around the packed rect via the
+    # offsets, so an empty piece must keep its full rect: a shrunk rect would
+    # leave C's hull sampling whatever sprite nest packed next to it.
     atlas = load(monkeypatch, SAME, SAME_MESH)
     want = pattern(32, 16)
     want[6:16, 4:12, 3] = 0                                   # C's whole hull is transparent
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(mesh_aware=True, split_composite=True)
-    assert built.region("C").bounds[2:] == (1, 1)
-    assert built.region("C").offsets == (2, 16 - 6 - 1, 32, 16)
-    a, b = built.region("A").bounds, built.region("B").bounds
-    assert (a[0], a[1]) != (b[0], b[1])
+    built = atlas.build(nest=nest, mesh_aware=True, split_composite=True)
+    assert built.region("C").bounds[2:] == (12, 10)
+    assert built.region("C").offsets == (2, 0, 32, 16)
+    # C's hull lies inside its rect, so every texel it samples is in its bounds.
+    assert not np.any(np.asarray(built.extract("C").convert("RGBA"))[..., 3])
 
 
 @pytest.mark.parametrize("edit", ["rename", "add", "remove"])

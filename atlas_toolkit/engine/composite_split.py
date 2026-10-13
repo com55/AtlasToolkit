@@ -73,9 +73,8 @@ def split_composite(
         piece = pixels[y0:y0 + h, x0:x0 + w].copy()
         piece[..., 3] = alphas[k, y0:y0 + h, x0:x0 + w]
         piece[piece[..., 3] == 0] = 0
-        if not piece[..., 3].any():
-            image = raster.from_pixels(1, 1, bytes(4))
-            pieces[name] = Piece(image, [x0, height - y0 - 1, width, height])
-            continue
+        # An empty piece keeps its full rect: in game the mesh maps the whole
+        # canvas around the packed rect, so a smaller rect would let the hull
+        # sample a neighbouring sprite.
         pieces[name] = Piece(raster.from_pixels(w, h, piece.tobytes()), offsets[name])
     return pieces

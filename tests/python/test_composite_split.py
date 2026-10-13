@@ -84,11 +84,11 @@ def test_piece_offsets_put_the_canvas_at_the_image_size():
     assert np.all(pixels[:, 4:20, 3] == 255) and np.all(pixels[:, :4, 3] == 0)
 
 
-def test_empty_piece_shrinks_to_one_pixel_at_its_rect_origin():
+def test_empty_piece_keeps_its_full_rect_transparent():
     arr = np.zeros((16, 32, 4), np.uint8)
     arr[:, :8, 3] = 255                              # opaque only where E's hull is not
     metas = {"E": meta([3, 0, 24, 12], 15, 9)}
     out = _cut(arr, ["E"], metas, {"E": rect_mesh(0.25, 0.25, 0.75, 1)})
     offsets, pixels = out["E"]
-    assert pixels.shape[:2] == (1, 1) and pixels[0, 0, 3] == 0
-    assert offsets == [4, 16 - 4 - 1, 32, 16]
+    assert pixels.shape[:2] == (12, 20) and not pixels[..., 3].any()
+    assert offsets == [4, 0, 32, 16]
