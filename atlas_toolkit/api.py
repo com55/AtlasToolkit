@@ -416,7 +416,7 @@ class SpineAtlas:
         picture = _edit_image(image)
         if not keys:
             return
-        self._session.apply_mod_image(picture, keys)
+        self._session.apply_mod_image(picture, keys, composite=True)
         self._edited()
 
     def add_region(self, name: str, image: ImageLike) -> None:

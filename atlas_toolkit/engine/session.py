@@ -9,6 +9,7 @@ from atlas_toolkit.domain.effective_model import derive_effective_model
 from atlas_toolkit.domain.packing import normalize_gap
 from atlas_toolkit.domain.region_validation import validate_region_name
 from atlas_toolkit.engine._images import _SessionRaster
+from atlas_toolkit.engine.composite_split import split_composite as cut_composite
 from atlas_toolkit.engine.extraction import AtlasProcessor
 from atlas_toolkit.engine.modifier import (
     AtlasModifier,
@@ -249,7 +250,7 @@ class AtlasSession:
         return result.value
 
     def _build_repack(
-        self, batches: list[dict], sprites: dict[str, ImageHandle],
+        self, batches: list[dict], sprites: dict[str, ImageHandle], split_composite: bool = False,
     ) -> PackResult:
         full_canvas_regions = {
             name
@@ -260,7 +261,12 @@ class AtlasSession:
         modifier = self._fresh_modifier()
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         nest_options = self._processor.get_nest_options()
-        if any(batch.get("type") != "mod" for batch in batches):
+        pieces = self._composite_pieces(modifier, batches, sprites, mesh_lookup_fn) if split_composite else {}
+        if pieces:
+            # New containers: pack_pending passes the session's live dict.
+            sprites = {name: handle for name, handle in sprites.items() if name not in pieces}
+            full_canvas_regions = full_canvas_regions - pieces.keys()
+        if pieces or any(batch.get("type") != "mod" for batch in batches):
             pristine_names = js_object_key_order(modifier.region_names)
             pristine_regions = {
                 key: region_meta(modifier.regions[key])
@@ -280,6 +286,7 @@ class AtlasSession:
                 full_canvas_regions=full_canvas_regions,
                 mesh_lookup_fn=mesh_lookup_fn,
                 nest_options=nest_options,
+                piece_sprites=pieces or None,
             )
         return modifier.repack_with_modded_sprites(
             sprites,
@@ -287,6 +294,33 @@ class AtlasSession:
             mesh_lookup_fn=mesh_lookup_fn,
             nest_options=nest_options,
         )
+
+    def _composite_pieces(self, modifier, batches: list[dict], sprites: dict[str, ImageHandle], mesh_lookup_fn) -> dict:
+        """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
+        survivors all have repack mesh and no nine-patch; others stay as
+        they are. Survivors: the batch's names (first occurrence) still
+        holding its prepared image and not removed, in batch order."""
+        removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
+        pieces: dict = {}
+        for batch in batches:
+            if batch.get("type") != "mod" or not batch.get("composite"):
+                continue
+            image = batch["prepared"].image
+            survivors: list[str] = []
+            for name in batch["names"]:
+                if name in survivors or name in removed or sprites.get(name) != image:
+                    continue
+                survivors.append(name)
+            if not survivors or any(name not in modifier.regions for name in survivors):
+                continue
+            metas = {name: region_meta(modifier.regions[name]) for name in survivors}
+            geometry = {name: mesh_lookup_fn(name) for name in survivors}
+            if any(g is None for g in geometry.values()):
+                continue
+            if any(m["split"] is not None or m["pad"] is not None for m in metas.values()):
+                continue
+            pieces.update(cut_composite(self._raster, batch["source"], survivors, metas, geometry))
+        return pieces
 
     def _make_result(self, pack: PackResult) -> RepackResult:
         width, height = self._raster.size(pack.image)
@@ -477,7 +511,7 @@ class AtlasSession:
         return text, pages
 
     def apply_mod_image(
-        self, image: bytes | object, selected_names: list[str],
+        self, image: bytes | object, selected_names: list[str], composite: bool = False,
     ) -> RepackResult | None:
         self._require_open()
         names = list(selected_names)
@@ -499,6 +533,7 @@ class AtlasSession:
                 "source": source,
                 "prepared": prepared,
                 "is_full_canvas": prepared.is_full_canvas,
+                "composite": bool(composite),
             }
             candidate_batches = [*self._mod_batches, batch]
             candidate_sprites = dict(self._modded_sprites)
@@ -626,7 +661,7 @@ class AtlasSession:
         )
         return result
 
-    def pack_pending(self) -> tuple[str, dict[str, object]]:
+    def pack_pending(self, split_composite: bool = False) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return (text, {page: native image}).
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released."""
@@ -635,7 +670,10 @@ class AtlasSession:
             return self._document.serialize(), self.export_pages()
         before = self._raster.checkpoint()
         try:
-            candidate = self._build_repack(self._mod_batches, self._modded_sprites)
+            if split_composite:
+                candidate = self._build_repack(self._mod_batches, self._modded_sprites, split_composite=True)
+            else:
+                candidate = self._build_repack(self._mod_batches, self._modded_sprites)
             self._make_result(candidate)
             page = candidate.document.pages[0]
             return candidate.document.serialize(), {page.filename: self._raster.export(candidate.image)}
