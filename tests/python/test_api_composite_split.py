@@ -265,3 +265,29 @@ def test_force_resize_masks_at_the_target_size(monkeypatch):
     atlas.replace_composite(["D", "E"], comp)
     built = atlas.build(mesh_aware=True, split_composite=True)
     assert_round_trip(built.extract_composite(["D", "E"], force_resize=True, mesh_crop=True), np.asarray(comp), inside)
+
+
+SAME_PMA = SAME.replace("size: 64,32\n", "size: 64,32\npma: true\n", 1)
+
+
+def premultiplied(arr):
+    out = arr.astype(np.uint16)
+    out[..., :3] = out[..., :3] * out[..., 3:4] // 255
+    return out.astype(np.uint8)
+
+
+def test_pma_split_renders_back_premultiplied():
+    # A pma page has no repack mesh, so every survivor holds its rect. The
+    # straight-alpha round trip cannot see a pma bug; render premultiplied.
+    atlas = SpineAtlas.load(SAME_PMA, page())
+    want = premultiplied(pattern(32, 16))
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(split_composite=True)
+    assert "pma: true" in built.atlas_text
+    out = np.zeros((16, 32, 4))
+    for name in "CBA":                                              # A is the top holder
+        piece = np.asarray(built.extract(name).convert("RGBA")).astype(float)
+        out = piece + out * (1 - piece[..., 3:4] / 255)
+    inside = union(32, 16, SAME_RECTS)
+    assert np.all(np.abs(out[inside] - want[inside]) <= 2)
+    assert np.all(out[~inside] == 0)

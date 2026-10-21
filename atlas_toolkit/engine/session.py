@@ -302,6 +302,7 @@ class AtlasSession:
         repack off) is cut to its whole rect. Survivors: the batch's names (first occurrence) still
         holding its prepared image and not removed, in batch order."""
         removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
+        pma_pages = {page.filename for page in self._document.pages if page.pma}
         pieces: dict = {}
         for batch in batches:
             if batch.get("type") != "mod" or not batch.get("composite"):
@@ -320,7 +321,8 @@ class AtlasSession:
                 continue
             if any(m["offsets"] is not None and (m["offsets"][2] <= 0 or m["offsets"][3] <= 0) for m in metas.values()):
                 continue  # malformed canvas size: nothing to scale against
-            pieces.update(cut_composite(self._raster, batch["source"], survivors, metas, geometry))
+            pma_names = {name for name in survivors if modifier.regions[name].page_filename in pma_pages}
+            pieces.update(cut_composite(self._raster, batch["source"], survivors, metas, geometry, pma_names))
         return pieces
 
     def _make_result(self, pack: PackResult) -> RepackResult:
