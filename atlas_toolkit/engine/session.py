@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.effective_model import derive_effective_model
-from atlas_toolkit.domain.packing import normalize_gap
+from atlas_toolkit.domain.packing import CanvasTooLargeError, normalize_gap
 from atlas_toolkit.domain.region_validation import validate_region_name
 from atlas_toolkit.engine._images import _SessionRaster
 from atlas_toolkit.engine.composite_split import split_composite as cut_composite
@@ -75,9 +75,10 @@ class RepackResult:
 class AtlasSession:
     """In-memory atlas session; it does not write files or integrate a UI/bridge.
 
-    Load, read, extract and pristine save support multi-page atlases. Nonempty
-    edits and repack are single-page only and reject multi-page sessions before
-    allocating candidate images.
+    Load, read, extract and pristine save support multi-page atlases. In
+    deferred mode (SpineAtlas) every edit works on every page; immediate mode
+    publishes one active canvas, so its edits and repack stay single-page and
+    reject multi-page sessions before allocating candidate images.
     """
 
     def __init__(
@@ -215,11 +216,11 @@ class AtlasSession:
                 "structural changes are not supported for multi-page atlases",
             )
 
+    def _page_modifier(self, filename: str) -> AtlasModifier:
+        return AtlasModifier(self._document, self._page_images[filename], self._raster, filename)
+
     def _fresh_modifier(self) -> AtlasModifier:
-        page = self._document.pages[0]
-        return AtlasModifier(
-            self._document, self._page_images[page.filename], self._raster, page.filename,
-        )
+        return self._page_modifier(self._document.pages[0].filename)
 
     def _load_source(self, image: object) -> ImageHandle:
         """PNG bytes are decoded; anything else is a backend-native image, adopted."""
@@ -249,19 +250,75 @@ class AtlasSession:
             raise RegionNameError(result.reason)
         return result.value
 
+    def _region_pages(self, batches: list[dict]) -> dict[str, str]:
+        """Page file name of every pristine key and every added key."""
+        pages = {key: region.page_filename for key, region in self._processor.regions.items()}
+        for batch in batches:
+            if batch.get("type") == "add":
+                pages[batch["internal_key"]] = batch["page"]
+        return pages
+
+    def _touched_pages(self, batches: list[dict], region_pages: dict[str, str]) -> list[str]:
+        """Spec 2026-10-21 §3.2: pages that own a region a mod names, receive
+        an add, or lose a region to a remove, in page order. On a multi-page
+        atlas a rename touches nothing (text-only rewrite, §3.4); a one-page
+        atlas keeps today's repack for renames."""
+        single = len(self._document.pages) == 1
+        touched: set[str] = set()
+        for batch in batches:
+            batch_type = batch.get("type")
+            if batch_type == "mod":
+                touched.update(region_pages[name] for name in batch["names"] if name in region_pages)
+            elif batch_type == "add":
+                touched.add(batch["page"])
+            elif batch_type == "remove" or (batch_type == "rename" and single):
+                if batch["target_key"] in region_pages:
+                    touched.add(region_pages[batch["target_key"]])
+        return [name for name in dict.fromkeys(self._document.page_filenames()) if name in touched]
+
+    @staticmethod
+    def _page_batches(filename: str, batches: list[dict], region_pages: dict[str, str]) -> list[dict]:
+        """Every mod (a no-op for keys off this page) plus this page's
+        add, remove and rename batches, in order."""
+        out = []
+        for batch in batches:
+            batch_type = batch.get("type")
+            if batch_type == "mod":
+                out.append(batch)
+            elif batch_type == "add":
+                if batch["page"] == filename:
+                    out.append(batch)
+            elif region_pages.get(batch.get("target_key")) == filename:
+                out.append(batch)
+        return out
+
     def _build_repack(
         self, batches: list[dict], sprites: dict[str, ImageHandle], split_composite: bool = False,
     ) -> PackResult:
+        """Immediate mode: the one page of a single-page atlas."""
+        modifier = self._fresh_modifier()
+        mesh_lookup_fn = self._processor.get_repack_mesh_geometry
+        pieces = (
+            self._composite_pieces({modifier.target_page: modifier}, batches, mesh_lookup_fn)
+            if split_composite else {}
+        )
+        return self._pack_page(modifier, batches, sprites, pieces)
+
+    def _pack_page(
+        self, modifier: AtlasModifier, batches: list[dict], sprites: dict[str, ImageHandle], pieces: dict,
+    ) -> PackResult:
+        """Today's single-page repack, for one page: `batches` are that page's
+        (_page_batches), `sprites` and `pieces` may name other pages' keys;
+        both repack paths only read the page's own names."""
         full_canvas_regions = {
             name
             for batch in batches
             if batch.get("type") == "mod" and batch.get("is_full_canvas")
             for name in batch["names"]
         }
-        modifier = self._fresh_modifier()
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         nest_options = self._processor.get_nest_options()
-        pieces = self._composite_pieces(modifier, batches, mesh_lookup_fn) if split_composite else {}
+        pieces = {name: piece for name, piece in pieces.items() if name in modifier.regions}
         if pieces:
             # New containers: pack_pending passes the session's live dict.
             sprites = {name: handle for name, handle in sprites.items() if name not in pieces}
@@ -295,13 +352,52 @@ class AtlasSession:
             nest_options=nest_options,
         )
 
-    def _composite_pieces(self, modifier, batches: list[dict], mesh_lookup_fn) -> dict:
+    def _build_pages(
+        self, batches: list[dict], sprites: dict[str, ImageHandle], split_composite: bool = False,
+    ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
+        """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
+        own and splice it into the pristine document (port of JS
+        replacePageInAtlas); every other page keeps its pristine image. Never
+        mutates self._document or its pages: every build reuses them."""
+        region_pages = self._region_pages(batches)
+        touched = self._touched_pages(batches, region_pages)
+        modifiers = {filename: self._page_modifier(filename) for filename in touched}
+        mesh_lookup_fn = self._processor.get_repack_mesh_geometry
+        pieces = self._composite_pieces(modifiers, batches, mesh_lookup_fn) if split_composite else {}
+        packed: dict[str, PackResult] = {}
+        for filename in touched:
+            try:
+                result = self._pack_page(
+                    modifiers[filename], self._page_batches(filename, batches, region_pages), sprites, pieces,
+                )
+            except CanvasTooLargeError as error:
+                if len(self._document.pages) > 1:
+                    error.page = filename
+                raise
+            width, height = self._raster.size(result.image)
+            if width <= 0 or height <= 0:
+                raise ValueError("Repack output must have positive dimensions.")
+            packed[filename] = result
+        pages, images = [], {}
+        for page in self._document.pages:
+            if page.filename in packed:
+                pages.append(packed[page.filename].document.pages[0])
+                images[page.filename] = packed[page.filename].image
+            else:
+                pages.append(page)
+                images[page.filename] = self._page_images[page.filename]
+        return AtlasDocument(pages), images
+
+    def _composite_pieces(self, modifiers: dict[str, AtlasModifier], batches: list[dict], mesh_lookup_fn) -> dict:
         """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
         survivors have no nine-patch and a non-empty offsets canvas; others
         stay as they are. A survivor without repack mesh (none, or mesh-aware
         repack off) is cut to its whole rect. Survivors: the batch's names
         (first occurrence) that no later mod batch names and that are not
-        removed, in batch order (spec 2026-10-21 §3.2)."""
+        removed, in batch order (spec 2026-10-21 §3.2). Each survivor's metas
+        come from its own page's modifier (`modifiers` maps page file name to
+        modifier); a survivor that is not a pristine key of one of those
+        pages (an added key) makes the batch fall back (spec 2026-10-21 §3.7)."""
         removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
         pma_pages = {page.filename for page in self._document.pages if page.pma}
         last_mod: dict[str, int] = {}
@@ -318,15 +414,21 @@ class AtlasSession:
                 if name in survivors or name in removed or last_mod[name] != index:
                     continue
                 survivors.append(name)
-            if not survivors or any(name not in modifier.regions for name in survivors):
+            owners: dict[str, AtlasModifier] = {}
+            for name in survivors:
+                region = self._processor.regions.get(name)
+                modifier = modifiers.get(region.page_filename) if region is not None else None
+                if modifier is not None and name in modifier.regions:
+                    owners[name] = modifier
+            if not survivors or len(owners) < len(survivors):
                 continue
-            metas = {name: region_meta(modifier.regions[name]) for name in survivors}
+            metas = {name: region_meta(owners[name].regions[name]) for name in survivors}
             geometry = {name: mesh_lookup_fn(name) for name in survivors}
             if any(m["split"] is not None or m["pad"] is not None for m in metas.values()):
                 continue
             if any(m["offsets"] is not None and (m["offsets"][2] <= 0 or m["offsets"][3] <= 0) for m in metas.values()):
                 continue  # malformed canvas size: nothing to scale against
-            pma_names = {name for name in survivors if modifier.regions[name].page_filename in pma_pages}
+            pma_names = {name for name in survivors if owners[name].target_page in pma_pages}
             pieces.update(cut_composite(self._raster, batch["source"], survivors, metas, geometry, pma_names))
         return pieces
 
@@ -523,27 +625,46 @@ class AtlasSession:
         names = list(selected_names)
         if not names:
             return None
-        if len(self._document.pages) > 1:
+        if len(self._document.pages) > 1 and not self._defer_repack:
             raise NotImplementedError("pixel modifications are not supported for multi-page atlases")
 
         before = self._raster.checkpoint()
         try:
             source = self._load_source(image)
-            prepare_modifier = self._fresh_modifier()
-            ordered_names = [name for name in names if name in prepare_modifier.regions]
-            ordered_names.extend(name for name in names if name not in prepare_modifier.regions)
-            prepared = prepare_modifier.prepare_mod_image(source, ordered_names)
+            candidate_sprites = dict(self._modded_sprites)
+            if len(self._document.pages) == 1:
+                prepare_modifier = self._fresh_modifier()
+                ordered_names = [name for name in names if name in prepare_modifier.regions]
+                ordered_names.extend(name for name in names if name not in prepare_modifier.regions)
+                prepared = prepare_modifier.prepare_mod_image(source, ordered_names)
+                is_full_canvas = prepared.is_full_canvas
+                for name in names:
+                    candidate_sprites[name] = prepared.image
+            else:
+                # JS _registerModBatch, multi-page branch: one preparation per
+                # page from that page's own names; the batch is full-canvas
+                # if any page's preparation is.
+                is_full_canvas = False
+                for filename in dict.fromkeys(self._document.page_filenames()):
+                    page_names = [
+                        name for name in names
+                        if name in self._processor.regions
+                        and self._processor.regions[name].page_filename == filename
+                    ]
+                    if not page_names:
+                        continue
+                    prepared = self._page_modifier(filename).prepare_mod_image(source, page_names)
+                    is_full_canvas = is_full_canvas or prepared.is_full_canvas
+                    for name in page_names:
+                        candidate_sprites[name] = prepared.image
             batch = {
                 "type": "mod",
                 "names": list(names),
                 "source": source,
-                "is_full_canvas": prepared.is_full_canvas,
+                "is_full_canvas": is_full_canvas,
                 "composite": bool(composite),
             }
             candidate_batches = [*self._mod_batches, batch]
-            candidate_sprites = dict(self._modded_sprites)
-            for name in names:
-                candidate_sprites[name] = prepared.image
             if not self._defer_repack:
                 candidate = self._build_repack(candidate_batches, candidate_sprites)
                 result = self._make_result(candidate)
@@ -609,7 +730,13 @@ class AtlasSession:
             source = self._load_source(image)
             candidate_batches = [
                 *self._mod_batches,
-                {"type": "add", "internal_key": internal_key, "atlas_name": atlas_name, "source": source},
+                {
+                    "type": "add",
+                    "internal_key": internal_key,
+                    "atlas_name": atlas_name,
+                    "source": source,
+                    "page": self._document.pages[0].filename,
+                },
             ]
         except BaseException:
             self._raster.release_except(before)
@@ -676,12 +803,13 @@ class AtlasSession:
         before = self._raster.checkpoint()
         try:
             if split_composite:
-                candidate = self._build_repack(self._mod_batches, self._modded_sprites, split_composite=True)
+                document, images = self._build_pages(self._mod_batches, self._modded_sprites, split_composite=True)
             else:
-                candidate = self._build_repack(self._mod_batches, self._modded_sprites)
-            self._make_result(candidate)
-            page = candidate.document.pages[0]
-            return candidate.document.serialize(), {page.filename: self._raster.export(candidate.image)}
+                document, images = self._build_pages(self._mod_batches, self._modded_sprites)
+            return document.serialize(), {
+                filename: self._raster.export(images[filename])
+                for filename in dict.fromkeys(document.page_filenames())
+            }
         finally:
             self._raster.release_except(before)
 

@@ -91,8 +91,8 @@ def test_structural_sequence_keeps_the_rename_of_the_second_add():
 def test_deferred_edits_never_pack_and_pack_pending_never_publishes(monkeypatch):
     session = AtlasSession.load_images(ATLAS, {"p.png": page()}, PillowRasterBackend(), defer_repack=True)
     calls = []
-    original = AtlasSession._build_repack
-    monkeypatch.setattr(AtlasSession, "_build_repack", lambda self, b, s: calls.append(1) or original(self, b, s))
+    original = AtlasSession._build_pages
+    monkeypatch.setattr(AtlasSession, "_build_pages", lambda self, b, s: calls.append(1) or original(self, b, s))
     for step in SEQUENCES["mixed"]:
         step(session)
     session.set_nest_regions_enabled(True)
@@ -123,7 +123,7 @@ def test_pack_pending_releases_its_allocations_on_success_and_failure(monkeypatc
         self._raster.create(3, 3)
         raise RuntimeError("pack failed")
 
-    monkeypatch.setattr(AtlasSession, "_build_repack", broken)
+    monkeypatch.setattr(AtlasSession, "_build_pages", broken)
     with pytest.raises(RuntimeError):
         session.pack_pending()
     assert set(raster._images) == live
