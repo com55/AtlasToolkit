@@ -798,7 +798,7 @@ def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkey
     batch = left._mod_batches[0]
     durable_batch_pixels = (
         raster.get_pixels(batch["source"]),
-        raster.get_pixels(batch["prepared"].image),
+        raster.get_pixels(left._modded_sprites["a"]),
     )
     foreign_and_right = {
         handle: raster.get_pixels(handle)
@@ -813,7 +813,7 @@ def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkey
         batch = left._mod_batches[0]
         expected_live = (
             set(left._roots)
-            | {batch["source"], batch["prepared"].image}
+            | {batch["source"], left._modded_sprites["a"]}
             | set(left._modded_sprites.values())
             | {left._active.image}
         )
@@ -822,7 +822,7 @@ def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkey
         assert prepare_calls == 1
         assert (
             raster.get_pixels(batch["source"]),
-            raster.get_pixels(batch["prepared"].image),
+            raster.get_pixels(left._modded_sprites["a"]),
         ) == durable_batch_pixels
         assert prepared_pixels == [durable_batch_pixels[1]]
         assert {

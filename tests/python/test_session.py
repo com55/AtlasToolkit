@@ -932,7 +932,7 @@ def test_task5_toggle_repack_reuses_mod_add_and_pristine_sources_without_handle_
     mod_batch, add_batch = loaded._mod_batches
     durable = {
         mod_batch["source"]: raster.get_pixels(mod_batch["source"]),
-        mod_batch["prepared"].image: raster.get_pixels(mod_batch["prepared"].image),
+        loaded._modded_sprites["a"]: raster.get_pixels(loaded._modded_sprites["a"]),
         add_batch["source"]: raster.get_pixels(add_batch["source"]),
     }
     live_count = len(raster._images)

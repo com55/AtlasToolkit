@@ -261,7 +261,7 @@ class AtlasSession:
         modifier = self._fresh_modifier()
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         nest_options = self._processor.get_nest_options()
-        pieces = self._composite_pieces(modifier, batches, sprites, mesh_lookup_fn) if split_composite else {}
+        pieces = self._composite_pieces(modifier, batches, mesh_lookup_fn) if split_composite else {}
         if pieces:
             # New containers: pack_pending passes the session's live dict.
             sprites = {name: handle for name, handle in sprites.items() if name not in pieces}
@@ -295,22 +295,27 @@ class AtlasSession:
             nest_options=nest_options,
         )
 
-    def _composite_pieces(self, modifier, batches: list[dict], sprites: dict[str, ImageHandle], mesh_lookup_fn) -> dict:
+    def _composite_pieces(self, modifier, batches: list[dict], mesh_lookup_fn) -> dict:
         """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
         survivors have no nine-patch and a non-empty offsets canvas; others
         stay as they are. A survivor without repack mesh (none, or mesh-aware
-        repack off) is cut to its whole rect. Survivors: the batch's names (first occurrence) still
-        holding its prepared image and not removed, in batch order."""
+        repack off) is cut to its whole rect. Survivors: the batch's names
+        (first occurrence) that no later mod batch names and that are not
+        removed, in batch order (spec 2026-10-21 §3.2)."""
         removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
         pma_pages = {page.filename for page in self._document.pages if page.pma}
+        last_mod: dict[str, int] = {}
+        for index, batch in enumerate(batches):
+            if batch.get("type") == "mod":
+                for name in batch["names"]:
+                    last_mod[name] = index
         pieces: dict = {}
-        for batch in batches:
+        for index, batch in enumerate(batches):
             if batch.get("type") != "mod" or not batch.get("composite"):
                 continue
-            image = batch["prepared"].image
             survivors: list[str] = []
             for name in batch["names"]:
-                if name in survivors or name in removed or sprites.get(name) != image:
+                if name in survivors or name in removed or last_mod[name] != index:
                     continue
                 survivors.append(name)
             if not survivors or any(name not in modifier.regions for name in survivors):
@@ -351,8 +356,6 @@ class AtlasSession:
             batch_type = batch.get("type")
             if batch_type in ("mod", "add"):
                 keep.add(batch["source"])
-            if batch_type == "mod":
-                keep.add(batch["prepared"].image)
         keep.update(sprites.values())
         return keep
 
@@ -534,7 +537,6 @@ class AtlasSession:
                 "type": "mod",
                 "names": list(names),
                 "source": source,
-                "prepared": prepared,
                 "is_full_canvas": prepared.is_full_canvas,
                 "composite": bool(composite),
             }

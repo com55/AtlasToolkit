@@ -180,3 +180,14 @@ def test_deferred_session_close_disposes_every_recorded_image():
     assert len(raster._images) > 1
     session.close()
     assert raster._images == {}
+
+def test_mod_batches_hold_no_prepared_copy_and_an_overridden_copy_is_released():
+    raster = PillowRasterBackend()
+    session = AtlasSession.load_images(ATLAS, {"p.png": page()}, raster, defer_repack=True)
+    session.apply_mod_image(sprite(6, 5, 1), ["Head"])
+    first = session._modded_sprites["Head"]
+    session.apply_mod_image(sprite(6, 5, 2), ["Head"])
+    assert set(session._mod_batches[0]) == {"type", "names", "source", "is_full_canvas", "composite"}
+    assert first not in raster._images                      # no name points at it any more
+    assert session._mod_batches[0]["source"] in raster._images
+    assert session._modded_sprites["Head"] in raster._images
