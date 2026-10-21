@@ -2,6 +2,8 @@
 extract_composite(force_resize=True) inside the mesh hulls (spec 2026-10-13).
 All meshes are axis-aligned rectangles whose edges land on whole pixels, so
 the expected hulls are written by hand, never taken from the product."""
+import warnings
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -358,3 +360,49 @@ def test_pma_force_resize_matches_premultiplied_straight_stack():
     want = premultiplied(np.asarray(straight.extract_composite(["M", "L"], force_resize=True))).astype(int)
     got = np.asarray(pma.extract_composite(["M", "L"], force_resize=True)).astype(int)
     assert np.max(np.abs(got - want)) <= 1
+
+
+# Cross-page: A and C on page one, B on a second page; same 32x16 canvas.
+TWO_PAGE_SAME = (
+    "page.png\nsize: 64,32\n"
+    "A\n bounds: 0,0,16,10\n offsets: 0,6,32,16\n"
+    "C\n bounds: 28,0,12,10\n offsets: 2,0,32,16\n"
+    "\nsecond.png\nsize: 64,32\n"
+    "B\n bounds: 16,0,24,12\n offsets: 8,0,32,16\n rotate: 90\n"
+)
+
+
+def load_two(monkeypatch, text, meshes):
+    monkeypatch.setattr(api, "_parse_skeleton", lambda data: {"attachments": meshes})
+    return SpineAtlas.load(text, {"page.png": page(), "second.png": page()}, skeleton=b"x")
+
+
+@pytest.mark.parametrize("mesh_aware", [False, True])
+def test_cross_page_split_round_trips(monkeypatch, mesh_aware):
+    atlas = load_two(monkeypatch, TWO_PAGE_SAME, SAME_MESH)
+    want = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(mesh_aware=mesh_aware, split_composite=True)
+    assert built.region("B").page == "second.png"
+    inside = union(32, 16, SAME_HULLS if mesh_aware else SAME_RECTS)
+    # mesh_crop must match mesh_aware (spec §3.7, r2 I2)
+    got = built.extract_composite(["A", "B", "C"], force_resize=True, mesh_crop=mesh_aware)
+    assert_round_trip(got, want, inside)
+
+
+def test_mixed_pma_composite_warns_and_still_splits(monkeypatch):
+    text = TWO_PAGE_SAME.replace("second.png\nsize: 64,32\n", "second.png\nsize: 64,32\npma: true\n")
+    atlas = load_two(monkeypatch, text, SAME_MESH)
+    with pytest.warns(UserWarning, match="pma"):
+        atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
+    built = atlas.build(split_composite=True)
+    assert built.region("B").offsets == (8, 0, 32, 16)
+
+
+@pytest.mark.parametrize("pma", [False, True])
+def test_single_kind_composite_does_not_warn(monkeypatch, pma):
+    text = TWO_PAGE_SAME.replace("size: 64,32\n", "size: 64,32\npma: true\n") if pma else TWO_PAGE_SAME
+    atlas = load_two(monkeypatch, text, SAME_MESH)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
