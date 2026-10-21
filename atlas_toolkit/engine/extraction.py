@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from math import isfinite
 
+import numpy as np
+
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.region_ops import extracted_canvas_size, scaled_region_geometry
 from atlas_toolkit.engine.modifier import js_object_key_order
@@ -180,6 +182,8 @@ class AtlasProcessor:
             frame = preview_composite_frame(
                 [self._raster.size(image) for image in images], force_resize,
             )
+            if all(self._page_map[self.regions[name].page_filename].pma for name in image_names):
+                return self._premultiplied_stack(images, frame)
             composite = self._raster.create(frame["width"], frame["height"])
             for image, name in zip(reversed(images), reversed(image_names)):
                 if not frame["scale"] or self._raster.size(image) == (frame["width"], frame["height"]):
@@ -200,6 +204,32 @@ class AtlasProcessor:
                 self._raster.dispose(image)
             if composite is not None:
                 self._raster.dispose(composite)
+
+    def _premultiplied_stack(self, images: list[ImageHandle], frame: dict) -> ImageHandle:
+        """Premultiplied over, bottom first, for regions that all live on pma
+        pages: their stored RGB is already multiplied by alpha, so straight
+        alpha_composite would darken every overlapping semi-transparent
+        pixel (spec 2026-10-21-multi-page-editing §3.7). Accumulates in
+        float64 and rounds half-even once at the end. Mesh masking never
+        applies on a pma page."""
+        width, height = frame["width"], frame["height"]
+        out = np.zeros((height, width, 4), np.float64)
+        for image in reversed(images):
+            if frame["scale"] and self._raster.size(image) != (width, height):
+                resized = self._raster.resize_lanczos(image, width, height)
+                try:
+                    image_pixels = self._raster.get_pixels(resized)
+                finally:
+                    self._raster.dispose(resized)
+                w, h = width, height
+            else:
+                image_pixels = self._raster.get_pixels(image)
+                w, h = self._raster.size(image)
+            src = np.frombuffer(image_pixels, dtype=np.uint8).reshape(h, w, 4).astype(np.float64)
+            under = out[:h, :w]
+            out[:h, :w] = src + under * (1 - src[..., 3:4] / 255)
+        data = np.rint(out).astype(np.uint8).tobytes()
+        return self._raster.from_pixels(width, height, data)
 
 
 def pick_force_resize_target(sizes: list[tuple[int, int]]) -> tuple[int, int]:

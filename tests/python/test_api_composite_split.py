@@ -291,3 +291,46 @@ def test_pma_split_renders_back_premultiplied():
     inside = union(32, 16, SAME_RECTS)
     assert np.all(np.abs(out[inside] - want[inside]) <= 2)
     assert np.all(out[~inside] == 0)
+
+
+def test_pma_extract_composite_round_trips():
+    # Stacking straight would darken every overlapping semi pixel on a pma
+    # page, so extract -> replace -> build would drift further each cycle.
+    atlas = SpineAtlas.load(SAME_PMA, page())
+    want = premultiplied(pattern(32, 16))
+    inside = union(32, 16, SAME_RECTS)
+    image = Image.fromarray(want, "RGBA")
+    for _ in range(2):
+        atlas.replace_composite(["A", "B", "C"], image)
+        image = atlas.build(split_composite=True).extract_composite(["A", "B", "C"])
+        got = np.asarray(image).astype(int)
+        assert np.all(np.abs(got[inside] - want[inside]) <= 2)
+        assert np.all(got[~inside] == 0)
+
+
+MIXED_PMA = (
+    "one.png\nsize: 8,8\npma: true\nP\n bounds: 0,0,4,4\n"
+    "\ntwo.png\nsize: 8,8\nS\n bounds: 0,0,4,4\n"
+)
+
+
+def test_mixed_pma_composite_stays_straight():
+    semi = Image.new("RGBA", (8, 8), (40, 20, 10, 100))
+    atlas = SpineAtlas.load(MIXED_PMA, {"one.png": semi, "two.png": semi})
+    p, s = atlas.extract("P"), atlas.extract("S")
+    assert np.array_equal(np.asarray(atlas.extract_composite(["P", "S"])), np.asarray(Image.alpha_composite(s, p)))
+
+
+SIZES = "page.png\nsize: 16,16\nL\n bounds: 0,0,8,6\nM\n bounds: 8,0,4,4\n"
+
+
+@pytest.mark.parametrize("force_resize", [False, True])
+def test_pma_composite_of_opaque_regions_matches_straight(force_resize):
+    # Opaque pixels composite the same either way, which pins the pma
+    # stack's frame, placement and resizing against the straight one.
+    arr = np.asarray(page())[:16, :16]
+    straight = SpineAtlas.load(SIZES, Image.fromarray(arr, "RGBA"))
+    pma = SpineAtlas.load(SIZES.replace("16,16\n", "16,16\npma: true\n"), Image.fromarray(arr, "RGBA"))
+    want = straight.extract_composite(["M", "L"], force_resize=force_resize)
+    got = pma.extract_composite(["M", "L"], force_resize=force_resize)
+    assert np.array_equal(np.asarray(got), np.asarray(want))
