@@ -334,3 +334,27 @@ def test_pma_composite_of_opaque_regions_matches_straight(force_resize):
     want = straight.extract_composite(["M", "L"], force_resize=force_resize)
     got = pma.extract_composite(["M", "L"], force_resize=force_resize)
     assert np.array_equal(np.asarray(got), np.asarray(want))
+
+
+def test_pma_stack_clips_additive_colour_instead_of_wrapping():
+    # An alpha-0 pixel with colour (additive) on top of an opaque one: over
+    # gives 200 + 200 > 255, which must clip, not wrap.
+    arr = np.zeros((4, 8, 4), np.uint8)
+    arr[:, :4] = (200, 200, 200, 0)
+    arr[:, 4:] = (200, 100, 50, 255)
+    text = "page.png\nsize: 8,4\npma: true\nT\n bounds: 0,0,4,4\nB\n bounds: 4,0,4,4\n"
+    atlas = SpineAtlas.load(text, Image.fromarray(arr, "RGBA"))
+    got = np.asarray(atlas.extract_composite(["T", "B"]))
+    assert np.all(got == [255, 255, 250, 255])
+
+
+def test_pma_force_resize_matches_premultiplied_straight_stack():
+    # Semi-transparent edges: resizing premultiplied data as if straight
+    # leaves a bright halo. The pma stack must equal the straight stack of
+    # the same picture, premultiplied.
+    arr = pattern(16, 16)
+    straight = SpineAtlas.load(SIZES, Image.fromarray(arr, "RGBA"))
+    pma = SpineAtlas.load(SIZES.replace("16,16\n", "16,16\npma: true\n"), Image.fromarray(premultiplied(arr), "RGBA"))
+    want = premultiplied(np.asarray(straight.extract_composite(["M", "L"], force_resize=True))).astype(int)
+    got = np.asarray(pma.extract_composite(["M", "L"], force_resize=True)).astype(int)
+    assert np.max(np.abs(got - want)) <= 1
