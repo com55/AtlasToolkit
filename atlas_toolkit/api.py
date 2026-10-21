@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from collections import Counter
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -25,7 +26,7 @@ from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
-    "InvalidRegionName", "MultiPageNotSupported", "MissingPageImage", "SkeletonUnavailable",
+    "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge",
 ]
 
@@ -57,10 +58,6 @@ class InvalidRegionName(AtlasError, ValueError):
         self.reason = reason
 
 
-class MultiPageNotSupported(AtlasError, NotImplementedError):
-    pass
-
-
 class MissingPageImage(AtlasError):
     def __init__(self, pages: list[str], message: str | None = None) -> None:
         super().__init__(message or f"missing page images: {', '.join(pages)}")
@@ -77,13 +74,16 @@ class CanvasTooLarge(AtlasError, ValueError):
     """Packing the edits would need a canvas side over the packers' limit
     (atlas_toolkit.domain.packing.MAX_CANVAS, 10000 px). Raised by build()
     and save() before the oversized page is allocated; the atlas and its
-    recorded edits are unchanged."""
+    recorded edits are unchanged. `page` names the page file of a
+    multi-page atlas, and is None for a one-page atlas."""
 
-    def __init__(self, width: int, height: int, limit: int) -> None:
-        super().__init__(f"the packed layout would be about {width}x{height}, over the {limit} px per side limit")
+    def __init__(self, width: int, height: int, limit: int, page: str | None = None) -> None:
+        where = f"page {page!r}: " if page is not None else ""
+        super().__init__(f"{where}the packed layout would be about {width}x{height}, over the {limit} px per side limit")
         self.width = width
         self.height = height
         self.limit = limit
+        self.page = page
 
 
 @dataclass(frozen=True)
@@ -256,6 +256,7 @@ class SpineAtlas:
     def _refresh_names(self) -> None:
         self._labels = self._session.region_labels()
         self._keys = {label: key for key, label in self._labels}
+        self._added_pages = self._session.added_region_pages()
 
     def _key(self, name: str) -> str:
         try:
@@ -291,7 +292,7 @@ class SpineAtlas:
         for key, label in self._labels:
             region = self._pristine.get(key)
             if region is None:
-                out.append(Region(label, None, default_page, None, 0, None))
+                out.append(Region(label, None, self._added_pages.get(key, default_page), None, 0, None))
             else:
                 out.append(Region(
                     label, region.atlas_name or region.name, region.page_filename,
@@ -384,10 +385,6 @@ class SpineAtlas:
 
     # -- edits -------------------------------------------------------------
 
-    def _require_editable(self) -> None:
-        if len(self._document.pages) > 1:
-            raise MultiPageNotSupported("editing multi-page atlases is not supported")
-
     def _edited(self) -> None:
         self._build_cache = None
         self._refresh_names()
@@ -395,7 +392,6 @@ class SpineAtlas:
     def replace(self, images: Mapping[str, ImageLike]) -> None:
         """Replace each named region's pixels. Every name and image is checked
         before anything is recorded, so a failing call records nothing."""
-        self._require_editable()
         if not isinstance(images, Mapping):
             raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
         entries = [(self._built_key(name), _edit_image(image)) for name, image in images.items()]
@@ -422,26 +418,36 @@ class SpineAtlas:
         them all gives the image back; a region drawn on its own looks
         fainter there, and rects overlap far more than hulls. A group keeps
         the default behaviour when any of its regions is a nine-patch or has
-        malformed offsets (a zero-size canvas)."""
-        self._require_editable()
+        malformed offsets (a zero-size canvas). Regions on several pages work: each page gets
+        its own copy, or with split_composite=True its own pieces, stored at the image's
+        resolution. Regions on pma pages keep RGB scaled by their alpha share."""
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
+        pma = {page.filename: page.pma for page in self._document.pages}
+        if len({pma[self._pristine[key].page_filename] for key in keys}) > 1:
+            warnings.warn(
+                "replace_composite spans pma and non-pma pages: the image is read as "
+                "premultiplied on the pma pages and as straight alpha on the others",
+                UserWarning, stacklevel=2,
+            )
         if not keys:
             return
         self._session.apply_mod_image(picture, keys, composite=True)
         self._edited()
 
-    def add_region(self, name: str, image: ImageLike) -> None:
-        self._require_editable()
+    def add_region(self, name: str, image: ImageLike, page: str | None = None) -> None:
+        """Add a region. `page` is a page file name (a key of `pages`); None
+        picks the page whose regions cover the least area now. The region
+        takes its page's header (filter, pma, ...): pass `page` when that
+        matters. An unknown page raises ValueError and records nothing."""
         picture = _edit_image(image)
         try:
-            self._session.add_region(picture, name)
+            self._session.add_region(picture, name, page=page)
         except RegionNameError as error:
             raise InvalidRegionName(error.reason) from None
         self._edited()
 
     def rename_region(self, name: str, new_name: str) -> None:
-        self._require_editable()
         key = self._key(name)
         try:
             self._session.rename_region(key, new_name)
@@ -450,7 +456,6 @@ class SpineAtlas:
         self._edited()
 
     def remove_region(self, names: str | list[str]) -> None:
-        self._require_editable()
         keys = [self._key(name) for name in ([names] if isinstance(names, str) else names)]
         if not keys:
             return
@@ -482,7 +487,7 @@ class SpineAtlas:
                 return session.pack_pending(split_composite=True)
             return session.pack_pending()
         except CanvasTooLargeError as error:
-            raise CanvasTooLarge(error.width, error.height, error.limit) from None
+            raise CanvasTooLarge(error.width, error.height, error.limit, getattr(error, "page", None)) from None
         finally:
             session.set_nest_regions_enabled(False)
             session.set_nest_gap_distance(4)

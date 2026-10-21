@@ -56,3 +56,23 @@ def test_canvas_too_large_is_exported():
     import atlas_toolkit.api as api
     assert atlas_toolkit.CanvasTooLarge is CanvasTooLarge
     assert "CanvasTooLarge" in api.__all__
+
+
+def test_too_large_names_the_page_of_a_multi_page_atlas(monkeypatch):
+    text = ATLAS + "\nsecond.png\nsize: 8,8\nTail\n bounds: 0,0,8,8\n"
+    atlas = SpineAtlas.load(text, {"page.png": page(), "second.png": Image.new("RGBA", (8, 8), (1, 1, 1, 255))})
+    atlas.replace({"Tail": Image.new("RGBA", (8, 8), (9, 8, 7, 255))})
+    monkeypatch.setattr(packing, "MAX_CANVAS", 7)
+    with pytest.raises(CanvasTooLarge) as raised:
+        atlas.build()
+    assert raised.value.page == "second.png"
+    assert "'second.png'" in str(raised.value) and "7 px per side" in str(raised.value)
+
+
+def test_single_page_too_large_has_no_page(monkeypatch):
+    atlas = SpineAtlas.load(ATLAS, page())
+    atlas.replace({"Head": Image.new("RGBA", (6, 5), (9, 8, 7, 255))})
+    monkeypatch.setattr(packing, "MAX_CANVAS", 8)
+    with pytest.raises(CanvasTooLarge) as raised:
+        atlas.build()
+    assert raised.value.page is None

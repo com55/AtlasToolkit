@@ -5,7 +5,7 @@ import pytest
 from PIL import Image
 
 from atlas_toolkit.api import (
-    AtlasError, InvalidRegionName, MultiPageNotSupported, RegionNotFound, SpineAtlas,
+    AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas,
 )
 
 ATLAS = (
@@ -139,18 +139,41 @@ def test_failing_replace_records_nothing():
     assert len(atlas._session._mod_batches) == batches
 
 
-def test_multi_page_edits_raise_at_the_call():
-    atlas = SpineAtlas.load(TWO_PAGES, {"page.png": page(), "second.png": page(4, 4)})
-    for call in (
-        lambda: atlas.replace({"Head": sprite(6, 5)}),
-        lambda: atlas.replace_composite(["Head"], sprite(6, 5)),
-        lambda: atlas.add_region("N", sprite()),
-        lambda: atlas.rename_region("Head", "H"),
-        lambda: atlas.remove_region("Head"),
-    ):
-        with pytest.raises(MultiPageNotSupported):
-            call()
-    assert atlas.extract("Tail").size == (4, 4)
+def two_page_atlas():
+    return SpineAtlas.load(TWO_PAGES, {"page.png": page(), "second.png": page(4, 4)})
+
+
+def test_multi_page_edits_work():
+    atlas = two_page_atlas()
+    atlas.replace({"Tail": sprite(4, 4)})
+    atlas.rename_region("Head", "H")
+    atlas.add_region("N", sprite(), page="second.png")
+    atlas.remove_region("Arm")
+    assert atlas.region("N").page == "second.png"
+    built = atlas.build()
+    assert built.region("N").page == "second.png"
+    assert built.region("H").page == "page.png"
+    assert built.extract("Tail").getpixel((0, 0)) == (1, 2, 3, 255)
+    assert "Arm" not in [r.name for r in built.regions]
+
+
+def test_add_region_page_choice():
+    atlas = two_page_atlas()
+    with pytest.raises(ValueError):
+        atlas.add_region("N", sprite(), page="missing.png")
+    assert not atlas.has_changes
+    atlas.add_region("Auto", sprite())                     # second.png weighs 16 px², page.png 93
+    assert atlas.region("Auto").page == "second.png"
+
+
+def test_multi_page_error_class_is_gone():
+    import atlas_toolkit
+    import atlas_toolkit.api as api
+
+    assert "MultiPageNotSupported" not in api.__all__
+    assert not hasattr(api, "MultiPageNotSupported")
+    with pytest.raises(AttributeError):
+        atlas_toolkit.MultiPageNotSupported
 
 
 def test_edit_images_are_copied():
