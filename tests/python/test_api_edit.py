@@ -148,10 +148,13 @@ def test_multi_page_edits_work():
     atlas.replace({"Tail": sprite(4, 4)})
     atlas.rename_region("Head", "H")
     atlas.add_region("N", sprite(), page="second.png")
+    atlas.add_region("M", sprite(), page="page.png")             # the heavier page: auto would pick second.png
     atlas.remove_region("Arm")
     assert atlas.region("N").page == "second.png"
+    assert atlas.region("M").page == "page.png"
     built = atlas.build()
     assert built.region("N").page == "second.png"
+    assert built.region("M").page == "page.png"
     assert built.region("H").page == "page.png"
     assert built.extract("Tail").getpixel((0, 0)) == (1, 2, 3, 255)
     assert "Arm" not in [r.name for r in built.regions]
