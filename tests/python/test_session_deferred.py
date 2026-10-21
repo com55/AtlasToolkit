@@ -53,6 +53,7 @@ SEQUENCES = {
         lambda s: s.remove_regions(["Arm"]),
         lambda s: s.apply_mod_image(sprite(8, 6, 7), ["Body"]),
     ],
+    "unknown_key": [lambda s: s.apply_mod_image(sprite(6, 5, 8), ["Nope"])],
 }
 
 

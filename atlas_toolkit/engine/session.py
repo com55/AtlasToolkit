@@ -211,7 +211,7 @@ class AtlasSession:
         return self._repack_after_option_change(*previous)
 
     def _require_single_page_structural(self) -> None:
-        if len(self._document.pages) > 1:
+        if len(self._document.pages) > 1 and not self._defer_repack:
             raise NotImplementedError(
                 "structural changes are not supported for multi-page atlases",
             )
@@ -260,10 +260,11 @@ class AtlasSession:
 
     def _touched_pages(self, batches: list[dict], region_pages: dict[str, str]) -> list[str]:
         """Spec 2026-10-21 §3.2: pages that own a region a mod names, receive
-        an add, or lose a region to a remove, in page order. On a multi-page
-        atlas a rename touches nothing (text-only rewrite, §3.4); a one-page
-        atlas keeps today's repack for renames."""
-        single = len(self._document.pages) == 1
+        an add, or lose a region to a remove, in page order. A rename touches
+        nothing (text-only rewrite, §3.4). A one-page atlas repacks for any
+        batch, exactly as before multi-page support."""
+        if len(self._document.pages) == 1:
+            return [self._document.pages[0].filename] if batches else []
         touched: set[str] = set()
         for batch in batches:
             batch_type = batch.get("type")
@@ -271,10 +272,51 @@ class AtlasSession:
                 touched.update(region_pages[name] for name in batch["names"] if name in region_pages)
             elif batch_type == "add":
                 touched.add(batch["page"])
-            elif batch_type == "remove" or (batch_type == "rename" and single):
+            elif batch_type == "remove":
                 if batch["target_key"] in region_pages:
                     touched.add(region_pages[batch["target_key"]])
         return [name for name in dict.fromkeys(self._document.page_filenames()) if name in touched]
+
+    def _lightest_page(self) -> str:
+        """Spec 2026-10-21 §3.3: the page whose current effective regions
+        cover the least area. Pristine regions count their scaled bounds, a
+        replaced region its prepared image (each handle once), an added
+        region its source; removed regions count nothing. Ties go to the
+        earlier page. Never hashes or extracts."""
+        filenames = list(dict.fromkeys(self._document.page_filenames()))
+        if len(filenames) == 1:
+            return filenames[0]
+        batches = self._mod_batches
+        region_pages = self._region_pages(batches)
+        scaled = {}
+        for filename in filenames:
+            for key, region in self._page_modifier(filename).regions.items():
+                scaled[key] = region.w * region.h
+        added = {batch["internal_key"]: batch["source"] for batch in batches if batch.get("type") == "add"}
+        weights = dict.fromkeys(filenames, 0)
+        seen: set[ImageHandle] = set()
+        for key in self._raw_effective_model(batches)["region_names"]:
+            if key in added:
+                width, height = self._raster.size(added[key])
+            elif key in self._modded_sprites:
+                handle = self._modded_sprites[key]
+                if handle in seen:
+                    continue
+                seen.add(handle)
+                width, height = self._raster.size(handle)
+            else:
+                weights[region_pages[key]] += scaled[key]
+                continue
+            weights[region_pages[key]] += width * height
+        return min(filenames, key=lambda filename: weights[filename])
+
+    def added_region_pages(self) -> dict[str, str]:
+        """Page file name of every pending add, by internal key."""
+        return {
+            batch["internal_key"]: batch["page"]
+            for batch in self._mod_batches
+            if batch.get("type") == "add"
+        }
 
     @staticmethod
     def _page_batches(filename: str, batches: list[dict], region_pages: dict[str, str]) -> list[dict]:
@@ -361,11 +403,19 @@ class AtlasSession:
         mutates self._document or its pages: every build reuses them."""
         region_pages = self._region_pages(batches)
         touched = self._touched_pages(batches, region_pages)
+        remaining = {region_pages[key] for key in self._raw_effective_model(batches)["region_names"]}
+        renames = {
+            batch["target_key"]: batch["new_atlas_name"]
+            for batch in batches
+            if batch.get("type") == "rename"
+        }
         modifiers = {filename: self._page_modifier(filename) for filename in touched}
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         pieces = self._composite_pieces(modifiers, batches, mesh_lookup_fn) if split_composite else {}
         packed: dict[str, PackResult] = {}
         for filename in touched:
+            if filename not in remaining:
+                continue
             try:
                 result = self._pack_page(
                     modifiers[filename], self._page_batches(filename, batches, region_pages), sprites, pieces,
@@ -383,6 +433,21 @@ class AtlasSession:
             if page.filename in packed:
                 pages.append(packed[page.filename].document.pages[0])
                 images[page.filename] = packed[page.filename].image
+            elif page.filename in touched:
+                # Emptied by removes (spec §3.6): header kept, 10x10, transparent.
+                empty = page.clone()
+                empty.size = [10, 10]
+                empty.regions = []
+                pages.append(empty)
+                images[page.filename] = self._raster.create(10, 10)
+            elif any(region.name in renames for region in page.regions):
+                # Rename-only (spec §3.4): text-only rewrite, pristine image.
+                renamed = page.clone()
+                for region in renamed.regions:
+                    if region.name in renames:
+                        region.atlas_name = renames[region.name]
+                pages.append(renamed)
+                images[page.filename] = self._page_images[page.filename]
             else:
                 pages.append(page)
                 images[page.filename] = self._page_images[page.filename]
@@ -490,11 +555,12 @@ class AtlasSession:
         self._require_open()
         effective = self._raw_effective_model()
         default_page = self._document.pages[0].filename
+        region_pages = self._region_pages(self._mod_batches)
         summaries = tuple(
             RegionSummary(
                 key,
                 effective["labels"].get(key, key),
-                effective["regions"][key].get("page", default_page),
+                region_pages.get(key, default_page),
             )
             for key in effective["region_names"]
         )
@@ -709,9 +775,13 @@ class AtlasSession:
             False,
         )
 
-    def add_region(self, image: bytes | object, name: str) -> None:
+    def add_region(self, image: bytes | object, name: str, page: str | None = None) -> None:
+        """`page` names the page file; None picks the page with the lowest
+        add-time weight now (spec 2026-10-21 §3.3)."""
         self._require_open()
         self._require_single_page_structural()
+        if page is not None and page not in self._document.page_filenames():
+            raise ValueError(f"unknown page {page!r}; pages: {', '.join(self._document.page_filenames())}")
         atlas_name = self._validated_name(name)
         reserved = set(self._processor.regions)
         reserved.update(
@@ -724,6 +794,7 @@ class AtlasSession:
         while internal_key in reserved:
             internal_key = f"{atlas_name}_{suffix}"
             suffix += 1
+        target = page if page is not None else self._lightest_page()
 
         before = self._raster.checkpoint()
         try:
@@ -731,11 +802,8 @@ class AtlasSession:
             candidate_batches = [
                 *self._mod_batches,
                 {
-                    "type": "add",
-                    "internal_key": internal_key,
-                    "atlas_name": atlas_name,
-                    "source": source,
-                    "page": self._document.pages[0].filename,
+                    "type": "add", "internal_key": internal_key, "atlas_name": atlas_name,
+                    "source": source, "page": target,
                 },
             ]
         except BaseException:
