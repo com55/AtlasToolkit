@@ -297,8 +297,9 @@ class AtlasSession:
 
     def _composite_pieces(self, modifier, batches: list[dict], sprites: dict[str, ImageHandle], mesh_lookup_fn) -> dict:
         """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
-        survivors all have repack mesh, no nine-patch and a non-empty
-        offsets canvas; others stay as they are. Survivors: the batch's names (first occurrence) still
+        survivors have no nine-patch and a non-empty offsets canvas; others
+        stay as they are. A survivor without repack mesh (none, or mesh-aware
+        repack off) is cut to its whole rect. Survivors: the batch's names (first occurrence) still
         holding its prepared image and not removed, in batch order."""
         removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
         pieces: dict = {}
@@ -315,8 +316,6 @@ class AtlasSession:
                 continue
             metas = {name: region_meta(modifier.regions[name]) for name in survivors}
             geometry = {name: mesh_lookup_fn(name) for name in survivors}
-            if any(g is None for g in geometry.values()):
-                continue
             if any(m["split"] is not None or m["pad"] is not None for m in metas.values()):
                 continue
             if any(m["offsets"] is not None and (m["offsets"][2] <= 0 or m["offsets"][3] <= 0) for m in metas.values()):

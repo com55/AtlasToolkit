@@ -192,13 +192,44 @@ def test_member_removed_or_renamed(monkeypatch):
     assert "C" not in [r.name for r in built.regions]
 
 
-def test_split_needs_mesh_aware_even_unedited(monkeypatch):
+# Rects (x0, y0, x1, y1) of SAME at 32x16, used when a region has no mesh.
+SAME_RECTS = [(0, 0, 16, 10), (8, 4, 32, 16), (2, 6, 14, 16)]
+
+
+@pytest.mark.parametrize("nest", [False, True])
+def test_split_without_mesh_cuts_rects(nest):
+    atlas = SpineAtlas.load(SAME, page())
+    assert atlas.build(split_composite=True).atlas_text == atlas.atlas_text   # unedited: no error
+    want = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(nest=nest, split_composite=True)
+    assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, union(32, 16, SAME_RECTS))
+    assert built.region("A").offsets == (0, 6, 32, 16)
+    assert built.region("B").offsets == (8, 0, 32, 16)
+    assert built.region("B").bounds[2:] == (24, 12)
+    # (14, 4) is alpha 128, inside A's and B's rects only, A on top.
+    assert want[4, 14, 3] == 128
+    assert (built.extract("A").getpixel((14, 4))[3], built.extract("B").getpixel((14, 4))[3]) == SPLIT[128]
+
+
+def test_split_mixes_hulls_and_rects(monkeypatch):
+    # A has a mesh (hull x0-12, y0-8); B and C have none and hold their rects.
+    atlas = load(monkeypatch, SAME, {"A": SAME_MESH["A"]})
+    want = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(mesh_aware=True, split_composite=True)
+    inside = union(32, 16, [SAME_HULLS[0], *SAME_RECTS[1:]])
+    assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
+    assert want[2, 13, 3] > 0 and built.extract("A").getpixel((13, 2))[3] == 0   # in A's rect, outside its hull
+
+
+def test_split_ignores_meshes_without_mesh_aware(monkeypatch):
     atlas = load(monkeypatch, SAME, SAME_MESH)
-    with pytest.raises(ValueError):
-        atlas.build(split_composite=True)
-    atlas.replace_composite(["A", "B"], Image.fromarray(pattern(32, 16), "RGBA"))
-    with pytest.raises(ValueError):
-        atlas.build(split_composite=True)
+    want = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(split_composite=True)
+    assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, union(32, 16, SAME_RECTS))
+    assert built.extract("A").getpixel((13, 2))[3] == want[2, 13, 3] > 0
 
 
 def test_switch_is_part_of_the_build_cache(monkeypatch):
