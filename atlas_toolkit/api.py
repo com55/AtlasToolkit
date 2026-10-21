@@ -412,13 +412,17 @@ class SpineAtlas:
 
         By default each region's whole canvas becomes the image at the image's
         own size (offsets are dropped), as in the app; the regions share that
-        one sprite. With build(mesh_aware=True, split_composite=True) the
-        image is instead taken as the inverse of
-        extract_composite(force_resize=True): it is stored at its own size,
-        cut into one mesh-owned piece per region, and pixels outside every
-        mesh hull are dropped. A group keeps the default behaviour when any of
-        its regions has no mesh, is a nine-patch, or has malformed offsets (a
-        zero-size canvas)."""
+        one sprite. With build(split_composite=True) the image is instead
+        taken as the inverse of extract_composite(force_resize=True): it is
+        stored at its own size and cut into one piece per region. With
+        mesh_aware=True a region with mesh owns its mesh hull; any other
+        region owns its whole rect (its offsets canvas scaled to the image).
+        Pixels outside every owner are dropped. A semi-transparent pixel
+        several owners cover has its alpha split between them, so drawing
+        them all gives the image back; a region drawn on its own looks
+        fainter there, and rects overlap far more than hulls. A group keeps
+        the default behaviour when any of its regions is a nine-patch or has
+        malformed offsets (a zero-size canvas)."""
         self._require_editable()
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
@@ -487,8 +491,6 @@ class SpineAtlas:
     def build(
         self, *, nest: bool = False, gap: int = 4, mesh_aware: bool = False, split_composite: bool = False,
     ) -> "SpineAtlas":
-        if split_composite and not mesh_aware:
-            raise ValueError("split_composite=True needs mesh_aware=True")
         if mesh_aware:
             self._require_mesh()
         if not self.has_changes:

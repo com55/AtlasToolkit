@@ -92,3 +92,22 @@ def test_empty_piece_keeps_its_full_rect_transparent():
     offsets, pixels = out["E"]
     assert pixels.shape[:2] == (12, 20) and not pixels[..., 3].any()
     assert offsets == [4, 0, 32, 16]
+
+
+def test_region_without_geometry_holds_its_whole_rect():
+    # TOP has a hull x0-6; BOT has no mesh, so it holds its whole rect x2-8
+    # (here the whole canvas) and the semi pixel both hold is still split.
+    arr = np.zeros((4, 8, 4), np.uint8)
+    arr[..., 0] = np.arange(8)[None, :] * 30
+    arr[..., 3] = 255
+    arr[1, 3, 3] = 128                       # semi pixel in TOP's hull and BOT's rect
+    arr[2, 7, 3] = 128                       # semi pixel only in BOT's rect
+    metas = {"TOP": meta([0, 0, 8, 4], 8, 4), "BOT": meta([2, 0, 8, 4], 6, 4)}
+    out = _cut(arr, ["TOP", "BOT"], metas, {"TOP": rect_mesh(0, 0, 0.75, 1), "BOT": None})
+    top, bot = out["TOP"][1], out["BOT"][1]
+    assert bot.shape[:2] == (4, 6) and out["BOT"][0] == [2, 0, 8, 4]
+    t, b = SPLIT[128]
+    assert (top[1, 3, 3], bot[1, 1, 3]) == (t, b)
+    assert bot[2, 5, 3] == 128
+    assert np.all(bot[..., 3][arr[:, 2:, 3] == 255] == 255)   # every opaque pixel of its rect
+    assert np.all(top[:, 6:, 3] == 0)

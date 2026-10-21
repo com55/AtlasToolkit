@@ -4,9 +4,10 @@ inverse of extract_composite(force_resize=True). Spec
 
 Each survivor's canvas is scaled to fill the input image (per axis, per
 region), its rect scales with it, and its piece is the input inside that
-rect, cleared outside its own mesh hull. Pixels several hulls cover go to
-every holder; a semi-transparent one has its alpha split exactly
-(domain/alpha_split.py). Pixels no hull covers are dropped."""
+rect, cleared outside its own mesh hull. A region without mesh geometry
+holds its whole rect instead. Pixels several holders cover go to every
+holder; a semi-transparent one has its alpha split exactly
+(domain/alpha_split.py). Pixels no holder covers are dropped."""
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -38,9 +39,12 @@ def scaled_rect(meta: dict, width: int, height: int) -> tuple[int, int, int, int
     return x0, y0, x1 - x0, y1 - y0
 
 
-def _hull(raster: RasterBackend, geometry: dict, offsets: list[int], w: int, h: int) -> np.ndarray:
+def _hull(raster: RasterBackend, geometry: dict | None, offsets: list[int], w: int, h: int) -> np.ndarray:
     """Bool (h, w): the region's mesh hull inside its scaled rect -- the same
-    mask the repack footprint and extract(mesh_crop=True) derive later."""
+    mask the repack footprint and extract(mesh_crop=True) derive later. No
+    geometry: the whole rect."""
+    if geometry is None:
+        return np.ones((h, w), bool)
     probe = raster.from_pixels(w, h, b"\xff" * (w * h * 4))
     try:
         mask_raw_sprite(raster, probe, geometry, {"offsets": offsets})
@@ -54,10 +58,11 @@ def split_composite(
     source: ImageHandle,
     survivors: list[str],
     metas: dict[str, dict],
-    geometry: dict[str, dict],
+    geometry: dict[str, dict | None],
 ) -> dict[str, Piece]:
     """One Piece per survivor (stack order, first = top). Every piece's
-    offsets describe a canvas of the source's own size."""
+    offsets describe a canvas of the source's own size. A survivor whose
+    geometry is None is cut to its rect."""
     width, height = raster.size(source)
     pixels = np.frombuffer(raster.get_pixels(source), dtype=np.uint8).reshape(height, width, 4)
     rects, offsets, holders = {}, {}, np.zeros((len(survivors), height, width), bool)

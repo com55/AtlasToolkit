@@ -71,11 +71,14 @@ def test_replace_batches_are_never_split(monkeypatch):
     assert on.pages["page.png"].tobytes() == off.pages["page.png"].tobytes()
 
 
-def test_group_with_a_member_without_mesh_falls_back(monkeypatch):
+def test_group_with_a_member_without_mesh_still_splits(monkeypatch):
+    # C has no mesh: it is cut to its rect instead of the group falling back.
     atlas = loaded(monkeypatch, {"A": MESHES["A"]})
     atlas.replace_composite(["A", "C"], composite())
-    on, off = pack(atlas, True), pack(atlas, False)
-    assert on.atlas_text == off.atlas_text
+    built = pack(atlas, True)
+    assert built.region("A").offsets == (0, 6, 32, 16)
+    assert built.region("C").offsets == (2, 0, 32, 16)
+    assert built.region("C").bounds[2:] == (12, 10)
 
 
 def test_nine_patch_member_falls_back(monkeypatch):
