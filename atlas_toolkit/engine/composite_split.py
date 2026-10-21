@@ -7,7 +7,8 @@ region), its rect scales with it, and its piece is the input inside that
 rect, cleared outside its own mesh hull. A region without mesh geometry
 holds its whole rect instead. Pixels several holders cover go to every
 holder; a semi-transparent one has its alpha split exactly
-(domain/alpha_split.py). Pixels no holder covers are dropped."""
+(domain/alpha_split.py). Pixels no holder covers are dropped.
+On a pma page the stored RGB is premultiplied by the input alpha, so each piece keeps RGB x (its alpha / input alpha), rounded half-even: premultiplied over of the pieces then rebuilds the input (spec 2026-10-21-multi-page-editing §3.7)."""
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -59,10 +60,12 @@ def split_composite(
     survivors: list[str],
     metas: dict[str, dict],
     geometry: dict[str, dict | None],
+    pma_names: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, Piece]:
     """One Piece per survivor (stack order, first = top). Every piece's
     offsets describe a canvas of the source's own size. A survivor whose
-    geometry is None is cut to its rect."""
+    geometry is None is cut to its rect. A survivor in `pma_names` lives on
+    a pma page: its RGB is scaled by its share of the pixel's alpha."""
     width, height = raster.size(source)
     pixels = np.frombuffer(raster.get_pixels(source), dtype=np.uint8).reshape(height, width, 4)
     rects, offsets, holders = {}, {}, np.zeros((len(survivors), height, width), bool)
@@ -77,6 +80,12 @@ def split_composite(
         x0, y0, w, h = rects[name]
         piece = pixels[y0:y0 + h, x0:x0 + w].copy()
         piece[..., 3] = alphas[k, y0:y0 + h, x0:x0 + w]
+        if name in pma_names:
+            # float64: rgb * alpha overflows uint8. A share is <= 1, so the
+            # result never exceeds the input RGB.
+            total = pixels[y0:y0 + h, x0:x0 + w, 3].astype(np.float64)
+            share = np.divide(piece[..., 3].astype(np.float64), total, out=np.zeros_like(total), where=total > 0)
+            piece[..., :3] = np.rint(piece[..., :3].astype(np.float64) * share[..., None]).astype(np.uint8)
         piece[piece[..., 3] == 0] = 0
         # An empty piece keeps its full rect: in game the mesh maps the whole
         # canvas around the packed rect, so a smaller rect would let the hull

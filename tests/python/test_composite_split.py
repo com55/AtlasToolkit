@@ -45,10 +45,10 @@ def _image(arr):
     return Image.fromarray(np.ascontiguousarray(arr), "RGBA")
 
 
-def _cut(arr, survivors, metas, geometry):
+def _cut(arr, survivors, metas, geometry, pma_names=frozenset()):
     raster = PillowRasterBackend()
     source = raster.adopt(_image(arr))
-    pieces = split_composite(raster, source, survivors, metas, geometry)
+    pieces = split_composite(raster, source, survivors, metas, geometry, pma_names)
     return {n: (p.offsets, np.asarray(raster.export(p.image))) for n, p in pieces.items()}
 
 
@@ -111,3 +111,36 @@ def test_region_without_geometry_holds_its_whole_rect():
     assert bot[2, 5, 3] == 128
     assert np.all(bot[..., 3][arr[:, 2:, 3] == 255] == 255)   # every opaque pixel of its rect
     assert np.all(top[:, 6:, 3] == 0)
+
+
+def _two_holders_with_one_semi_pixel():
+    # 4x2 canvas, T on top, both holders cover all of it. Pixel (x1, y0) is
+    # valid premultiplied (RGB <= alpha): (64, 32, 16) at alpha 128.
+    arr = np.zeros((2, 4, 4), np.uint8)
+    arr[...] = (200, 100, 50, 255)
+    arr[0, 1] = (64, 32, 16, 128)
+    metas = {"T": meta(None, 4, 2), "B": meta(None, 4, 2)}
+    return arr, metas, {"T": None, "B": None}
+
+
+def test_pma_pieces_keep_rgb_times_their_alpha_share():
+    arr, metas, geometry = _two_holders_with_one_semi_pixel()
+    straight = _cut(arr, ["T", "B"], metas, geometry)
+    pma = _cut(arr, ["T", "B"], metas, geometry, pma_names={"T", "B"})
+    top, bottom = SPLIT[128]
+    assert straight["T"][1][0, 1].tolist() == [64, 32, 16, top]
+    assert straight["B"][1][0, 1].tolist() == [64, 32, 16, bottom]
+    assert pma["T"][1][0, 1].tolist() == [int(np.rint(v * top / 128)) for v in (64, 32, 16)] + [top]
+    assert pma["B"][1][0, 1].tolist() == [int(np.rint(v * bottom / 128)) for v in (64, 32, 16)] + [bottom]
+    assert pma["T"][1][1, 3].tolist() == [200, 100, 50, 255]      # opaque: share 1, unscaled
+    t, b = pma["T"][1][0, 1].astype(float), pma["B"][1][0, 1].astype(float)
+    out = t + b * (1 - t[3] / 255)                                 # premultiplied over, bottom first
+    assert np.all(np.abs(out - [64, 32, 16, 128]) <= 1)
+
+
+def test_pma_scaling_follows_each_survivors_own_page():
+    arr, metas, geometry = _two_holders_with_one_semi_pixel()
+    pieces = _cut(arr, ["T", "B"], metas, geometry, pma_names={"B"})
+    top, bottom = SPLIT[128]
+    assert pieces["T"][1][0, 1].tolist() == [64, 32, 16, top]
+    assert pieces["B"][1][0, 1].tolist() == [int(np.rint(v * bottom / 128)) for v in (64, 32, 16)] + [bottom]
