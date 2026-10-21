@@ -186,3 +186,118 @@ def test_later_replace_keeps_its_member_out_of_a_cross_page_split():
     ref.apply_mod_image(solid(16, 10, (7, 7, 7)), ["A"])
     ref_text, ref_out = ref.pack_pending(split_composite=True)
     assert raw(child(text, out).extract_images(["A"])["A"]) == raw(child(ref_text, ref_out).extract_images(["A"])["A"])
+
+
+def names_on(text, filename):
+    doc = AtlasDocument.parse(text)
+    return [r.atlas_name for p in doc.pages if p.filename == filename for r in p.regions]
+
+
+def test_add_with_an_explicit_page():
+    session = load()
+    session.add_region(solid(3, 3, (7, 7, 7)), "N", page="two.png")
+    assert session.added_region_pages() == {"N": "two.png"}
+    assert [s.page_filename for s in session.snapshot().regions if s.key == "N"] == ["two.png"]
+    text, pages = session.pack_pending()
+    assert "N" in names_on(text, "two.png") and "N" not in names_on(text, "one.png")
+    assert page_section(text, "one.png") == page_section(ATLAS, "one.png")
+    assert raw(child(text, pages).extract_images(["N"])["N"]) == raw(solid(3, 3, (7, 7, 7)))
+
+
+def test_unknown_page_records_nothing_and_decodes_nothing():
+    session = load()
+    with pytest.raises(ValueError):
+        session.add_region(b"not a png", "N", page="three.png")
+    assert session._mod_batches == []
+
+
+def test_auto_page_is_the_lightest_and_spreads():
+    # one.png: A 30 + B 48 = 78 px²; two.png: C 32 + D 36 = 68 px².
+    session = load()
+    session.add_region(solid(4, 4, (1, 1, 1)), "N1")          # two.png: 68 -> 84
+    session.add_region(solid(2, 2, (1, 1, 1)), "N2")          # one.png: 78 -> 82
+    assert session.added_region_pages() == {"N1": "two.png", "N2": "one.png"}
+
+
+def test_auto_page_counts_removes_and_replaces():
+    session = load()
+    session.remove_regions(["A", "B"])                        # one.png weighs 0
+    session.add_region(solid(9, 9, (1, 1, 1)), "N1")
+    assert session.added_region_pages()["N1"] == "one.png"
+    other = load()
+    other.apply_mod_image(solid(1, 1, (1, 1, 1)), ["A"])      # one.png: 1 + 48 = 49
+    other.apply_mod_image(solid(1, 1, (1, 1, 1)), ["B"])      # one.png: 1 + 1 = 2
+    other.add_region(solid(3, 3, (1, 1, 1)), "N")
+    assert other.added_region_pages()["N"] == "one.png"
+
+
+def test_auto_page_counts_a_shared_composite_once_and_ties_pick_the_earlier_page():
+    session = load()
+    # One composite over A and B (one page): counts 10x10 once -> 100 > 68.
+    session.apply_mod_image(solid(10, 10, (1, 1, 1)), ["A", "B"], composite=True)
+    session.add_region(solid(4, 8, (1, 1, 1)), "N1")          # two.png: 68 + 32 = 100
+    session.add_region(solid(1, 1, (1, 1, 1)), "N2")          # tie 100 / 100 -> one.png
+    assert session.added_region_pages() == {"N1": "two.png", "N2": "one.png"}
+
+
+def test_auto_page_uses_scaled_bounds():
+    # two.png's real image is twice its declared size: C, D weigh 4x (272).
+    session = load(pages={"one.png": page(16, 8, 10), "two.png": page(32, 16, 90)})
+    session.add_region(solid(3, 3, (1, 1, 1)), "N")
+    assert session.added_region_pages()["N"] == "one.png"     # 78 < 272
+
+
+def test_rename_is_checked_across_pages_and_rename_only_page_keeps_pixels():
+    from atlas_toolkit.engine.session import RegionNameError
+
+    session = load()
+    with pytest.raises(RegionNameError):
+        session.rename_region("C", "A")
+    session.rename_region("C", "Sea")
+    session.apply_mod_image(solid(6, 5, (1, 2, 3)), ["A"])    # one.png touched, two.png rename-only
+    text, pages = session.pack_pending()
+    assert raw(pages["two.png"]) == raw(page(16, 8, 90))
+    assert page_section(text, "two.png") == page_section(ATLAS, "two.png").replace("\nC\n", "\nSea\n")
+
+
+def test_a_page_with_a_mod_and_a_rename_keeps_the_rename():
+    session = load()
+    session.apply_mod_image(solid(6, 5, (1, 2, 3)), ["A"])
+    session.rename_region("B", "Bee")
+    text, _ = session.pack_pending()
+    assert sorted(names_on(text, "one.png")) == ["A", "Bee"]
+
+
+def test_removing_a_pages_last_region_leaves_a_10x10_page():
+    text_in = ATLAS.replace("two.png\nsize: 16,8\n", "two.png\nsize: 16,8\nfilter: Linear,Linear\n")
+    session = load(text_in)
+    session.remove_regions(["C", "D"])
+    text, pages = session.pack_pending()
+    two = next(p for p in AtlasDocument.parse(text).pages if p.filename == "two.png")
+    assert two.size == [10, 10] and two.regions == [] and two.filter == ["Linear", "Linear"]
+    assert raw(pages["two.png"]) == raw(Image.new("RGBA", (10, 10), (0, 0, 0, 0)))
+    assert page_section(text, "one.png") == page_section(text_in, "one.png")
+
+
+def test_removing_every_region_still_raises():
+    from atlas_toolkit.engine.session import RemoveAllRegionsError
+
+    session = load()
+    with pytest.raises(RemoveAllRegionsError):
+        session.remove_regions(["A", "B", "C", "D"])
+
+
+def test_repeated_builds_never_change_the_pristine_document():
+    # one.png is emptied and two.png is rename-only: both clone branches run.
+    session = load()
+    session.rename_region("C", "Sea")
+    session.remove_regions(["A", "B"])
+    before = session._document.serialize()
+    first = session.pack_pending()
+    session.set_nest_regions_enabled(True)
+    session.pack_pending()
+    session.set_nest_regions_enabled(False)
+    again = session.pack_pending()
+    assert session._document.serialize() == before
+    assert first[0] == again[0]
+    assert {k: raw(v) for k, v in first[1].items()} == {k: raw(v) for k, v in again[1].items()}
