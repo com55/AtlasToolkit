@@ -418,9 +418,10 @@ class SpineAtlas:
         them all gives the image back; a region drawn on its own looks
         fainter there, and rects overlap far more than hulls. A group keeps
         the default behaviour when any of its regions is a nine-patch or has
-        malformed offsets (a zero-size canvas). Regions on several pages work: each page gets
-        its own copy, or with split_composite=True its own pieces, stored at the image's
-        resolution. Regions on pma pages keep RGB scaled by their alpha share."""
+        malformed offsets (a zero-size canvas). Regions on several pages
+        work: each page gets its own copy, or with split_composite=True its
+        own pieces, stored at the image's resolution. Regions on pma pages
+        keep RGB scaled by their alpha share."""
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
         pma = {page.filename: page.pma for page in self._document.pages}
