@@ -215,21 +215,40 @@ class AtlasProcessor:
         width, height = frame["width"], frame["height"]
         out = np.zeros((height, width, 4), np.float64)
         for image in reversed(images):
-            if frame["scale"] and self._raster.size(image) != (width, height):
-                resized = self._raster.resize_lanczos(image, width, height)
+            w, h = self._raster.size(image)
+            pixels = np.frombuffer(self._raster.get_pixels(image), dtype=np.uint8).reshape(h, w, 4)
+            if frame["scale"] and (w, h) != (width, height):
+                # resize_lanczos takes straight alpha: un-premultiply, resize,
+                # premultiply again. Colour on alpha-0 pixels is lost here.
+                straight = self._raster.from_pixels(w, h, _unpremultiplied(pixels).tobytes())
                 try:
-                    image_pixels = self._raster.get_pixels(resized)
+                    resized = self._raster.resize_lanczos(straight, width, height)
+                finally:
+                    self._raster.dispose(straight)
+                try:
+                    w, h = width, height
+                    pixels = np.frombuffer(self._raster.get_pixels(resized), dtype=np.uint8).reshape(h, w, 4)
                 finally:
                     self._raster.dispose(resized)
-                w, h = width, height
+                src = pixels.astype(np.float64)
+                src[..., :3] *= src[..., 3:4] / 255
             else:
-                image_pixels = self._raster.get_pixels(image)
-                w, h = self._raster.size(image)
-            src = np.frombuffer(image_pixels, dtype=np.uint8).reshape(h, w, 4).astype(np.float64)
+                src = pixels.astype(np.float64)
             under = out[:h, :w]
             out[:h, :w] = src + under * (1 - src[..., 3:4] / 255)
-        data = np.rint(out).astype(np.uint8).tobytes()
+        # RGB above alpha (additive colour on alpha-0 pixels) can push over
+        # past 255; clip before the cast instead of wrapping.
+        data = np.clip(np.rint(out), 0, 255).astype(np.uint8).tobytes()
         return self._raster.from_pixels(width, height, data)
+
+
+
+def _unpremultiplied(pixels: np.ndarray) -> np.ndarray:
+    """Straight RGBA from premultiplied (h, w, 4) uint8; alpha-0 pixels go to 0."""
+    out = pixels.astype(np.float64)
+    alpha = out[..., 3:4]
+    out[..., :3] = np.divide(out[..., :3] * 255, alpha, out=np.zeros_like(out[..., :3]), where=alpha > 0)
+    return np.clip(np.rint(out), 0, 255).astype(np.uint8)
 
 
 def pick_force_resize_target(sizes: list[tuple[int, int]]) -> tuple[int, int]:
