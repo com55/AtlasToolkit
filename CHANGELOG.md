@@ -4,6 +4,46 @@ All notable changes to AtlasToolkit. Versions match the Git tags and the
 [GitHub Releases](https://github.com/com55/AtlasToolkit/releases), which carry
 the full notes and screenshots.
 
+## [Unreleased] - Python engine
+
+A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
+desktop and web apps are unchanged and still run the JavaScript engine.
+
+### Added
+- `SpineAtlas`: open an atlas from disk (`open`) or memory (`load`), list
+  regions, extract single, all or composite sprites (with Forced Resizing and
+  Mesh Cropping), record edits (`replace`, `replace_composite`, `add_region`,
+  `rename_region`, `remove_region`) and pack them once with `build()` /
+  `save()` (shelf or Smart Packing, Mesh-Aware).
+- `build(split_composite=True)`: a `replace_composite` image is cut back into
+  one piece per region, the inverse of `extract_composite(force_resize=True)`.
+  With Mesh-Aware each region keeps its mesh hull; a semi-transparent pixel
+  shared by several regions has its alpha split between them, so drawing them
+  all gives the image back.
+- Multi-page atlases can be edited, including Add, Rename and Remove. Only
+  pages that own an edited region are repacked. `add_region(page=...)` picks
+  the page; without it the page whose regions cover the least area is used.
+- Packed pages are capped at 10000 px per side: `CanvasTooLarge` is raised
+  before the page is allocated, with `.page` naming the page on a multi-page
+  atlas.
+- The core package needs only Pillow, numpy and the `.skel` parser; the
+  desktop shell's dependencies moved to the `app` extra.
+
+### Fixed
+- `pma: true` pages: split pieces keep RGB scaled by their alpha share, and
+  composite extracts and previews stack premultiplied colour, so an extract /
+  replace round trip keeps a composite's colours (to within a few levels).
+
+### Differences from the app's engine
+- `pma` is kept on repack (the app drops it).
+- Page lines other than the standard ones, such as `scale:`, are kept on
+  repack.
+- Extracted file names keep non-ASCII letters (the app turns them into `_`).
+- Output images carry no metadata such as embedded colour profiles.
+- Repack deduplication also compares sprite sizes.
+- Forced Resizing with Mesh Cropping resizes a region before masking it, so a
+  scaled composite round-trips exactly.
+
 ## [0.4.1] - 2026-10-12
 
 ### Fixed
