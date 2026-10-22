@@ -44,6 +44,74 @@ cd www
 # Open index.html in your browser, or serve it: python3 -m http.server
 ```
 
+## Python library
+
+The `atlas_toolkit` package also contains a Python port of the atlas engine,
+usable from scripts without the app. Its output matches the app's (checked
+against the app's own code running in a real browser), apart from the
+differences listed in [CHANGELOG.md](CHANGELOG.md). The desktop and web apps
+still run the JavaScript engine in `www/js/`.
+
+Install from source (Python 3.11 or later):
+
+```bash
+uv sync                # library only; add --extra app for the desktop shell
+uv run python your_script.py
+```
+
+Open an atlas, look at it, edit it, and save the result:
+
+```python
+from PIL import Image
+from atlas_toolkit import SpineAtlas, CanvasTooLarge
+
+atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
+for region in atlas.regions:
+    print(region.name, region.page, region.bounds)
+
+atlas.extract("head").save("head.png")
+atlas.extract_all_to("sprites/")
+
+atlas.replace({"head": "new_head.png"})
+atlas.add_region("hat", Image.new("RGBA", (8, 8), (0, 255, 0, 255)), page="hero_2.png")
+atlas.rename_region("arm", "left_arm")
+atlas.remove_region("tail")
+
+try:
+    atlas.save("out/hero.atlas", nest=True)    # writes out/hero.atlas + its page PNGs
+except CanvasTooLarge as error:
+    print("too big:", error.page, error)
+```
+
+Atlases can also be loaded from memory, and several regions can be edited as
+one picture:
+
+```python
+atlas = SpineAtlas.load(text, {"hero.png": page_one, "hero_2.png": page_two})
+sheet = atlas.extract_composite(["head", "arm"], force_resize=True)
+# ... edit `sheet` in an image editor ...
+atlas.replace_composite(["head", "arm"], sheet)
+built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is unchanged
+```
+
+- Edits are only recorded. `build()` packs them once and returns a new
+  `SpineAtlas`; `save()` builds and writes. Both take `nest` (Smart Packing),
+  `gap`, `mesh_aware` and `split_composite`.
+- With `split_composite=True`, a `replace_composite` image is cut back into one
+  piece per region: the inverse of `extract_composite(force_resize=True)`.
+- `mesh_crop=True` on the extract methods and `mesh_aware=True` on
+  `build()` / `save()` use the meshes from the `.skel` file; without usable
+  mesh data they raise `SkeletonUnavailable`.
+- Multi-page atlases can be edited. Only the pages that own an edited
+  region are repacked; the others are kept as they are. `add_region(page=...)`
+  picks the page, otherwise the page whose regions cover the least area is
+  used.
+- A region added with `add_region` can be extracted only after `build()`.
+- Errors derive from `AtlasError`: `RegionNotFound`, `DuplicateRegionName`,
+  `InvalidRegionName`, `MissingPageImage`, `SkeletonUnavailable` and
+  `CanvasTooLarge`. `CanvasTooLarge` is raised when a packed page would be over
+  10000 px on a side; `.page` names the page on a multi-page atlas.
+
 ## Features
 
 - **Atlas Preview** — View the full atlas image with region overlays

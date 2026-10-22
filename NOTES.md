@@ -9,7 +9,7 @@ User-facing changes are in `CHANGELOG.md`.
 - `www/` is the whole app: a static site with no build step (plain ES
   modules). The same files run as the web app (GitHub Pages / PWA) and inside
   the desktop app.
-- `www/js/` is the only atlas engine: parse → model → serialize
+- `www/js/` is the app's atlas engine: parse → model → serialize
   (`atlas-document.js`), crop/rotate/offset math (`core-region-ops.js`),
   extraction (`atlas-extracter.js`), mod preparation and packing
   (`atlas-modifier.js`, `repack-nest.js`), edit sessions (`atlas-session.js`)
@@ -18,15 +18,24 @@ User-facing changes are in `CHANGELOG.md`.
 - `atlas_toolkit/app/` is the desktop shell only: pywebview window, native
   dialogs, disk I/O, drag-and-drop paths and the self-updater
   (`atlas_toolkit/update/`). It holds no atlas logic.
-- The original Python engine was retired. Its last version is the pinned
-  oracle commit `9655e3c` (see `tests/browser/gen-ground-truth-ops.py`); it is
-  read with `git show <sha>:<path>`, never from a branch name.
+- The rest of `atlas_toolkit/` is a Python port of `www/js/`, used as a
+  library and not by the app (see "Python engine" below): `api.py`
+  (`SpineAtlas`), `document.py`, and `domain/`, `engine/`, `mesh/`, `raster/`,
+  which mirror the JS modules one for one.
+- The original Python engine (before the JS rewrite) was retired. Its last
+  version is the pinned oracle commit `9655e3c` (see
+  `tests/browser/gen-ground-truth-ops.py`); it is read with
+  `git show <sha>:<path>`, never from a branch name. The port above is new
+  code, not that engine.
 - Root `package.json` exists only so `node --test` can load the ES modules.
 
 ## Branches and releases
 
 - Work lands on `dev`; `main` receives releases. `legacy/js-project` and
   `legacy/python-engine` are archives, never pushed to.
+- The Python engine lives on its own line (`rewrite/python-base`), which is
+  never merged into `dev`. If it replaces `main`, the branches are swapped,
+  not merged.
 - Bump `version` in `pyproject.toml` and run `uv lock` in the same commit. A
   push to `main` that changes `pyproject.toml` runs `auto_tag.yml`, which tags
   `vX.Y.Z` and calls `build_release.yml` (Windows installer + portable zip).
@@ -137,7 +146,12 @@ each other.
 
 - Smart Packing with Mesh-Aware on very large atlases (around 4096×4096 with
   hundreds of regions) can exceed the 5-minute limit in `job-runner.js`.
-- Add / Rename / Remove are single-page only.
+- App: Add / Rename / Remove are single-page only. The Python library edits
+  multi-page atlases in its deferred mode (`SpineAtlas`); its immediate mode
+  (the app-style session) still refuses every edit on a multi-page atlas.
+- Python library: picking a page automatically in `add_region` rebuilds every
+  page's model on each call, which adds up over hundreds of adds; pass `page=`
+  in bulk.
 
 ## Design decisions
 
@@ -243,6 +257,56 @@ Python `repacker.py`) only ever produced `rotate: true`/`false` (0 or 90). This 
 deliberate, confirmed decision (not an oversight): the target Spine runtimes are confirmed to
 accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
 (`repack-nest.js`'s `rotationVariants`) is kept as-is rather than restricted to `[0, 90]`.
+
+## Python engine
+
+- **Port only live code.** Before porting a JS function, check with grep that
+  production calls it (the merge path in `atlas-modifier.js` is dead, see
+  above).
+- **Package rule:** nothing under `atlas_toolkit/domain/` imports
+  `atlas_toolkit/engine/`. `tests/python/test_packing_import_boundary.py`
+  enforces it by AST, relative imports included; `domain/packing.py` gets the
+  modifier helpers it needs by injection.
+- **Sessions:** `engine/session.py`'s `AtlasSession` has an immediate mode
+  (repack after every edit, like the app) and a deferred mode (record edits,
+  pack once in `pack_pending`) that `SpineAtlas` uses. Each `pack_pending`
+  replays every batch from the pristine pages and packs only the pages that
+  own a modified, added or removed region; a page with only renames keeps its
+  pixels and gets new names in its text.
+- **Name order:** the packers trust the caller's region order. JS gets it from
+  `Object.keys()`; Python callers pass names through `js_object_key_order()`.
+- **`AtlasDocument.with_updates` shares list fields** (`split`, `pad`,
+  `extra_pairs`, whole unchanged `Region` / `Page` objects) with its input.
+  Treat regions and pages taken from a document as read-only; rebuild through
+  `with_updates` / `clone` / `from_rebuild_args`.
+- **Pillow `paste(src, box)` without a mask overwrites** (alpha included). For
+  "source over", paste onto a transparent layer and `Image.alpha_composite`.
+- The deliberate differences from the JS engine are listed in `CHANGELOG.md`
+  under "Differences from the app's engine". Keep new ones out of parity
+  cases and pin them with their own tests.
+
+### Python tests
+
+- `uv run pytest tests/python -q` runs the suite.
+- JS parity comes in two kinds:
+  - pixel work runs the real JS in Chromium: `tests/python/gen_js_reference_*.mjs`
+    (`playwright-core`, skipped when missing) writes a committed JSON fixture,
+    and the tests compare decoded pixels, never PNG bytes;
+  - pure logic runs the JS in plain Node per test (through `conftest.py`
+    fixtures); generators such as `gen_js_reference_packing.mjs` use a
+    `FakeCanvas` that records draws instead of rendering.
+- Regenerate a fixture with `node tests/python/gen_js_reference_<name>.mjs`
+  and check that the existing cases did not change.
+- No parity case may use a `pma: true` page or extra page lines such as
+  `scale:`: the Python engine keeps them and the JS engine does not.
+- Byte-exact mask oracles need axis-aligned geometry: a diagonal edge hits
+  partly covered pixels, which Canvas antialiases and the Python rasterizer
+  does not.
+- A passing test is not proof that a guard works. Break the code on purpose
+  and see the test fail, check that the edit actually landed, and restore
+  from a saved copy (not `git checkout`, which drops uncommitted work). Vary
+  both axes, use patterned images where every pixel is different, and pin
+  split alpha per piece rather than only through a composite.
 
 ## Python port: packaging
 
