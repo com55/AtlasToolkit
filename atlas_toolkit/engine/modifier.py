@@ -29,13 +29,14 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 
 from atlas_toolkit.document import AtlasDocument, Region
+from atlas_toolkit.domain.effective_model import derive_effective_model
 from atlas_toolkit.domain.packing import (
     footprint_for_canonical,
     nest_pack,
@@ -773,93 +774,63 @@ class AtlasModifier:
         names = js_object_key_order(self.region_names)
         return names, {name: region_meta(self.regions[name]) for name in names}
 
-    def repack_with_modded_sprites(
+    def repack(
         self,
-        modded_sprites: Optional[dict[str, ImageHandle]],
+        modded_sprites: Optional[dict[str, ImageHandle]] = None,
         full_canvas_regions: Optional[set[str]] = None,
         mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
         nest_options: Optional[dict] = None,
+        *,
+        batches: Sequence[dict] = (),
+        piece_sprites: Optional[dict[str, object]] = None,
     ) -> PackResult:
         """Repack from this modifier's pristine base image, overlaid with
-        modded sprites. Non-modded regions carry their pristine offsets
-        into the output; regions in `full_canvas_regions` get default
-        offsets -- the offsets-preserved-on-repack asymmetry that merge
-        (which resets every touched region) cannot express. Port of
-        repackWithModdedSprites.
+        modded sprites, over the effective (pristine union structural-batch)
+        region model. The one repack entry point: it replaces JS's two,
+        repackWithModdedSprites and repackWithEffectiveModel -- with no
+        structural batch the effective model IS the pristine one, so both
+        produced the same pack.
+
+        `batches` are this page's session batches (mod/add/remove/rename
+        dicts); they are folded over the pristine regions, in
+        js_object_key_order, by derive_effective_model. A pristine region the
+        fold drops was removed by a RemoveBatch; an AddBatch's `source` is
+        packed under its `internal_key`, which never existed in the pristine
+        parse. No batches means the pristine model.
+
+        Non-modded regions carry their pristine offsets into the output;
+        regions in `full_canvas_regions` get default offsets -- the
+        offsets-preserved-on-repack asymmetry that merge (which resets every
+        touched region) cannot express.
 
         A modded sprite handle is used as-is, never cloned: JS's _toCanvas
         deliberately preserves canvas identity here, and
         group_names_by_sprite_identity groups by handle value.
 
-        When `mesh_lookup_fn` is given, every pristine (non-modded) region
-        with real mesh geometry gets masked via mask_raw_sprite before
-        packing, and every modded-sprite identity group with real mesh
-        geometry gets masked via _mask_modded_sprites -- mirroring
-        atlas-modifier.js:845-862 exactly. Pass `mesh_lookup_fn=None` when
-        mesh masking is not wanted."""
-        region_names, regions = self._scoped_region_meta()
-        sprites = {
-            name: extract_raw_sprite(self.raster, self.base_image, regions[name])
-            for name in region_names
-        }
-        if mesh_lookup_fn is not None:
-            for name in region_names:
-                if name in (modded_sprites or {}):
-                    continue
-                geom = mesh_lookup_fn(name)
-                if geom is not None:
-                    mask_raw_sprite(self.raster, sprites[name], geom, regions[name])
-        for name, sprite in (modded_sprites or {}).items():
-            if name in sprites:
-                sprites[name] = sprite
-        _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn)
-        return self._pack_and_emit(
-            sprites, region_names, regions, full_canvas_regions,
-            nest_options, modded_sprites, None, mesh_lookup_fn,
-        )
-
-    def repack_with_effective_model(
-        self,
-        effective_region_names: list[str],
-        effective_regions: dict[str, dict],
-        added_sprites: Optional[dict[str, ImageHandle]],
-        modded_sprites: Optional[dict[str, ImageHandle]],
-        full_canvas_regions: Optional[set[str]] = None,
-        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]] = None,
-        nest_options: Optional[dict] = None,
-        piece_sprites: Optional[dict[str, object]] = None,
-    ) -> PackResult:
-        """Repack from the effective (pristine union structural-batch)
-        region model -- the Add/Remove/Rename path. Mirrors
-        repack_with_modded_sprites's own extraction rather than making the
-        caller pre-extract, so no caller needs to know about scaling,
-        extract_raw_sprite, or base_image. Port of
-        repackWithEffectiveModel.
-
-        `effective_regions` is keyed by internal key and shaped exactly as
-        domain/effective_model.py's output (camelCase). A pristine region
-        absent from it was dropped by a RemoveBatch; a key present only in
-        `added_sprites` is an AddBatch source that never existed in the
-        pristine parse.
-
         CALLER NOTES:
 
-        1. The caller orders the INITIAL pristine map with js_object_key_order()
-           before deriving the effective model, then supplies the resulting
-           effective_region_names array unchanged. Do not re-sort after the fold:
-           numeric Add keys remain in append order.
-        2. When `mesh_lookup_fn` is given, masking mirrors
-           repack_with_modded_sprites, with one addition: a name present
-           in `added_sprites` is also excluded from the pristine-masking
-           pass (mirrors atlas-modifier.js:871-889's third guard clause --
-           an AddBatch sprite never had a pristine region to look mesh
-           geometry up for).
-
+        1. Numeric Add keys stay in append order after the fold: the pristine
+           map is ordered BEFORE folding and never re-sorted after it.
+        2. When `mesh_lookup_fn` is given, every pristine region with real
+           mesh geometry that is neither modded nor added gets masked via
+           mask_raw_sprite before packing, and every modded-sprite identity
+           group with real mesh geometry gets masked via _mask_modded_sprites
+           -- mirroring atlas-modifier.js:845-862 and 871-889 (an AddBatch
+           sprite never had a pristine region to look mesh geometry up for).
+           Pass `mesh_lookup_fn=None` when mesh masking is not wanted.
         3. `piece_sprites` maps a name to a pre-cut piece (`.image`,
            `.offsets`; engine/composite_split.py's Piece): the piece is
            used instead of extracting from the page, is not masked again
            (it is already cut to its hull), and its offsets replace the
            region's in a copied meta. Spec 2026-10-13-composite-split §3.5."""
+        _pristine_names, pristine_regions = self._scoped_region_meta()
+        effective = derive_effective_model(pristine_regions, list(batches))
+        effective_region_names, effective_regions = effective["region_names"], effective["regions"]
+        added_sprites = {
+            batch["internal_key"]: batch["source"]
+            for batch in batches
+            if batch.get("type") == "add"
+        }
         pieces = piece_sprites or {}
         if pieces:
             # Spec 2026-10-13 §3.5: copy the mapping, then give each piece a
@@ -868,7 +839,6 @@ class AtlasModifier:
             effective_regions = dict(effective_regions)
             for name, piece in pieces.items():
                 effective_regions[name] = {**effective_regions[name], "offsets": list(piece.offsets)}
-        _pristine_names, pristine_regions = self._scoped_region_meta()
         sprites: dict[str, ImageHandle] = {}
         for name, meta in pristine_regions.items():
             if name not in effective_regions:

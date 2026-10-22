@@ -622,14 +622,11 @@ def test_failed_mod_candidate_keeps_published_output_and_releases_facade_allocat
         target, name = modifier_module.AtlasModifier, "prepare_mod_image"
         replacement = fail_prepare
     elif failure == "pack":
-        def fail_pack(
-            self, modded_sprites, full_canvas_regions=None,
-            mesh_lookup_fn=None, nest_options=None,
-        ):
+        def fail_pack(self, *args, **kwargs):
             self.raster.clone(root)
             raise RuntimeError("candidate pack failure")
 
-        target, name = modifier_module.AtlasModifier, "repack_with_modded_sprites"
+        target, name = modifier_module.AtlasModifier, "repack"
         replacement = fail_pack
     else:
         def fail_assembly(pack):
@@ -672,13 +669,12 @@ def test_nonpositive_pack_dimensions_roll_back_apply_and_repack(
     before = live_pixels(raster)
     snapshot = loaded.snapshot()
 
-    def empty_pack(self, modded_sprites, full_canvas_regions=None,
-                   mesh_lookup_fn=None, nest_options=None):
+    def empty_pack(self, *args, **kwargs):
         image = self.raster.create(width, height)
         return PackResult(image, loaded._document, {})
 
     monkeypatch.setattr(
-        modifier_module.AtlasModifier, "repack_with_modded_sprites", empty_pack,
+        modifier_module.AtlasModifier, "repack", empty_pack,
     )
     invoke = (
         (lambda: loaded.apply_mod_image(patterned_png(), ["a"]))
@@ -706,14 +702,13 @@ def test_nonpositive_dimension_gate_discriminator_and_real_empty_atlas(monkeypat
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
 
-    def empty_pack(self, modded_sprites, full_canvas_regions=None,
-                   mesh_lookup_fn=None, nest_options=None):
+    def empty_pack(self, *args, **kwargs):
         image = self.raster.create(0, 3)
         return PackResult(image, loaded._document, {})
 
     with monkeypatch.context() as patched:
         patched.setattr(
-            modifier_module.AtlasModifier, "repack_with_modded_sprites", empty_pack,
+            modifier_module.AtlasModifier, "repack", empty_pack,
         )
         before = live_pixels(raster)
         with pytest.raises(ValueError, match="positive dimensions"):
@@ -851,16 +846,13 @@ def test_pack_failure_before_first_output_restores_pristine_roots(monkeypatch):
     snapshot = loaded.snapshot()
     root = next(iter(loaded._roots))
 
-    def fail_pack(
-        self, modded_sprites, full_canvas_regions=None,
-        mesh_lookup_fn=None, nest_options=None,
-    ):
+    def fail_pack(self, *args, **kwargs):
         self.raster.clone(root)
         raise RuntimeError("initial pack failure")
 
     with monkeypatch.context() as patcher:
         patcher.setattr(
-            modifier_module.AtlasModifier, "repack_with_modded_sprites", fail_pack,
+            modifier_module.AtlasModifier, "repack", fail_pack,
         )
         with pytest.raises(RuntimeError, match="initial pack failure"):
             loaded.apply_mod_image(patterned_png(), ["a"])
@@ -1118,7 +1110,7 @@ def test_failed_structural_operation_preserves_saved_output_and_recovers(
     old_pixels = raster.get_pixels(old_image)
 
     if failure == "pack":
-        target, method = modifier_module.AtlasModifier, "repack_with_effective_model"
+        target, method = modifier_module.AtlasModifier, "repack"
 
         def fail_pack(self, *args, **kwargs):
             self.raster.clone(old_image)
@@ -1316,16 +1308,10 @@ def test_task5_toggle_rerun_keeps_positive_dimension_gate_on_real_packer(monkeyp
     before_live = live_pixels(raster)
     before_active = loaded._active.image
     before_encoded = loaded.save()
-    real_pack = modifier_module.AtlasModifier.repack_with_modded_sprites
+    real_pack = modifier_module.AtlasModifier.repack
 
-    def nonpositive_after_real_pack(
-        self, modded_sprites, full_canvas_regions=None,
-        mesh_lookup_fn=None, nest_options=None,
-    ):
-        candidate = real_pack(
-            self, modded_sprites, full_canvas_regions,
-            mesh_lookup_fn, nest_options,
-        )
+    def nonpositive_after_real_pack(self, *args, **kwargs):
+        candidate = real_pack(self, *args, **kwargs)
         self.raster.dispose(candidate.image)
         image = self.raster.create(0, 2)
         return PackResult(image, candidate.document, candidate.region_bounds)
@@ -1333,7 +1319,7 @@ def test_task5_toggle_rerun_keeps_positive_dimension_gate_on_real_packer(monkeyp
     with monkeypatch.context() as patched:
         patched.setattr(
             modifier_module.AtlasModifier,
-            "repack_with_modded_sprites",
+            "repack",
             nonpositive_after_real_pack,
         )
         with pytest.raises(ValueError, match="positive dimensions"):

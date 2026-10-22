@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier, js_object_key_order, region_meta
+from atlas_toolkit.engine.modifier import AtlasModifier, js_object_key_order
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 PAGE_TEXT = "\n".join([
@@ -128,7 +128,7 @@ def _python_result(case_id):
                 name: _sprite(raster, spec["w"], spec["h"], spec["content"])
                 for name, spec in modded_specs.items()
             }
-        result = modifier.repack_with_modded_sprites(
+        result = modifier.repack(
             modded, None if full_names is None else set(full_names)
         )
         shaped = _shape(raster, result)
@@ -142,25 +142,19 @@ def _python_result(case_id):
 
     text, real_w, real_h, page, drop_names, added_specs, modded_specs = args
     modifier = _modifier(raster, text, real_w, real_h, page)
-    dropped = set(drop_names or [])
-    names = [n for n in js_object_key_order(modifier.region_names) if n not in dropped]
-    effective_regions = {name: region_meta(modifier.regions[name]) for name in names}
-    added = {}
+    batches = [{"type": "remove", "target_key": name} for name in drop_names or []]
     for key, spec in (added_specs or {}).items():
-        effective_regions[key] = {
-            "name": key, "atlasName": spec["atlas_name"], "page": page,
-            "bounds": [0, 0, spec["w"], spec["h"]], "offsets": None, "rotate": 0,
-            "index": -1, "split": None, "pad": None, "extraPairs": [],
-        }
-        names.append(key)
-        added[key] = _sprite(raster, spec["w"], spec["h"], spec["content"])
+        batches.append({
+            "type": "add", "internal_key": key, "atlas_name": spec["atlas_name"],
+            "source": _sprite(raster, spec["w"], spec["h"], spec["content"]),
+        })
     modded = None
     if modded_specs is not None:
         modded = {
             name: _sprite(raster, spec["w"], spec["h"], spec["content"])
             for name, spec in modded_specs.items()
         }
-    result = modifier.repack_with_effective_model(names, effective_regions, added, modded)
+    result = modifier.repack(modded, batches=batches)
     return _shape(raster, result)
 
 
@@ -229,7 +223,7 @@ def test_a_modded_sprite_handle_is_used_without_cloning():
     modifier = _modifier(raster, PAGE_TEXT, 64, 64, "p.png")
     shared = _sprite(raster, 20, 12, "SHARED")
     before = raster.clones
-    modifier.repack_with_modded_sprites({"alpha": shared, "beta": shared})
+    modifier.repack({"alpha": shared, "beta": shared})
     assert raster.clones == before
 
 
@@ -254,15 +248,16 @@ def test_mesh_aware_repack_works_with_mesh_lookup_fn_returning_none():
     # produces a valid result.
     raster = PillowRasterBackend()
     modifier = _modifier(raster, PAGE_TEXT, 64, 64, "p.png")
-    # Test repack_with_modded_sprites
-    result1 = modifier.repack_with_modded_sprites(None, None, lambda name: None)
+    # No batches
+    result1 = modifier.repack(None, None, lambda name: None)
     assert result1.image is not None
     assert len(result1.region_bounds) > 0
-    # Test repack_with_effective_model
-    region_names = js_object_key_order(modifier.region_names)
-    effective_regions = {name: region_meta(modifier.regions[name]) for name in region_names}
-    result2 = modifier.repack_with_effective_model(
-        region_names, effective_regions, None, None, None, lambda name: None,
+    # A mod-only batch leaves the pristine model unchanged
+    result2 = modifier.repack(
+        None, None, lambda name: None, batches=[{"type": "mod", "names": ["alpha"]}],
     )
     assert result2.image is not None
     assert len(result2.region_bounds) > 0
+    assert result1.document.serialize() == result2.document.serialize()
+    assert raster.get_pixels(result1.image) == raster.get_pixels(result2.image)
+
