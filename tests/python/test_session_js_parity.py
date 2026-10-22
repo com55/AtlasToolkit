@@ -80,19 +80,17 @@ def _run_repack(case):
     model = None
     if params["route"] == "rename":
         batch = params["batch"]
-        metadata = {key: region_meta(region) for key, region in modifier.regions.items()}
-        model = derive_effective_model(metadata, [{
+        rename = {
             "type": "rename",
             "target_key": batch["targetKey"],
             "new_atlas_name": batch["newAtlasName"],
-        }])
-        result = modifier.repack_with_effective_model(
-            model["region_names"], model["regions"], {}, {},
-            mesh_lookup_fn=mesh_lookup, nest_options=nest,
-        )
+        }
+        metadata = {key: region_meta(region) for key, region in modifier.regions.items()}
+        model = derive_effective_model(metadata, [rename])
+        result = modifier.repack({}, mesh_lookup_fn=mesh_lookup, nest_options=nest, batches=[rename])
     else:
         assert params["route"] == "pixel"
-        result = modifier.repack_with_modded_sprites(
+        result = modifier.repack(
             {}, mesh_lookup_fn=mesh_lookup, nest_options=nest,
         )
     return raster, result, model

@@ -1,6 +1,6 @@
 # tests/python/test_modifier_mesh_masking.py
 """Pixel-content tests for mask_raw_sprite/_mask_modded_sprites and their
-wiring into repack_with_modded_sprites/repack_with_effective_model.
+wiring into repack.
 Python-only (no JS oracle): these functions are pure composition of
 already-parity-tested primitives (rasterize_mesh_mask, tested in Task 1;
 composite_destination_in, tested in Task 2), so the thing worth proving
@@ -123,16 +123,16 @@ def _base_page(raster, w, h):
     return raster.decode_png(buf.getvalue())
 
 
-def test_repack_with_modded_sprites_masks_pristine_regions_with_geom():
+def test_repack_masks_pristine_regions_with_geom():
     # End-to-end: a pristine (non-modded) region with real mesh geometry
-    # gets masked during repack_with_modded_sprites, closing the Stage-5
+    # gets masked during repack, closing the Stage-5
     # ledger's deferred "no pixel-content assertion on _pack_and_emit's
     # sheet" gap for the mesh-aware path specifically.
     raster = PillowRasterBackend()
     base = _base_page(raster, 20, 20)
     modifier = AtlasModifier(AtlasDocument.parse(PAGE_TEXT), base, raster, "p.png")
     mesh_lookup_fn = lambda name: LEFT_HALF_RECT if name == "alpha" else None  # noqa: E731
-    result = modifier.repack_with_modded_sprites(None, None, mesh_lookup_fn, None)
+    result = modifier.repack(None, None, mesh_lookup_fn, None)
     sheet = raster._images[result.image]
     alpha_bounds = result.region_bounds["alpha"]
     ax, ay, aw, ah = alpha_bounds[0], alpha_bounds[1], alpha_bounds[2], alpha_bounds[3]
@@ -150,7 +150,7 @@ def test_repack_with_modded_sprites_masks_pristine_regions_with_geom():
     assert sheet.getpixel((bx + bw // 2, by + bh // 2))[3] == 255
 
 
-def test_repack_with_modded_sprites_skips_masking_for_modded_names():
+def test_repack_skips_masking_for_modded_names():
     # A region present in moddedSprites must NOT be masked via the
     # PRISTINE-extraction pass (atlas-modifier.js: `!(name in
     # (moddedSprites || {}))` guard) -- it gets the modded sprite's own
@@ -172,7 +172,7 @@ def test_repack_with_modded_sprites_skips_masking_for_modded_names():
         return LEFT_HALF_RECT if name == "alpha" else None
 
     modded_sprite = _patterned_sprite(raster, 10, 10)
-    modifier.repack_with_modded_sprites({"alpha": modded_sprite}, None, tracking_lookup, None)
+    modifier.repack({"alpha": modded_sprite}, None, tracking_lookup, None)
     # Zero calls would come from the pristine pass (which correctly skips
     # "alpha" since it's in modded_sprites); exactly one comes from
     # _mask_modded_sprites processing the singleton ["alpha"] group.
@@ -190,7 +190,7 @@ def _find_uncovered_pixel(canvas_w, canvas_h, bounds_by_name):
     return None
 
 
-def test_repack_with_modded_sprites_no_mesh_preserves_content_and_shows_gutter_transparency():
+def test_repack_no_mesh_preserves_content_and_shows_gutter_transparency():
     # Closes the Stage 5 ledger's deferred general pixel-content coverage
     # gap on _pack_and_emit's sheet ("no test asserts PIXEL content...
     # two distinguishable patterned sprites, a pixel asserted at each
@@ -204,7 +204,7 @@ def test_repack_with_modded_sprites_no_mesh_preserves_content_and_shows_gutter_t
     raster = PillowRasterBackend()
     base = _base_page(raster, 20, 20)
     modifier = AtlasModifier(AtlasDocument.parse(PAGE_TEXT), base, raster, "p.png")
-    result = modifier.repack_with_modded_sprites(None, None, None, None)
+    result = modifier.repack(None, None, None, None)
     canvas_w, canvas_h = raster.size(result.image)
     sheet = raster._images[result.image]
 

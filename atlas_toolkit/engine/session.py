@@ -343,7 +343,7 @@ class AtlasSession:
     ) -> PackResult:
         """Today's single-page repack, for one page: `batches` are that page's
         (_page_batches), `sprites` and `pieces` may name other pages' keys;
-        both repack paths only read the page's own names."""
+        the repack only reads the page's own names."""
         full_canvas_regions = {
             name
             for batch in batches
@@ -357,33 +357,13 @@ class AtlasSession:
             # New containers: pack_pending passes the session's live dict.
             sprites = {name: handle for name, handle in sprites.items() if name not in pieces}
             full_canvas_regions = full_canvas_regions - pieces.keys()
-        if pieces or any(batch.get("type") != "mod" for batch in batches):
-            pristine_names = js_object_key_order(modifier.region_names)
-            pristine_regions = {
-                key: region_meta(modifier.regions[key])
-                for key in pristine_names
-            }
-            effective = derive_effective_model(pristine_regions, batches)
-            added_sprites = {
-                batch["internal_key"]: batch["source"]
-                for batch in batches
-                if batch.get("type") == "add"
-            }
-            return modifier.repack_with_effective_model(
-                effective["region_names"],
-                effective["regions"],
-                added_sprites,
-                sprites,
-                full_canvas_regions=full_canvas_regions,
-                mesh_lookup_fn=mesh_lookup_fn,
-                nest_options=nest_options,
-                piece_sprites=pieces or None,
-            )
-        return modifier.repack_with_modded_sprites(
+        return modifier.repack(
             sprites,
             full_canvas_regions=full_canvas_regions,
             mesh_lookup_fn=mesh_lookup_fn,
             nest_options=nest_options,
+            batches=batches,
+            piece_sprites=pieces or None,
         )
 
     def _build_pages(
