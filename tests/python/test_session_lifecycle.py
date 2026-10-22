@@ -813,7 +813,7 @@ def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkey
         batch = left._mod_batches[0]
         expected_live = (
             set(left._roots)
-            | {batch["source"], left._modded_sprites["a"]}
+            | {batch["source"]}
             | set(left._modded_sprites.values())
             | {left._active.image}
         )

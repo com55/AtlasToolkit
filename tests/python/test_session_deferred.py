@@ -182,6 +182,7 @@ def test_deferred_session_close_disposes_every_recorded_image():
     session.close()
     assert raster._images == {}
 
+
 def test_mod_batches_hold_no_prepared_copy_and_an_overridden_copy_is_released():
     raster = PillowRasterBackend()
     session = AtlasSession.load_images(ATLAS, {"p.png": page()}, raster, defer_repack=True)

@@ -8,7 +8,10 @@ rect, cleared outside its own mesh hull. A region without mesh geometry
 holds its whole rect instead. Pixels several holders cover go to every
 holder; a semi-transparent one has its alpha split exactly
 (domain/alpha_split.py). Pixels no holder covers are dropped.
-On a pma page the stored RGB is premultiplied by the input alpha, so each piece keeps RGB x (its alpha / input alpha), rounded half-even: premultiplied over of the pieces then rebuilds the input (spec 2026-10-21-multi-page-editing §3.7)."""
+On a pma page the stored RGB is premultiplied by the input alpha, so
+each piece keeps RGB x (its alpha / input alpha), rounded half-even:
+premultiplied over of the pieces then rebuilds the input (spec
+2026-10-21-multi-page-editing §3.7)."""
 from __future__ import annotations
 
 from typing import NamedTuple
