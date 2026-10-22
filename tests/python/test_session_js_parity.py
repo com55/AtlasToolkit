@@ -100,7 +100,7 @@ def _run_repack(case):
 
 def test_fixture_is_complete_browser_generated_schema():
     assert ORACLE["schema"] == 1
-    assert len(CASES) == 42
+    assert len(CASES) == 44
     assert sum(case["kind"] == "extract" for case in CASES.values()) == 13
     assert sum(case["kind"] == "preview" for case in CASES.values()) == 1
     assert sum(case["kind"] == "repack" for case in CASES.values()) == 16
@@ -108,6 +108,7 @@ def test_fixture_is_complete_browser_generated_schema():
     assert sum(case["kind"] == "session_pixel" for case in CASES.values()) == 2
     assert sum(case["kind"] == "session_structural" for case in CASES.values()) == 5
     assert sum(case["kind"] == "session_mesh_nest" for case in CASES.values()) == 2
+    assert sum(case["kind"] == "session_multipage" for case in CASES.values()) == 2
 
 
 def test_pixel_comparator_literal_contract_and_invalid_lengths():
@@ -431,5 +432,33 @@ def test_pixel_transaction_sequence_matches_real_browser(case_id):
             assert list(extracts) == list(step["extracts"])
             for key, payload in extracts.items():
                 _assert_png_matches_record(payload, step["extracts"][key])
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("case_id", ["session_multipage_shelf", "session_multipage_nest"])
+def test_multi_page_replace_matches_real_browser(case_id):
+    """Spec 2026-10-21 §3.10: deferred multi-page replace equals the app's
+    _rebuildMultiPageRepack -- text after parse/serialize, pages as pixels."""
+    from atlas_toolkit.engine.session import AtlasSession
+
+    params, expected = CASES[case_id]["params"], CASES[case_id]["output"]
+    session = AtlasSession.load(
+        params["atlas"], {source["filename"]: _record_png(source) for source in params["sources"]},
+        PillowRasterBackend(), defer_repack=True,
+    )
+    try:
+        if params["nest"]:
+            session.set_nest_regions_enabled(True)
+            session.set_nest_gap_distance(0)
+        for mod in params["mods"]:
+            session.apply_mod_image(_record_png(mod), mod["names"])
+        text, pages = session.pack_pending()
+        assert AtlasDocument.parse(text).serialize() == AtlasDocument.parse(expected["text"]).serialize()
+        assert list(pages) == list(expected["pages"])
+        for filename, image in pages.items():
+            want = expected["pages"][filename]
+            image = image.convert("RGBA")
+            assert pixels_equal(image.size, image.tobytes(), (want["width"], want["height"]), bytes(want["rgba"])), filename
     finally:
         session.close()

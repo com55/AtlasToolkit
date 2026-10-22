@@ -537,6 +537,35 @@ try {
       cases['session_mesh_nest_' + route] = { kind: 'session_mesh_nest',
         params: { atlas, source, mod, selection, names }, output: { steps } };
     }
+    // Multi-page replace (Python spec 2026-10-21 §3.10): the app packs each
+    // page that owns a modified region on its own (_rebuildMultiPageRepack);
+    // a composite spanning pages gets one prepared copy per page; untouched
+    // pages keep their pristine canvas.
+    const multiAtlas = 'one.png\nsize: 12,4\na\n  bounds: 0,0,2,2\nb\n  bounds: 2,0,3,2\n'
+      + '\ntwo.png\nsize: 8,6\nc\n  bounds: 0,0,2,3\n  offsets: 0,1,3,4\nd\n  bounds: 2,0,2,2\n'
+      + '\nthree.png\nsize: 6,6\ne\n  bounds: 0,0,2,2\n';
+    const multiSizes = [['one.png', 12, 4], ['two.png', 8, 6], ['three.png', 6, 6]];
+    const multiMods = [{ ...patterned(3, 2, 100), names: ['a'] },
+      { ...patterned(4, 3, 160), names: ['b', 'c'] }];
+    for (const nest of [false, true]) {
+      const sources = multiSizes.map(([filename, width, height], i) =>
+        ({ filename, ...patterned(width, height, 10 + 60 * i) }));
+      const proc = new AtlasProcessor(multiAtlas);
+      await proc.loadImages(Object.fromEntries(sources.map(s =>
+        [s.filename, canvas(s.width, s.height, s.rgba).toDataURL('image/png')])));
+      ensure(sources.every(s => proc.getPageImage(s.filename)), 'missing multi-page image');
+      if (nest) proc.setNestOptions(true, 0);
+      const session = new AtlasSession(proc, multiAtlas, 'fixture.atlas');
+      ensure(session.isMultiPage, 'fixture must be multi-page');
+      for (const mod of multiMods) {
+        await session.processModImage(canvas(mod.width, mod.height, mod.rgba), mod.names);
+      }
+      const pages = Object.fromEntries(proc.pages.map((p, i) => [p.filename, imageRecord(session.active.pages[i])]));
+      ensure(JSON.stringify(pages['three.png'].rgba) === JSON.stringify(sources[2].rgba), 'untouched page must stay pristine');
+      cases['session_multipage_' + (nest ? 'nest' : 'shelf')] = { kind: 'session_multipage',
+        params: { atlas: multiAtlas, sources, mods: multiMods, nest },
+        output: { text: session.active.text, pages } };
+    }
     return cases;
   });
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
