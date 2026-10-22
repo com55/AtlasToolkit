@@ -242,7 +242,6 @@ class AtlasProcessor:
         return self._raster.from_pixels(width, height, data)
 
 
-
 def _unpremultiplied(pixels: np.ndarray) -> np.ndarray:
     """Straight RGBA from premultiplied (h, w, 4) uint8; alpha-0 pixels go to 0."""
     out = pixels.astype(np.float64)

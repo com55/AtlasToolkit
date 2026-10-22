@@ -406,3 +406,28 @@ def test_single_kind_composite_does_not_warn(monkeypatch, pma):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
+
+
+def test_cross_page_split_mixes_hulls_and_rects(monkeypatch):
+    # Spec 2026-10-21 §4: B (second.png) has no mesh and holds its whole rect,
+    # while A and C (page.png) are cut to their hulls.
+    atlas = load_two(monkeypatch, TWO_PAGE_SAME, {"A": SAME_MESH["A"], "C": SAME_MESH["C"]})
+    want = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
+    built = atlas.build(mesh_aware=True, split_composite=True)
+    inside = union(32, 16, [SAME_HULLS[0], SAME_RECTS[1], SAME_HULLS[2]])
+    assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
+    assert want[2, 13, 3] > 0 and built.extract("A").getpixel((13, 2))[3] == 0     # in A's rect, outside its hull
+    assert built.extract("B").getpixel((30, 10))[3] == want[10, 30, 3] > 0         # in B's rect, outside B's mesh hull
+
+
+def test_cross_page_nine_patch_member_falls_back(monkeypatch):
+    # Spec 2026-10-21 §4: a nine-patch survivor on second.png makes the whole
+    # batch fall back, page.png's A and C included.
+    text = TWO_PAGE_SAME.replace(" rotate: 90\n", " rotate: 90\n split: 1,1,1,1\n")
+    atlas = load_two(monkeypatch, text, SAME_MESH)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
+    split, plain = atlas.build(split_composite=True), atlas.build()
+    assert split.atlas_text == plain.atlas_text
+    for name in ("A", "B", "C"):
+        assert split.extract(name).tobytes() == plain.extract(name).tobytes(), name

@@ -334,17 +334,9 @@ class AtlasSession:
                 out.append(batch)
         return out
 
-    def _build_repack(
-        self, batches: list[dict], sprites: dict[str, ImageHandle], split_composite: bool = False,
-    ) -> PackResult:
-        """Immediate mode: the one page of a single-page atlas."""
-        modifier = self._fresh_modifier()
-        mesh_lookup_fn = self._processor.get_repack_mesh_geometry
-        pieces = (
-            self._composite_pieces({modifier.target_page: modifier}, batches, mesh_lookup_fn)
-            if split_composite else {}
-        )
-        return self._pack_page(modifier, batches, sprites, pieces)
+    def _build_repack(self, batches: list[dict], sprites: dict[str, ImageHandle]) -> PackResult:
+        """Immediate mode: the one page of a single-page atlas (never split)."""
+        return self._pack_page(self._fresh_modifier(), batches, sprites, {})
 
     def _pack_page(
         self, modifier: AtlasModifier, batches: list[dict], sprites: dict[str, ImageHandle], pieces: dict,
