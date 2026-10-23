@@ -139,9 +139,8 @@ def shelf_pack(items: list[dict], padding: int = 0) -> dict:
     is applied once, to the winner only, so a small-canvas rounding delta
     can never flip which candidate looks squarest.
 
-    `padding` (Python-only, default 0 = the app's
-    layout) is the number of pixels left between items, on both axes, never at
-    the edges."""
+    `padding` (Python-only, default 0 = the app's layout) is the number of
+    pixels left between items, on both axes, never at the edges."""
     if not items:
         return {"canvas_w": 0, "canvas_h": 0, "placements": []}
 
