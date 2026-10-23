@@ -339,7 +339,14 @@ class AtlasSession:
         return self._pack_page(self._fresh_modifier(), batches, sprites, {})
 
     def _pack_page(
-        self, modifier: AtlasModifier, batches: list[dict], sprites: dict[str, ImageHandle], pieces: dict,
+        self,
+        modifier: AtlasModifier,
+        batches: list[dict],
+        sprites: dict[str, ImageHandle],
+        pieces: dict,
+        *,
+        shelf_padding: int = 0,
+        mesh_footprint: bool = True,
     ) -> PackResult:
         """Today's single-page repack, for one page: `batches` are that page's
         (_page_batches), `sprites` and `pieces` may name other pages' keys;
@@ -351,7 +358,13 @@ class AtlasSession:
             for name in batch["names"]
         }
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
-        nest_options = self._processor.get_nest_options()
+        # Python-only switches (spec 2026-10-22 §4.3) ride on a copy;
+        # get_nest_options() itself stays the JS port.
+        nest_options = {
+            **self._processor.get_nest_options(),
+            "shelf_padding": shelf_padding,
+            "mesh_footprint": mesh_footprint,
+        }
         pieces = {name: piece for name, piece in pieces.items() if name in modifier.regions}
         if pieces:
             # New containers: pack_pending passes the session's live dict.
@@ -367,7 +380,13 @@ class AtlasSession:
         )
 
     def _build_pages(
-        self, batches: list[dict], sprites: dict[str, ImageHandle], split_composite: bool = False,
+        self,
+        batches: list[dict],
+        sprites: dict[str, ImageHandle],
+        split_composite: bool = False,
+        *,
+        shelf_padding: int = 0,
+        mesh_footprint: bool = True,
     ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
         """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
         own and splice it into the pristine document (port of JS
@@ -390,7 +409,12 @@ class AtlasSession:
                 continue
             try:
                 result = self._pack_page(
-                    modifiers[filename], self._page_batches(filename, batches, region_pages), sprites, pieces,
+                    modifiers[filename],
+                    self._page_batches(filename, batches, region_pages),
+                    sprites,
+                    pieces,
+                    shelf_padding=shelf_padding,
+                    mesh_footprint=mesh_footprint,
                 )
             except CanvasTooLargeError as error:
                 if len(self._document.pages) > 1:
@@ -833,7 +857,13 @@ class AtlasSession:
         )
         return result
 
-    def pack_pending(self, split_composite: bool = False) -> tuple[str, dict[str, object]]:
+    def pack_pending(
+        self,
+        split_composite: bool = False,
+        *,
+        shelf_padding: int = 0,
+        mesh_footprint: bool = True,
+    ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return (text, {page: native image}).
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released."""
@@ -842,10 +872,10 @@ class AtlasSession:
             return self._document.serialize(), self.export_pages()
         before = self._raster.checkpoint()
         try:
-            if split_composite:
-                document, images = self._build_pages(self._mod_batches, self._modded_sprites, split_composite=True)
-            else:
-                document, images = self._build_pages(self._mod_batches, self._modded_sprites)
+            document, images = self._build_pages(
+                self._mod_batches, self._modded_sprites, split_composite,
+                shelf_padding=shelf_padding, mesh_footprint=mesh_footprint,
+            )
             return document.serialize(), {
                 filename: self._raster.export(images[filename])
                 for filename in dict.fromkeys(document.page_filenames())
