@@ -63,7 +63,7 @@ Open an atlas, look at it, edit it, and save the result:
 
 ```python
 from PIL import Image
-from atlas_toolkit import SpineAtlas, CanvasTooLarge
+from atlas_toolkit import SpineAtlas, CanvasTooLarge, Packer, PackerOptions
 
 atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
 for region in atlas.regions:
@@ -78,7 +78,7 @@ atlas.rename_region("arm", "left_arm")
 atlas.remove_region("tail")
 
 try:
-    atlas.save("out/hero.atlas", nest=True)    # writes out/hero.atlas + its page PNGs
+    atlas.save("out/hero.atlas", packer="rectangles")    # writes out/hero.atlas + its page PNGs
 except CanvasTooLarge as error:
     print("too big:", error.page, error)
 ```
@@ -95,13 +95,24 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
 ```
 
 - Edits are only recorded. `build()` packs them once and returns a new
-  `SpineAtlas`; `save()` builds and writes. Both take `nest` (Smart Packing),
-  `gap`, `mesh_aware` and `split_composite`.
+  `SpineAtlas`; `save()` builds and writes. Both take:
+  - `packer`: `"shelf"` (default), `"rectangles"` (Smart Packing on solid
+    rects) or `"polygons"` (Smart Packing on mesh silhouettes, needs mesh
+    data). `"grid"`, `"rectangles_in_place"` and `"polygons_in_place"` are
+    reserved and raise `NotImplementedError`.
+  - `packer_options`: a `PackerOptions`:
+    - `padding` is the pixels between images, default 2, 1 to 256.
+    - `mesh_aware` cuts each region outside its mesh hull before packing. It
+      defaults to on whenever the atlas has usable mesh data, so a `.skel`
+      next to the atlas changes the default output.
+  - `split_composite`.
+
+  `atlas.build(packer="polygons", packer_options=PackerOptions(padding=4))`
 - With `split_composite=True`, a `replace_composite` image is cut back into one
   piece per region: the inverse of `extract_composite(force_resize=True)`.
-- `mesh_crop=True` on the extract methods and `mesh_aware=True` on
-  `build()` / `save()` use the meshes from the `.skel` file; without usable
-  mesh data they raise `SkeletonUnavailable`.
+- `mesh_crop=True` on the extract methods and `packer="polygons"` or
+  `PackerOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
+  the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
 - Multi-page atlases can be edited. Only the pages that own an edited
   region are repacked; the others are kept as they are. `add_region(page=...)`
   picks the page, otherwise the page whose regions cover the least area is
