@@ -79,7 +79,7 @@ def _aspect(w: int, h: int) -> float:
     return max(w, h) / smaller
 
 
-def _pack_with_width(items: list[dict], strip_w: int, allow_rotate: bool) -> tuple[int, int, list[dict]]:
+def _pack_with_width(items: list[dict], strip_w: int, allow_rotate: bool, padding: int = 0) -> tuple[int, int, list[dict]]:
     """One shelf-packing attempt at a fixed strip width. Port of
     _shelfPack's inner packWithWidth."""
     ordered = sorted(items, key=lambda item: -max(item["w"], item["h"]))
@@ -101,14 +101,15 @@ def _pack_with_width(items: list[dict], strip_w: int, allow_rotate: bool) -> tup
             elif h > w:
                 pw, ph, rotated = h, w, True
         if cursor_x + pw > strip_w and cursor_x > 0:
-            shelf_y += shelf_h
+            shelf_y += shelf_h + padding
             cursor_x = 0
             shelf_h = 0
         placements.append(
             {"name": item["name"], "x": cursor_x, "y": shelf_y, "pw": pw, "ph": ph, "rotated": rotated}
         )
-        cursor_x += pw
-        used_w = max(used_w, cursor_x)
+        # Measured before the padding is added: no trailing padding.
+        used_w = max(used_w, cursor_x + pw)
+        cursor_x += pw + padding
         shelf_h = max(shelf_h, ph)
 
     return used_w, shelf_y + shelf_h, placements
@@ -128,7 +129,7 @@ def _squarest_within_budget(candidates: list[dict]) -> dict:
     return within_budget[0]
 
 
-def shelf_pack(items: list[dict]) -> dict:
+def shelf_pack(items: list[dict], padding: int = 0) -> dict:
     """Shelf bin-packer: try a fixed set of candidate strip widths with and
     without rotation, then pick the squarest layout whose area is within
     15% of the best area found, tie-broken by smaller area then smaller
@@ -136,7 +137,11 @@ def shelf_pack(items: list[dict]) -> dict:
 
     All scoring uses RAW (pre-rounding) dimensions -- round_up_to_multiple
     is applied once, to the winner only, so a small-canvas rounding delta
-    can never flip which candidate looks squarest."""
+    can never flip which candidate looks squarest.
+
+    `padding` (Python-only, default 0 = the app's
+    layout) is the number of pixels left between items, on both axes, never at
+    the edges."""
     if not items:
         return {"canvas_w": 0, "canvas_h": 0, "placements": []}
 
@@ -157,7 +162,7 @@ def shelf_pack(items: list[dict]) -> dict:
     candidate_widths.update(max_single * (i + 1) for i in range(5))
 
     def attempt(strip_w: int, allow_rotate: bool) -> dict:
-        used_w, canvas_h, placements = _pack_with_width(items, strip_w, allow_rotate)
+        used_w, canvas_h, placements = _pack_with_width(items, strip_w, allow_rotate, padding)
         return {
             "canvas_w": used_w,
             "canvas_h": canvas_h,
