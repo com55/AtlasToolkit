@@ -62,14 +62,36 @@ def test_shelf_padding_reaches_the_shelf_packer(split):
 @pytest.mark.parametrize("split", [False, True])
 def test_mesh_footprint_off_gives_solid_footprints_but_keeps_masking(monkeypatch, split):
     seen = record_nest_items(monkeypatch)
-    text, pages = golden.session_pack(golden.edited_atlas("single"), True, 4, True, split, mesh_footprint=False)
+    atlas = golden.edited_atlas("single")
+    atlas.replace({"T2": golden.pattern(40, 40, 7)})  # a modded region with mesh (lower-right triangle)
+    text, pages = golden.session_pack(atlas, True, 4, True, split, mesh_footprint=False)
     assert seen and all(is_solid(item) for item in seen)
-    t1 = SpineAtlas.load(text, pages).extract("T1")  # upper-left triangle mesh
+    built = SpineAtlas.load(text, pages)
+    t1 = built.extract("T1")  # pristine, upper-left triangle mesh
     assert t1.getpixel((1, 1))[3] == 255
     assert t1.getpixel((39, 39))[3] == 0  # outside the hull: definitely removed
+    t2 = built.extract("T2")  # modded, lower-right triangle mesh
+    assert t2.getpixel((38, 38))[3] == 255
+    assert t2.getpixel((1, 1))[3] == 0
+    if split:
+        ca = built.extract("CA")  # composite piece, upper-left triangle mesh
+        assert ca.getpixel((1, 1))[3] > 0
+        assert ca.getpixel((38, 28))[3] == 0
 
 
 def test_default_mesh_footprint_is_still_the_mesh(monkeypatch):
     seen = record_nest_items(monkeypatch)
     golden.session_pack(golden.edited_atlas("single"), True, 4, True, False)
     assert seen and not all(is_solid(item) for item in seen)
+
+
+def test_shelf_padding_is_exact_between_shelf_neighbours():
+    text, pages = golden.session_pack(golden.edited_atlas("single"), False, None, False, False, shelf_padding=3)
+    rects = sorted({footprints(r) for r in SpineAtlas.load(text, pages).regions if r.page == "page.png"})
+    gaps = {
+        bx - (ax + aw)
+        for (ax, ay, aw, ah) in rects
+        for (bx, by, bw, bh) in rects
+        if ay == by and bx > ax
+    }
+    assert 3 in gaps
