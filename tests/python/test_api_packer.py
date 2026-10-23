@@ -64,6 +64,9 @@ def test_shelf_padding_through_build(padding, split):
         packer="shelf", packer_options=PackerOptions(padding=padding), split_composite=split,
     )
     assert_spaced(built, "page.png", padding)
+    rects = sorted({footprint(r) for r in built.regions if r.page == "page.png"})
+    gaps = {bx - (ax + aw) for (ax, ay, aw, ah) in rects for (bx, by, bw, bh) in rects if ay == by and bx > ax}
+    assert min(gaps) == padding, gaps
 
 
 # --- test 4: rectangles + mesh_aware ------------------------------------------

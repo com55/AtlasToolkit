@@ -18,9 +18,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   `PackerOptions` padding and mesh-aware).
 - `build(split_composite=True)`: a `replace_composite` image is cut back into
   one piece per region, the inverse of `extract_composite(force_resize=True)`.
-  With Mesh-Aware each region keeps its mesh hull; a semi-transparent pixel
-  shared by several regions has its alpha split between them, so drawing them
-  all gives the image back.
+  When the build is mesh-aware (the default with mesh data) each meshed region
+  keeps its mesh hull; a semi-transparent pixel shared by several regions has
+  its alpha split between them, so drawing them all gives the image back.
 - Multi-page atlases can be edited, including Add, Rename and Remove. Only
   pages that own an edited region are repacked. `add_region(page=...)` picks
   the page; without it the page whose regions cover the least area is used.
@@ -40,9 +40,10 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - `mesh_aware` defaults to on when the atlas has usable mesh data, and
   `SpineAtlas.open()` reads a `.skel` next to the atlas. So a default
   `build()` masks repacked pages to the mesh hulls, and
-  `build(split_composite=True)` gives each meshed region its hull. Pass
-  `PackerOptions(mesh_aware=False)` for the old default. Untouched and
-  rename-only pages keep their pixels.
+  `build(split_composite=True)` gives each meshed region its hull.
+  `PackerOptions(mesh_aware=False)` turns the masking off (the shelf layout
+  still has at least 1 px padding; the old edge-to-edge layout is gone).
+  Untouched and rename-only pages keep their pixels.
 - `packer="rectangles"` can be combined with `mesh_aware`: pixels are cut to
   the hull, but the packing uses each region's whole rect.
 
@@ -60,8 +61,10 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - Repack deduplication also compares sprite sizes.
 - Forced Resizing with Mesh Cropping resizes a region before masking it, so a
   scaled composite round-trips exactly.
-- The shelf packer can leave padding between sprites (the app's packs them
-  edge to edge).
+- The shelf packer leaves padding between sprites (the app packs them edge to
+  edge), and nest packing defaults to 2 px padding (the app's gap is 4).
+  `"rectangles"` can be combined with mesh_aware (the app always nests
+  mesh-aware regions on their mesh).
 
 ## [0.4.1] - 2026-10-12
 

@@ -51,11 +51,16 @@ class ResolvedPack:
     mesh_footprint: bool
 
 
+def _type_name(value: object) -> str:
+    kind = type(value)
+    return kind.__qualname__ if kind.__module__ == "builtins" else f"{kind.__module__}.{kind.__qualname__}"
+
+
 def _mode(value: object) -> Packer:
     if isinstance(value, Packer):
         return value
     if not isinstance(value, str):
-        raise TypeError(f"packer must be a Packer or str, not {type(value).__name__}")
+        raise TypeError(f"packer must be a Packer or str, not {_type_name(value)}")
     try:
         return Packer(value)
     except ValueError:
@@ -71,7 +76,7 @@ def _padding(value: object) -> int:
     try:
         number = int(operator.index(value))
     except TypeError:
-        raise TypeError(f"padding must be an integer, not {type(value).__name__}") from None
+        raise TypeError(f"padding must be an integer, not {_type_name(value)}") from None
     if not 1 <= number <= MAX_PADDING:
         raise ValueError(f"padding must be between 1 and {MAX_PADDING}, got {number}")
     return number
@@ -87,11 +92,11 @@ def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tupl
     if options is None:
         options = PackerOptions()
     elif not isinstance(options, PackerOptions):
-        raise TypeError(f"packer_options must be a PackerOptions, not {type(options).__name__}")
+        raise TypeError(f"packer_options must be a PackerOptions, not {_type_name(options)}")
     padding = _padding(options.padding)
     mesh_aware = options.mesh_aware
     if mesh_aware is not None and not isinstance(mesh_aware, bool):
-        raise TypeError(f"mesh_aware must be True, False or None, not {type(mesh_aware).__name__}")
+        raise TypeError(f"mesh_aware must be True, False or None, not {_type_name(mesh_aware)}")
     if mode is Packer.POLYGONS:
         if mesh_aware is False:
             raise ValueError("packer 'polygons' always uses the mesh; mesh_aware cannot be False")

@@ -514,8 +514,9 @@ class SpineAtlas:
         (default auto: on when the atlas has usable mesh data, which
         SpineAtlas.open picks up from a sibling .skel file). Mesh-aware cuts
         each region's pixels outside its mesh hull, on repacked pages only;
-        untouched and rename-only pages keep their pixels. Settings are
-        checked even when nothing was edited."""
+        untouched and rename-only pages keep their pixels. An unedited atlas
+        is returned as is, never repacked or masked, but its settings are
+        still checked."""
         resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
         if needs_mesh:
             self._require_mesh()
@@ -532,6 +533,9 @@ class SpineAtlas:
         self, atlas_path: str | os.PathLike, *, packer: Packer | str = Packer.SHELF,
         packer_options: PackerOptions | None = None, split_composite: bool = False,
     ) -> None:
+        """build() with the same arguments, then write the .atlas text and its
+        page PNGs next to it. The pack settings (and the auto mesh_aware
+        default) are build()'s."""
         target = self.build(packer=packer, packer_options=packer_options, split_composite=split_composite)
         text, pngs = target._session.save()
         path = Path(atlas_path)
