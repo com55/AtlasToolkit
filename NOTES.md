@@ -284,6 +284,14 @@ accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
 - The deliberate differences from the JS engine are listed in `CHANGELOG.md`
   under "Differences from the app's engine". Keep new ones out of parity
   cases and pin them with their own tests.
+- **Pack modes:** `atlas_toolkit/packer.py`'s `resolve_packer` turns
+  `packer` / `PackerOptions` into the session's existing switches, plus two
+  Python-only `pack_pending` keywords (`shelf_padding`, `mesh_footprint`) that
+  `_pack_page` adds to a copy of `get_nest_options()`. That dict itself stays
+  the JS port. Modes that cannot be expressed this way (`grid`, `*_in_place`)
+  need the modifier to dispatch on the mode itself; see the spec's "Notes for
+  future modes". `tests/python/gen_packer_refactor_golden.py` pins the
+  pre-refactor layouts at the session layer.
 
 ### Python tests
 

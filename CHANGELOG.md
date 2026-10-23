@@ -14,7 +14,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   regions, extract single, all or composite sprites (with Forced Resizing and
   Mesh Cropping), record edits (`replace`, `replace_composite`, `add_region`,
   `rename_region`, `remove_region`) and pack them once with `build()` /
-  `save()` (shelf or Smart Packing, Mesh-Aware).
+  `save()` (packer `"shelf"`, `"rectangles"` or `"polygons"`, with
+  `PackerOptions` padding and mesh-aware).
 - `build(split_composite=True)`: a `replace_composite` image is cut back into
   one piece per region, the inverse of `extract_composite(force_resize=True)`.
   With Mesh-Aware each region keeps its mesh hull; a semi-transparent pixel
@@ -28,6 +29,22 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   atlas.
 - The core package needs only Pillow, numpy and the `.skel` parser; the
   desktop shell's dependencies moved to the `app` extra.
+
+### Changed
+- `build()` / `save()` take `packer=` and `packer_options=PackerOptions(...)`
+  instead of `nest`, `gap` and `mesh_aware`, which are removed.
+- `padding` (formerly the Smart Packing gap) follows the Spine Texture Packer:
+  pixels between images, default 2 for every packer (the Smart Packing gap
+  was 4). The shelf packer now leaves this padding too; before, it packed
+  sprites edge to edge.
+- `mesh_aware` defaults to on when the atlas has usable mesh data, and
+  `SpineAtlas.open()` reads a `.skel` next to the atlas. So a default
+  `build()` masks repacked pages to the mesh hulls, and
+  `build(split_composite=True)` gives each meshed region its hull. Pass
+  `PackerOptions(mesh_aware=False)` for the old default. Untouched and
+  rename-only pages keep their pixels.
+- `packer="rectangles"` can be combined with `mesh_aware`: pixels are cut to
+  the hull, but the packing uses each region's whole rect.
 
 ### Fixed
 - `pma: true` pages: split pieces keep RGB scaled by their alpha share, and
@@ -43,6 +60,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - Repack deduplication also compares sprite sizes.
 - Forced Resizing with Mesh Cropping resizes a region before masking it, so a
   scaled composite round-trips exactly.
+- The shelf packer can leave padding between sprites (the app's packs them
+  edge to edge).
 
 ## [0.4.1] - 2026-10-12
 
