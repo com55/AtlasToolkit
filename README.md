@@ -78,7 +78,7 @@ atlas.rename_region("arm", "left_arm")
 atlas.remove_region("tail")
 
 try:
-    atlas.save("out/hero.atlas", packer="rectangles")    # writes out/hero.atlas + its page PNGs
+    atlas.save("out/hero.atlas", packer=Packer.RECTANGLES, packer_options=PackerOptions(padding=4))  # + page PNGs
 except CanvasTooLarge as error:
     print("too big:", error.page, error)
 ```
@@ -98,8 +98,12 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
   `SpineAtlas`; `save()` builds and writes. Both take:
   - `packer`: `"shelf"` (default), `"rectangles"` (Smart Packing on solid
     rects) or `"polygons"` (Smart Packing on mesh silhouettes, needs mesh
-    data). `"grid"`, `"rectangles_in_place"` and `"polygons_in_place"` are
-    reserved and raise `NotImplementedError`.
+    data; `PackerOptions(mesh_aware=False)` with it raises `ValueError`). A
+    string or a `Packer` member. `"grid"`, `"rectangles_in_place"` and
+    `"polygons_in_place"` are reserved and raise `NotImplementedError`. With
+    `"polygons"`, a region's rect can contain pixels of neighbours nested
+    into its empty corners; extract with `mesh_crop=True` to see only the
+    region.
   - `packer_options`: a `PackerOptions`:
     - `padding` is the pixels between images, default 2, 1 to 256.
     - `mesh_aware` cuts each region outside its mesh hull before packing. It

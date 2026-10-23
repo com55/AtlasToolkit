@@ -289,8 +289,11 @@ accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
   Python-only `pack_pending` keywords (`shelf_padding`, `mesh_footprint`) that
   `_pack_page` adds to a copy of `get_nest_options()`. That dict itself stays
   the JS port. Modes that cannot be expressed this way (`grid`, `*_in_place`)
-  need the modifier to dispatch on the mode itself; see the spec's "Notes for
-  future modes". `tests/python/gen_packer_refactor_golden.py` pins the
+  need the modifier to dispatch on the mode itself: `grid` needs a new packer
+  function, and `*_in_place` needs the original placements plus a per-region
+  fit check with a fallback, so the session would hold one pack config and
+  `_pack_and_emit` would dispatch on `Packer`.
+  `tests/python/gen_packer_refactor_golden.py` pins the
   pre-refactor layouts at the session layer.
 
 ### Python tests

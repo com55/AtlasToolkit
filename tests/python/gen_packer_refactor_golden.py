@@ -186,7 +186,7 @@ def main(argv: list[str]) -> int:
     self_check(cases)
     if "--check" in argv:
         expected = json.loads(FIXTURE.read_text())
-        bad = [key for key in expected if cases.get(key) != expected[key]]
+        bad = sorted(set(cases) ^ set(expected)) + [key for key in expected if cases.get(key) != expected[key]]
         print("mismatch:", bad) if bad else print(f"ok: {len(expected)} cases")
         return 1 if bad else 0
     FIXTURE.write_text(json.dumps(cases, indent=1, sort_keys=True) + "\n")
