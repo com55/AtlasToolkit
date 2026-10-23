@@ -81,9 +81,22 @@ def test_bad_padding(padding, error):
             resolve(packer, padding=padding)
 
 
+@pytest.mark.parametrize("packer", ["shelf", "rectangles", "polygons"])
 @pytest.mark.parametrize("padding", [1, 2, 256])
-def test_padding_range_ends(padding):
-    assert resolve("rectangles", padding=padding)[0].padding == padding
+def test_padding_range_ends(packer, padding):
+    assert resolve(packer, padding=padding)[0].padding == padding
+
+
+def test_validation_order():
+    with pytest.raises(NotImplementedError):
+        resolve_packer("grid", {"padding": 2}, mesh_ready=True)
+    with pytest.raises(ValueError, match="padding"):
+        resolve("polygons", padding=0, mesh_aware=False)
+
+
+def test_packer_names_are_case_sensitive():
+    with pytest.raises(ValueError):
+        resolve("SHELF")
 
 
 def test_numpy_integer_padding_resolves_to_plain_int():
