@@ -694,7 +694,11 @@ class AtlasModifier:
                         "modded_sprites": modded_sprites,
                         "added_sprites": added_sprites,
                         "regions": regions,
-                        "mesh_lookup_fn": mesh_lookup_fn,
+                        # Python-only (spec 2026-10-22 §4.1): "rectangles" keeps
+                        # masking but packs solid rects.
+                        "mesh_lookup_fn": (
+                            mesh_lookup_fn if (nest_options or {}).get("mesh_footprint", True) else None
+                        ),
                         "combine_mesh_geometry": combine_mesh_geometry,
                         "group_names_by_sprite_identity": group_names_by_sprite_identity,
                         "mask_crop_rect_for_offsets": mask_crop_rect_for_offsets,
@@ -706,7 +710,7 @@ class AtlasModifier:
             for name in unique_names:
                 width, height = self.raster.size(sprites[name])
                 items.append({"name": name, "w": width, "h": height})
-            packed = shelf_pack(items)
+            packed = shelf_pack(items, padding=(nest_options or {}).get("shelf_padding", 0))
 
         canvas_w, canvas_h = packed["canvas_w"], packed["canvas_h"]
         placement_map = {p["name"]: p for p in packed["placements"]}
