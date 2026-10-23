@@ -25,3 +25,24 @@ def test_session_level_generator_reproduces_the_fixture():
 
 def test_fixture_axes_are_live():
     golden.self_check(EXPECTED)
+
+
+import pytest
+
+from atlas_toolkit.packer import PackerOptions
+
+NEW_API = {
+    "nest4": ("rectangles", PackerOptions(padding=4, mesh_aware=False)),
+    "nest4-mesh": ("polygons", PackerOptions(padding=4)),
+    "nest7": ("rectangles", PackerOptions(padding=7, mesh_aware=False)),
+    "nest7-mesh": ("polygons", PackerOptions(padding=7)),
+}
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("flag", sorted(NEW_API))
+@pytest.mark.parametrize("layout", ["single", "multi"])
+def test_new_api_reproduces_the_old_nest_goldens(layout, flag, split):
+    packer, options = NEW_API[flag]
+    built = golden.edited_atlas(layout).build(packer=packer, packer_options=options, split_composite=split)
+    assert golden.summarize(built.atlas_text, built.pages) == EXPECTED[golden.case_id(layout, flag, split)]

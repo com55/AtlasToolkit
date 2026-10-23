@@ -6,6 +6,7 @@ from PIL import Image
 import atlas_toolkit
 from atlas_toolkit.api import AtlasError, CanvasTooLarge, SpineAtlas
 from atlas_toolkit.domain import packing
+from atlas_toolkit.packer import PackerOptions
 
 ATLAS = (
     "page.png\nsize: 16,8\n"
@@ -21,11 +22,11 @@ def page():
     )
 
 
-@pytest.mark.parametrize("options", [{}, {"nest": True, "gap": 3}])
+@pytest.mark.parametrize("options", [{}, {"packer": "rectangles", "packer_options": PackerOptions(padding=3)}])
 def test_too_large_is_a_public_error_and_changes_nothing(monkeypatch, options):
     atlas = SpineAtlas.load(ATLAS, page())
     atlas.replace({"Head": Image.new("RGBA", (6, 5), (9, 8, 7, 255))})
-    good = atlas.build(nest=True)
+    good = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     cache = atlas._build_cache
     names = [r.name for r in atlas.regions]
     monkeypatch.setattr(packing, "MAX_CANVAS", 8)  # 93 px² of sprites cannot fit in 8x8
@@ -40,7 +41,7 @@ def test_too_large_is_a_public_error_and_changes_nothing(monkeypatch, options):
     assert (snap.nest_regions_enabled, snap.nest_gap_distance, snap.mesh_aware_repack_enabled) == (False, 4, False)
     monkeypatch.setattr(packing, "MAX_CANVAS", 10000)
     assert atlas.build(**options).atlas_text
-    assert atlas.build(nest=True).atlas_text == good.atlas_text
+    assert atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4)).atlas_text == good.atlas_text
 
 
 def test_save_raises_before_writing(tmp_path, monkeypatch):

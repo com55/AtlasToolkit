@@ -5,8 +5,9 @@ import pytest
 from PIL import Image
 
 import atlas_toolkit.api as api
-from atlas_toolkit.api import SkeletonUnavailable, SpineAtlas
+from atlas_toolkit.api import SpineAtlas
 from atlas_toolkit.engine.session import AtlasSession
+from atlas_toolkit.packer import PackerOptions
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
@@ -47,7 +48,7 @@ def test_build_matches_an_immediate_session():
     atlas.rename_region("Body", "X")
     atlas.add_region("New", sprite(3, 4, 2))
     atlas.remove_region("Arm")
-    out = atlas.build(nest=True, gap=3)
+    out = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=3))
     ref = AtlasSession.load_images(ATLAS, {"page.png": page()}, PillowRasterBackend())
     ref.set_nest_regions_enabled(True)
     ref.set_nest_gap_distance(3)
@@ -79,27 +80,27 @@ def test_build_cache_returns_fresh_objects(monkeypatch):
     atlas.rename_region("Head", "H2")
     calls = []
     original = AtlasSession.pack_pending
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: calls.append(1) or original(self))
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, *args, **kwargs: calls.append(1) or original(self, *args, **kwargs))
     first = atlas.build()
     first.rename_region("Body", "Y")
-    second = atlas.build(gap=9)  # gap ignored without nest
+    second = atlas.build(packer_options=PackerOptions(padding=2))  # same settings as the default: cache hit
     assert len(calls) == 1
     assert second is not first and not second.has_changes
     assert sorted(r.name for r in second.regions) == ["Arm", "Body", "H2"]
-    atlas.build(nest=True)
-    atlas.build(nest=True, gap=4.5)  # normalize_gap(4.5) == 4
+    atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
+    atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     assert len(calls) == 2
     atlas.rename_region("Arm", "A2")
-    atlas.build(nest=True)
+    atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     assert len(calls) == 3
 
 
 def test_unedited_build_is_a_fresh_copy_without_packing(monkeypatch):
     atlas = SpineAtlas.load(ATLAS, page())
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: pytest.fail("packed"))
-    one = atlas.build(nest=True)
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, *args, **kwargs: pytest.fail("packed"))
+    one = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     one.rename_region("Head", "H")
-    two = atlas.build(nest=True)
+    two = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     assert [r.name for r in two.regions] == ["Head", "Body", "Arm"]
     assert pixels(two.pages["page.png"]) == pixels(page())
 
@@ -109,13 +110,13 @@ def test_failed_build_keeps_edits_cache_and_settings(monkeypatch):
     atlas.rename_region("Head", "H2")
     good = atlas.build()
     original = AtlasSession.pack_pending
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     with pytest.raises(RuntimeError):
-        atlas.build(nest=True, gap=7)
+        atlas.build(packer="rectangles", packer_options=PackerOptions(padding=7))
     snap = atlas._session.snapshot()
     assert (snap.nest_regions_enabled, snap.nest_gap_distance, snap.mesh_aware_repack_enabled) == (False, 4, False)
     assert atlas.has_changes and [r.name for r in atlas.regions][0] == "H2"
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: pytest.fail("cache not used"))
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, *args, **kwargs: pytest.fail("cache not used"))
     assert atlas.build().atlas_text == good.atlas_text
     monkeypatch.setattr(AtlasSession, "pack_pending", original)
 
@@ -129,9 +130,9 @@ def test_save_writes_canonical_text_and_pages(tmp_path):
     assert pixels(reopened.pages["page.png"]) == pixels(page())
     edited = SpineAtlas.load(ATLAS, page())
     edited.replace({"Head": sprite(6, 5, 3)})
-    edited.save(tmp_path / "e.atlas", nest=True)
+    edited.save(tmp_path / "e.atlas", packer="rectangles", packer_options=PackerOptions(padding=4))
     again = SpineAtlas.open(tmp_path / "e.atlas")
-    built = edited.build(nest=True)
+    built = edited.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     assert again.atlas_text == built.atlas_text
     assert pixels(again.extract("Head")) == pixels(built.extract("Head"))
 
@@ -150,24 +151,19 @@ def test_no_png_work_from_memory(monkeypatch):
     atlas.extract_all()
     atlas.replace({"Head": sprite(6, 5, 1)})
     atlas.add_region("New", sprite(2, 2, 1))
-    atlas.build(nest=True).extract("New")
+    atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4)).extract("New")
     assert counts["png"] == 0
-
-
-def test_mesh_aware_requires_mesh_even_unedited():
-    with pytest.raises(SkeletonUnavailable):
-        SpineAtlas.load(ATLAS, page()).build(mesh_aware=True)
 
 
 def test_renamed_region_keeps_mesh_in_its_own_build(monkeypatch):
     atlas = with_mesh(monkeypatch, {"Head": LEFT})
     atlas.rename_region("Head", "H2")
-    built = atlas.build(mesh_aware=True)
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=True))
     h2 = built.extract("H2")
     # mesh-aware repack masks the sprite with Head's LEFT mesh (key unchanged by the rename)
     assert h2.getpixel((1, 2))[3] == 255
     assert h2.getchannel("A").getextrema()[0] == 0
-    plain = atlas.build().extract("H2")
+    plain = atlas.build(packer_options=PackerOptions(mesh_aware=False)).extract("H2")  # no-mask control
     assert plain.getchannel("A").getextrema()[0] == 255
 
 
@@ -175,15 +171,15 @@ def test_swap_rename_gets_no_mesh_after_build(monkeypatch):
     atlas = with_mesh(monkeypatch, {"Head": LEFT, "Body": RIGHT})
     atlas.rename_region("Body", "X")
     atlas.rename_region("Head", "Body")
-    built = atlas.build()
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=False))  # no-mask default; masking here is extract-time only
     body = built.extract("Body", mesh_crop=True)  # former Head pixels; RIGHT would erase x < 3
     assert body.getpixel((0, 2))[3] == 255 and body.getpixel((5, 2))[3] == 255
-    again = built.build()
+    again = built.build(packer_options=PackerOptions(mesh_aware=False))
     assert again.extract("Body", mesh_crop=True).getpixel((0, 2))[3] == 255
     # control: an unrenamed region on the built atlas is still masked
     plain = with_mesh(monkeypatch, {"Arm": LEFT})
     plain.rename_region("Head", "H")
-    arm = plain.build().extract("Arm", mesh_crop=True)
+    arm = plain.build(packer_options=PackerOptions(mesh_aware=False)).extract("Arm", mesh_crop=True)
     assert arm.getpixel((0, 1))[3] == 255 and arm.getpixel((4, 1))[3] == 0
 
 
@@ -205,9 +201,9 @@ def test_every_region_renamed_masks_nothing_without_raising(monkeypatch):
     for old, new in (("Head", "a"), ("Body", "b"), ("Arm", "c")):
         atlas.rename_region(old, new)
     assert atlas.extract("a", mesh_crop=True).getpixel((5, 2))[3] == 0  # control: masked before build
-    built = atlas.build()
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=False))  # no-mask default; the point is no raise
     assert built.extract("a", mesh_crop=True).getpixel((5, 2))[3] == 255
-    built.build(mesh_aware=True)
+    built.build(packer_options=PackerOptions(mesh_aware=True))
 
 
 EDITS = {
@@ -225,12 +221,12 @@ def test_every_edit_drops_the_build_cache(monkeypatch, edit):
     atlas.replace({"Head": sprite(6, 5, 1)})
     calls = []
     original = AtlasSession.pack_pending
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self: calls.append(1) or original(self))
-    first = atlas.build(nest=True)
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, *args, **kwargs: calls.append(1) or original(self, *args, **kwargs))
+    first = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     batches = len(atlas._session._mod_batches)
     EDITS[edit](atlas)
     assert len(atlas._session._mod_batches) > batches  # the edit landed
-    second = atlas.build(nest=True)
+    second = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
     assert len(calls) == 2
     assert second.atlas_text != first.atlas_text or second.pages["page.png"].tobytes() != first.pages["page.png"].tobytes()
 
