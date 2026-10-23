@@ -31,6 +31,10 @@ def test_pack_with_width_spaces_items_and_adds_no_trailing_padding(seed, padding
             assert separated(a, b, padding), (a, b)
     assert used_w == max(p["x"] + p["pw"] for p in placements)
     assert height == max(p["y"] + p["ph"] for p in placements)
+    assert min(p["x"] for p in placements) == 0 and min(p["y"] for p in placements) == 0
+    assert all(p["x"] + p["pw"] <= 90 for p in placements if p["x"] > 0)
+    for y in {p["y"] for p in placements}:
+        assert any(p["x"] == 0 for p in placements if p["y"] == y)
 
 
 @pytest.mark.parametrize("padding", [1, 2, 5])
@@ -43,5 +47,6 @@ def test_shelf_pack_spaces_items(padding):
                 assert separated(a, b, padding), (a, b)
         raw_w = max(p["x"] + p["pw"] for p in placements)
         raw_h = max(p["y"] + p["ph"] for p in placements)
+        assert min(p["x"] for p in placements) == 0 and min(p["y"] for p in placements) == 0
         assert raw_w <= packed["canvas_w"] < raw_w + 4
         assert raw_h <= packed["canvas_h"] < raw_h + 4
