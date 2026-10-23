@@ -7,7 +7,7 @@ from PIL import Image
 import atlas_toolkit.api as api
 from atlas_toolkit.api import SpineAtlas
 from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import Packer, PackerOptions
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
@@ -88,7 +88,7 @@ def test_build_cache_returns_fresh_objects(monkeypatch):
     assert second is not first and not second.has_changes
     assert sorted(r.name for r in second.regions) == ["Arm", "Body", "H2"]
     atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
-    atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
+    atlas.build(packer=Packer.RECTANGLES, packer_options=PackerOptions(padding=4, mesh_aware=False))  # another spelling, same settings: cache hit
     assert len(calls) == 2
     atlas.rename_region("Arm", "A2")
     atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
@@ -189,7 +189,7 @@ def test_rename_back_keeps_mesh_and_added_lookalike_does_not(monkeypatch):
     atlas.rename_region("H2", "Head")
     atlas.rename_region("Arm", "A2")
     atlas.add_region("Arm", sprite(4, 4, 9))
-    built = atlas.build()
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=False))  # no-mask control: the check is the built atlas's mesh lookup, not repack masking
     head = built.extract("Head", mesh_crop=True)
     assert head.getpixel((1, 2))[3] == 255 and head.getpixel((5, 2))[3] == 0
     added = built.extract("Arm", mesh_crop=True)
@@ -273,7 +273,7 @@ def test_added_region_named_like_a_skeleton_mesh_gets_no_mesh(monkeypatch):
     # key equals its name, and only the pristine check keeps the mesh away.
     atlas = with_mesh(monkeypatch, {"New": LEFT, "Arm": LEFT})
     atlas.add_region("New", sprite(4, 4, 9))
-    built = atlas.build()
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=False))  # no-mask control: the check is the built atlas's mesh lookup, not repack masking
     assert built.extract("New", mesh_crop=True).getpixel((3, 1))[3] == 255
     arm = built.extract("Arm", mesh_crop=True)
     assert arm.getpixel((0, 1))[3] == 255 and arm.getpixel((4, 1))[3] == 0

@@ -95,13 +95,17 @@ def test_fixture_hulls_are_whole_pixels(monkeypatch):
         assert np.array_equal(alpha, union(32, 16, [hull])), name
 
 
-@pytest.mark.parametrize("packer", ["shelf", "polygons"])
-def test_same_canvas_round_trip(monkeypatch, packer):
+@pytest.mark.parametrize("packer, options", [
+    ("shelf", PackerOptions(mesh_aware=True)),
+    ("polygons", PackerOptions(padding=4)),
+])
+def test_same_canvas_round_trip(monkeypatch, packer, options):
     atlas = load(monkeypatch, SAME, SAME_MESH)
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    # padding=4: the old nest default gap, which the round trip depends on.
-    built = atlas.build(packer=packer, packer_options=PackerOptions(padding=4, mesh_aware=True), split_composite=True)
+    # polygons padding=4 is the old nest gap; at <=2 polygons nests a neighbour inside
+    # a rect and the rect-only composite below picks up its pixels.
+    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
     inside = union(32, 16, SAME_HULLS)
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True, mesh_crop=True), want, inside)
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
@@ -146,8 +150,11 @@ def test_later_replace_on_one_member(monkeypatch):
     assert a[0, 0].tolist() == [9, 9, 9, 255]
 
 
-@pytest.mark.parametrize("packer", ["shelf", "polygons"])
-def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, packer):
+@pytest.mark.parametrize("packer, options", [
+    ("shelf", PackerOptions(mesh_aware=True)),
+    ("polygons", PackerOptions(padding=4)),
+])
+def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, packer, options):
     # In game the mesh maps the whole canvas around the packed rect via the
     # offsets, so an empty piece must keep its full rect: a shrunk rect would
     # leave C's hull sampling whatever sprite nest packed next to it.
@@ -155,8 +162,8 @@ def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, packer):
     want = pattern(32, 16)
     want[6:16, 4:12, 3] = 0                                   # C's whole hull is transparent
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    # padding=4: the old nest default gap, which the layout assertions depend on.
-    built = atlas.build(packer=packer, packer_options=PackerOptions(padding=4, mesh_aware=True), split_composite=True)
+    # polygons padding=4: the old nest default gap.
+    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
     assert built.region("C").bounds[2:] == (12, 10)
     assert built.region("C").offsets == (2, 0, 32, 16)
     # C's hull lies inside its rect, so every texel it samples is in its bounds.
@@ -201,13 +208,13 @@ def test_member_removed_or_renamed(monkeypatch):
 SAME_RECTS = [(0, 0, 16, 10), (8, 4, 32, 16), (2, 6, 14, 16)]
 
 
-@pytest.mark.parametrize("packer", ["shelf", "rectangles"])
-def test_split_without_mesh_cuts_rects(packer):
+@pytest.mark.parametrize("packer, options", [("shelf", None), ("rectangles", PackerOptions(padding=4))])
+def test_split_without_mesh_cuts_rects(packer, options):
     atlas = SpineAtlas.load(SAME, page())
     assert atlas.build(split_composite=True).atlas_text == atlas.atlas_text   # unedited: no error
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer=packer, split_composite=True)
+    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, union(32, 16, SAME_RECTS))
     assert built.region("A").offsets == (0, 6, 32, 16)
     assert built.region("B").offsets == (8, 0, 32, 16)
