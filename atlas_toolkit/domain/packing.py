@@ -52,6 +52,10 @@ class CanvasTooLargeError(ValueError):
         self.height = height
         self.limit = limit
 
+    def __reduce__(self):
+        # args holds only the message; rebuild from the fields (state keeps a tagged `page`).
+        return type(self), (self.width, self.height, self.limit), self.__dict__
+
 
 def _js_or_chain_cmp(a: dict, b: dict, keys: tuple[str, ...]) -> int:
     """Port of JS's `(a.k1 - b.k1) || (a.k2 - b.k2) || ...` comparator
