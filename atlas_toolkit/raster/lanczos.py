@@ -78,6 +78,9 @@ def lanczos_resize_rgba(src: np.ndarray, dst_w: int, dst_h: int) -> np.ndarray:
     src_h, src_w = src.shape[:2]
     if src_w == dst_w and src_h == dst_h:
         return src.copy()
+    if src_w == 0 or src_h == 0:
+        # Nothing to sample (a zero-size region): the scaled frame is empty.
+        return np.zeros((dst_h, dst_w, 4), dtype=np.uint8)
     alpha = src[..., 3].astype(np.float64)
     premultiplied = np.empty(src.shape, dtype=np.float64)
     premultiplied[..., :3] = src[..., :3] * (alpha / 255)[..., None]
