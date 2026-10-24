@@ -144,3 +144,25 @@ def test_pma_scaling_follows_each_survivors_own_page():
     top, bottom = SPLIT[128]
     assert pieces["T"][1][0, 1].tolist() == [64, 32, 16, top]
     assert pieces["B"][1][0, 1].tolist() == [int(np.rint(v * bottom / 128)) for v in (64, 32, 16)] + [bottom]
+
+
+def test_pma_three_holders_scale_rgb_by_share_and_restack_within_two():
+    # Every semi alpha on a pma page, three whole-canvas holders (T on top):
+    # each piece is RGB * its share, stays valid premultiplied (RGB <= alpha),
+    # and premultiplied over (bottom first, rounded once) gives back the input.
+    names = ["T", "M", "B"]
+    metas = {n: meta(None, 4, 2) for n in names}
+    for colour in [(64, 32, 16), (128, 0, 1), (255, 255, 255), (3, 90, 128)]:
+        for alpha in range(2, 255):
+            rgb = [min(v, alpha) for v in colour]
+            arr = np.zeros((2, 4, 4), np.uint8)
+            arr[...] = (200, 100, 50, 255)
+            arr[0, 1] = (*rgb, alpha)
+            pieces = _cut(arr, names, metas, {n: None for n in names}, pma_names=set(names))
+            out = np.zeros(4)
+            for name in reversed(names):
+                px = pieces[name][1][0, 1].astype(float)
+                assert px[:3].tolist() == [np.rint(v * (px[3] / alpha)) for v in rgb]
+                assert np.all(px[:3] <= px[3])
+                out = px + out * (1 - px[3] / 255)
+            assert np.all(np.abs(np.rint(out) - [*rgb, alpha]) <= 2), (rgb, alpha)
