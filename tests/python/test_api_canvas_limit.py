@@ -77,3 +77,14 @@ def test_single_page_too_large_has_no_page(monkeypatch):
     with pytest.raises(CanvasTooLarge) as raised:
         atlas.build()
     assert raised.value.page is None
+
+
+@pytest.mark.parametrize("page_name", [None, "second.png"])
+def test_too_large_survives_pickling(page_name):
+    import pickle
+    original = CanvasTooLarge(12001, 40, 10000, page_name)
+    original.add_note("while building")
+    error = pickle.loads(pickle.dumps(original))
+    assert type(error) is CanvasTooLarge and error.__notes__ == ["while building"]
+    assert (error.width, error.height, error.limit, error.page) == (12001, 40, 10000, page_name)
+    assert str(error) == str(CanvasTooLarge(12001, 40, 10000, page_name))

@@ -86,6 +86,10 @@ class CanvasTooLarge(AtlasError, ValueError):
         self.limit = limit
         self.page = page
 
+    def __reduce__(self):
+        # args holds only the message; rebuild from the fields so pickling works.
+        return type(self), (self.width, self.height, self.limit, self.page), self.__dict__
+
 
 @dataclass(frozen=True)
 class Region:

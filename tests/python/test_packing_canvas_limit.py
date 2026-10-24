@@ -188,3 +188,14 @@ def test_nest_rejects_more_cells_than_the_limit_holds_up_front(monkeypatch, allo
         nest_pack([solid(f"s{n}", 30, 30) for n in range(3)], 4)
     assert (raised.value.width, raised.value.height) == (50, 54)
     assert allocations == []
+
+
+def test_too_large_error_survives_pickling_with_its_page():
+    """The session tags the error with the page file it was packing."""
+    import pickle
+    error = CanvasTooLargeError(12001, 40, 10000)
+    error.page = "second.png"
+    copy = pickle.loads(pickle.dumps(error))
+    assert type(copy) is CanvasTooLargeError
+    assert (copy.width, copy.height, copy.limit, copy.page) == (12001, 40, 10000, "second.png")
+    assert str(copy) == str(error)
