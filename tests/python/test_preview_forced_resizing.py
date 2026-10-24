@@ -2,6 +2,7 @@
 import io
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
@@ -122,3 +123,20 @@ def test_resized_scratch_images_are_disposed():
     assert raster.size(out) == (8, 4)
     raster.dispose(out)
     assert set(raster._images) == {page}
+
+
+@pytest.mark.parametrize("pma", [False, True])
+def test_forced_resizing_with_a_zero_size_region(pma):
+    """A 0x0 region adds nothing to a forced-resize composite (it used to
+    raise ZeroDivisionError in the Lanczos kernels)."""
+    from atlas_toolkit.api import SpineAtlas
+
+    header = "page.png\nsize: 12,6\n" + ("pma: true\n" if pma else "")
+    text = header + "Head\n bounds: 0,0,6,4\nDot\n bounds: 6,0,0,0\n"
+    page = Image.fromarray(_page_pixels(), "RGBA")
+    atlas = SpineAtlas.load(text, page)
+    forced = np.asarray(atlas.extract_composite(["Head", "Dot"], force_resize=True))
+    plain = np.asarray(atlas.extract_composite(["Head", "Dot"]))
+    assert forced.shape == (4, 6, 4)
+    assert (forced == plain).all()
+    assert (forced[..., 3] == np.asarray(atlas.extract("Head"))[..., 3]).all()
