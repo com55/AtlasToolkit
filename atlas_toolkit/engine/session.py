@@ -261,19 +261,25 @@ class AtlasSession:
     def _touched_pages(self, batches: list[dict], region_pages: dict[str, str]) -> list[str]:
         """Spec 2026-10-21 §3.2: pages that own a region a mod names, receive
         an add, or lose a region to a remove, in page order. A rename touches
-        nothing (text-only rewrite, §3.4). A one-page atlas repacks for any
-        batch, exactly as before multi-page support."""
+        nothing (text-only rewrite, §3.4). A region added and then removed
+        again nets out and touches nothing either. A one-page atlas repacks
+        for any batch, exactly as before multi-page support."""
         if len(self._document.pages) == 1:
             return [self._document.pages[0].filename] if batches else []
+        added = {batch["internal_key"] for batch in batches if batch.get("type") == "add"}
+        gone = added & {batch["target_key"] for batch in batches if batch.get("type") == "remove"}
         touched: set[str] = set()
         for batch in batches:
             batch_type = batch.get("type")
             if batch_type == "mod":
-                touched.update(region_pages[name] for name in batch["names"] if name in region_pages)
+                touched.update(
+                    region_pages[name] for name in batch["names"] if name in region_pages and name not in gone
+                )
             elif batch_type == "add":
-                touched.add(batch["page"])
+                if batch["internal_key"] not in gone:
+                    touched.add(batch["page"])
             elif batch_type == "remove":
-                if batch["target_key"] in region_pages:
+                if batch["target_key"] in region_pages and batch["target_key"] not in gone:
                     touched.add(region_pages[batch["target_key"]])
         return [name for name in dict.fromkeys(self._document.page_filenames()) if name in touched]
 
