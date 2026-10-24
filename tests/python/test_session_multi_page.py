@@ -301,3 +301,19 @@ def test_repeated_builds_never_change_the_pristine_document():
     assert session._document.serialize() == before
     assert first[0] == again[0]
     assert {k: raw(v) for k, v in first[1].items()} == {k: raw(v) for k, v in again[1].items()}
+
+
+@pytest.mark.parametrize("replace_it", [False, True])
+def test_add_then_remove_leaves_its_page_pristine(replace_it):
+    """An added region that is removed again (even after a replace) nets
+    out: its page is not repacked, only the page with a real edit is."""
+    session = load()
+    session.add_region(solid(5, 5, (7, 7, 7)), "X", page="two.png")
+    if replace_it:
+        session.apply_mod_image(solid(5, 5, (8, 8, 8)), ["X"])
+    session.remove_regions(["X"])
+    session.apply_mod_image(solid(6, 5, (1, 2, 3)), ["A"])
+    text, pages = session.pack_pending()
+    assert page_section(text, "two.png") == page_section(ATLAS, "two.png")
+    assert raw(pages["two.png"]) == raw(page(16, 8, 90))
+    assert raw(child(text, pages).extract_images(["A"])["A"]) == raw(solid(6, 5, (1, 2, 3)))
