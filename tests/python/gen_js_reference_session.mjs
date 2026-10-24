@@ -541,7 +541,8 @@ try {
     // page that owns a modified region on its own (_rebuildMultiPageRepack);
     // a composite spanning pages gets one prepared copy per page; untouched
     // pages keep their pristine canvas.
-    const multiAtlas = 'one.png\nsize: 12,4\na\n  bounds: 0,0,2,2\nb\n  bounds: 2,0,3,2\n'
+    // f is never modded: the repacked page one must carry its pristine pixels.
+    const multiAtlas = 'one.png\nsize: 12,4\na\n  bounds: 0,0,2,2\nb\n  bounds: 2,0,3,2\nf\n  bounds: 5,0,3,3\n'
       + '\ntwo.png\nsize: 8,6\nc\n  bounds: 0,0,2,3\n  offsets: 0,1,3,4\nd\n  bounds: 2,0,2,2\n'
       + '\nthree.png\nsize: 6,6\ne\n  bounds: 0,0,2,2\n';
     const multiSizes = [['one.png', 12, 4], ['two.png', 8, 6], ['three.png', 6, 6]];
