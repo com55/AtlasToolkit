@@ -5,11 +5,15 @@ cross-page split under rect ownership. Regenerate ONLY from 54b9ace.
 
     uv run python tests/python/gen_pma_straight_baseline.py          # write
     uv run python tests/python/gen_pma_straight_baseline.py --check  # compare
+
+Writing refuses to run unless atlas_toolkit/ is identical to 54b9ace, so a
+failing baseline can never be "fixed" by regenerating it from new code.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import warnings
 from contextlib import contextmanager
@@ -24,6 +28,8 @@ from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.packer import PackerOptions
 
 FIXTURE = Path(__file__).with_name("fixtures") / "pma_straight_baseline.json"
+BASELINE_COMMIT = "54b9ace"
+REPO = Path(__file__).resolve().parents[2]
 QUAD = [0, 1, 2, 0, 2, 3]
 
 
@@ -65,6 +71,10 @@ def pattern(width, height, seed, pma):
     arr[..., 3] = np.array([255, 200, 128, 64, 255, 30], np.uint8)[(xs + 3 * ys + seed) % 6]
     if pma:
         arr[..., :3] = np.minimum(arr[..., :3], arr[..., 3:4])
+    else:
+        # Fully transparent pixels that still carry colour: straight output
+        # decides for itself what happens to their RGB, and the fixture pins it.
+        arr[..., 3][(xs + 2 * ys + seed) % 5 == 0] = 0
     return Image.fromarray(arr, "RGBA")
 
 
@@ -99,6 +109,13 @@ def multi_straight_page(packer: str, options: PackerOptions, skeleton: bool) -> 
     return {"text": page_section(built.atlas_text, "st.png"), "page": digest(built.pages["st.png"])}
 
 
+def straight_mesh_crop_extract() -> dict:
+    pages = {"pma.png": pattern(32, 8, 1, True), "st.png": pattern(32, 8, 2, False)}
+    with fake_skeleton():
+        atlas = SpineAtlas.load(MULTI, pages, skeleton=b"x")
+    return {"extract": digest(atlas.extract("S1", mesh_crop=True))}
+
+
 def mixed_force_resize() -> dict:
     atlas = SpineAtlas.load(SCALED, {"pma.png": pattern(16, 8, 5, True), "st.png": pattern(16, 8, 6, False)})
     with warnings.catch_warnings():
@@ -120,6 +137,7 @@ CASES = {
     "multi_rectangles_mesh": lambda: multi_straight_page("rectangles", PackerOptions(mesh_aware=True), True),
     "multi_polygons_mesh": lambda: multi_straight_page("polygons", PackerOptions(padding=2), True),
     "multi_shelf_rect": lambda: multi_straight_page("shelf", PackerOptions(mesh_aware=False), False),
+    "straight_mesh_crop_extract": straight_mesh_crop_extract,
     "mixed_force_resize": mixed_force_resize,
     "mixed_split_rect": mixed_split_rect,
 }
@@ -129,12 +147,36 @@ def generate() -> dict:
     return {name: case() for name, case in CASES.items()}
 
 
+def product_matches_baseline() -> str | None:
+    """None when atlas_toolkit/ equals BASELINE_COMMIT (tracked and untracked
+    files), else the reason it does not."""
+    try:
+        diff = subprocess.run(["git", "diff", "--quiet", BASELINE_COMMIT, "--", "atlas_toolkit"], cwd=REPO)
+        extra = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", "atlas_toolkit"],
+            cwd=REPO, capture_output=True, text=True,
+        )
+    except OSError as error:
+        return f"cannot run git: {error}"
+    if diff.returncode == 1:
+        return f"atlas_toolkit/ differs from {BASELINE_COMMIT}"
+    if diff.returncode != 0 or extra.returncode != 0:
+        return f"git could not compare atlas_toolkit/ with {BASELINE_COMMIT}"
+    if extra.stdout.strip():
+        return f"atlas_toolkit/ has untracked files: {extra.stdout.split()}"
+    return None
+
+
 if __name__ == "__main__":
-    data = generate()
     if "--check" in sys.argv:
         want = json.loads(FIXTURE.read_text())
+        data = generate()
         bad = [name for name in data if data[name] != want.get(name)]
         print("differ:", bad or "none")
         sys.exit(1 if bad else 0)
+    reason = product_matches_baseline()
+    if reason:
+        sys.exit(f"refusing to write {FIXTURE.name}: {reason}; the baseline must come from {BASELINE_COMMIT}")
+    data = generate()
     FIXTURE.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
     print(f"wrote {FIXTURE} ({len(data)} cases)")
