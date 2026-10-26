@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -877,7 +878,9 @@ def test_task5_no_batch_settings_on_pristine_and_multi_page_sessions_do_not_allo
     multi.close()
 
 
-def test_task5_repack_mesh_gate_skips_pma_and_added_keys():
+def test_task5_repack_mesh_masks_pma_premultiplied():
+    # Spec 2026-10-26 §3.2/§4: pma pages now get mesh geometry; the mask
+    # clears RGB together with alpha outside the hull (left half here).
     from atlas_toolkit.engine.session import AtlasSession
 
     raster = PillowRasterBackend()
@@ -893,13 +896,20 @@ a
     assert pma.snapshot().mesh_available is True
     pma.set_mesh_mask_enabled(True)
     pma.set_mesh_aware_repack_enabled(True)
-    assert decoded(pma.extract_regions(["a"])["a"]).tobytes()[3::4] == bytes([255] * 8)
+    extract = np.frombuffer(decoded(pma.extract_regions(["a"])["a"]).tobytes(), np.uint8).reshape(2, 4, 4)
+    assert (extract[:, :2, 3] == 255).all()
+    assert not extract[:, 2:].any()
     pma.apply_mod_image(pma_source, ["a"])
     result = pma.repack()
     _text, saved = pma.save()
-    assert _saved_region_pixels(saved, result, "a")[3::4] == bytes([255] * 8)
+    assert result.regions["a"][4] == 0
+    region = np.frombuffer(_saved_region_pixels(saved, result, "a"), np.uint8).reshape(2, 4, 4)
+    assert (region[:, :2, 3] == 255).all()
+    assert not region[:, 2:].any()
     pma.close()
 
+
+def test_task5_repack_mesh_gate_skips_added_keys():
     added, _added_raster = _task5_mesh_session()
     added.set_mesh_data({"new": _TASK5_LEFT_HALF})
     assert added.set_mesh_aware_repack_enabled(True) is None

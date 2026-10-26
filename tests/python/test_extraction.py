@@ -2,6 +2,7 @@
 import copy
 import io
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -210,7 +211,7 @@ def test_mesh_at_output_size_preserves_pattern_and_cuts_right_half(padded):
 
 
 @pytest.mark.parametrize(("extract_enabled", "repack_enabled"), [(False, False), (True, False), (False, True), (True, True)])
-def test_mesh_switches_are_independent_and_require_known_non_pma_region(extract_enabled, repack_enabled):
+def test_mesh_switches_are_independent_and_pma_regions_get_geometry(extract_enabled, repack_enabled):
     raster = PillowRasterBackend()
     doc = AtlasDocument.parse("p.png\nsize: 8,6\nr\n bounds: 0,0,4,2\nno_mesh\n bounds: 0,0,4,2\nq.png\nsize: 8,6\npma: true\npma\n bounds: 0,0,4,2")
     source = image(raster)
@@ -220,10 +221,17 @@ def test_mesh_switches_are_independent_and_require_known_non_pma_region(extract_
     p.set_nest_options(True, 0)
     assert p.get_mesh_geometry("r") == (LEFT_HALF if extract_enabled else None)
     assert p.get_repack_mesh_geometry("r") == (LEFT_HALF if repack_enabled else None)
-    for key in ("pma", "absent", "no_mesh"):
+    for key in ("absent", "no_mesh"):
         assert p.get_mesh_geometry(key) is None
         assert p.get_repack_mesh_geometry(key) is None
-    assert raster.get_pixels(p.extract_region("pma"))[3::4] == bytes([255] * 8)
+    assert p.get_mesh_geometry("pma") == (LEFT_HALF if extract_enabled else None)
+    assert p.get_repack_mesh_geometry("pma") == (LEFT_HALF if repack_enabled else None)
+    px = np.frombuffer(raster.get_pixels(p.extract_region("pma")), np.uint8).reshape(2, 4, 4)
+    if extract_enabled:
+        assert (px[:, :2, 3] == 255).all()
+        assert not px[:, 2:].any()          # premultiplied: RGB cleared with alpha
+    else:
+        assert (px[..., 3] == 255).all()
     p.set_mesh_mask_data(None, True, True)
     assert p.get_mesh_geometry("r") is None
     assert p.get_repack_mesh_geometry("r") is None

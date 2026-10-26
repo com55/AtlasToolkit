@@ -361,16 +361,7 @@ def test_pma_stack_clips_additive_colour_instead_of_wrapping():
     assert np.all(got == [255, 255, 250, 255])
 
 
-def test_pma_force_resize_matches_premultiplied_straight_stack():
-    # Semi-transparent edges: resizing premultiplied data as if straight
-    # leaves a bright halo. The pma stack must equal the straight stack of
-    # the same picture, premultiplied.
-    arr = pattern(16, 16)
-    straight = SpineAtlas.load(SIZES, Image.fromarray(arr, "RGBA"))
-    pma = SpineAtlas.load(SIZES.replace("16,16\n", "16,16\npma: true\n"), Image.fromarray(premultiplied(arr), "RGBA"))
-    want = premultiplied(np.asarray(straight.extract_composite(["M", "L"], force_resize=True))).astype(int)
-    got = np.asarray(pma.extract_composite(["M", "L"], force_resize=True)).astype(int)
-    assert np.max(np.abs(got - want)) <= 1
+# Force-resize on pma: see test_pma_mesh.py and test_pma_raster.py (spec 2026-10-26 §4).
 
 
 # Cross-page: A and C on page one, B on a second page; same 32x16 canvas.
