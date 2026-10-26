@@ -249,23 +249,26 @@ def group_names_by_sprite_identity(
 
 def mask_raw_sprite(
     raster: RasterBackend, sprite: ImageHandle, mesh_geometry: dict, region: dict,
+    *, premultiplied: bool = False,
 ) -> None:
     """Masks a freshly-extracted pristine sprite IN PLACE to its mesh
     silhouette. Mesh UVs are normalized to the region's raw crop size when
     it has no offsets, or to the full original (orig_w, orig_h) when it
     does -- the crop-back rect recovers just the sub-rect this raw crop
-    occupies within that full-size space. Port of maskRawSprite."""
+    occupies within that full-size space. Port of maskRawSprite.
+    `premultiplied` (a pma page) clears RGB with alpha outside the hull
+    (spec 2026-10-26 §3.1)."""
     offsets = region["offsets"]
     if offsets is None:
         mask = raster.rasterize_mesh_mask(
             mesh_geometry["uvs"], mesh_geometry["triangles"], *raster.size(sprite),
         )
-        raster.composite_destination_in(sprite, mask)
+        raster.composite_destination_in(sprite, mask, premultiplied=premultiplied)
         return
     orig_w, orig_h = offsets[2], offsets[3]
     rect = mask_crop_rect_for_offsets(offsets, *raster.size(sprite))
     full_mask = raster.rasterize_mesh_mask(mesh_geometry["uvs"], mesh_geometry["triangles"], orig_w, orig_h)
-    raster.composite_destination_in(sprite, full_mask, (rect["x"], rect["y"], rect["w"], rect["h"]))
+    raster.composite_destination_in(sprite, full_mask, (rect["x"], rect["y"], rect["w"], rect["h"]), premultiplied=premultiplied)
 
 
 def _mask_modded_sprites(
@@ -273,6 +276,8 @@ def _mask_modded_sprites(
     sprites: dict[str, ImageHandle],
     modded_sprites: Optional[dict[str, ImageHandle]],
     mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]],
+    *,
+    premultiplied: bool = False,
 ) -> None:
     """Masks the overlay entries of `sprites` (mutating the dict, never
     `modded_sprites`' own values or handles) to their mesh silhouette.
@@ -289,7 +294,7 @@ def _mask_modded_sprites(
             continue  # no mesh data for anyone in this group -- leave as-is
         masked = raster.clone(sprites[names[0]])
         mask = raster.rasterize_mesh_mask(combined["uvs"], combined["triangles"], *raster.size(masked))
-        raster.composite_destination_in(masked, mask)
+        raster.composite_destination_in(masked, mask, premultiplied=premultiplied)
         for name in names:
             sprites[name] = masked
 
@@ -434,11 +439,15 @@ def region_meta(region: Region) -> dict:
     }
 
 
-def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
+def canvas_hash(raster: RasterBackend, handle: ImageHandle, *, premultiplied: bool = False) -> str:
     """SHA-256 of hash-normalized RGBA bytes -- the dedup identity
     _packAndEmit groups by. Port of _canvasHash. Source raw bytes remain
     untouched: only the temporary hash buffer zeros RGB at alpha zero,
     matching Canvas readback. All nonzero-alpha RGBA is preserved.
+    On a pma page (`premultiplied=True`), alpha-0 RGB is visible additive
+    colour and is hashed too, so sprites that differ only there never
+    dedup. This is a deliberate divergence from JS (spec 2026-10-26
+    §3.3).
 
     Two parts of the JS are deliberately not ported. Its double
     getImageData "priming read" works around a documented Chromium
@@ -448,7 +457,8 @@ def canvas_hash(raster: RasterBackend, handle: ImageHandle) -> str:
     together, which is the only property parity tests assert -- digest
     STRINGS are never compared across the two runtimes."""
     pixels = np.frombuffer(raster.get_pixels(handle), dtype=np.uint8).reshape(-1, 4).copy()
-    pixels[pixels[:, 3] == 0, :3] = 0
+    if not premultiplied:
+        pixels[pixels[:, 3] == 0, :3] = 0
     width, height = raster.size(handle)
     # DELIBERATE DIVERGENCE from JS (user ruling 2026-10-13): the size is
     # hashed too, so equal bytes in different shapes (flat 4x2 vs 2x4) no
@@ -556,6 +566,12 @@ class AtlasModifier:
         self.region_names: list[str] = [region.name for region in scoped]
         self.regions: dict[str, Region] = {region.name: region for region in scoped}
 
+    @property
+    def pma(self) -> bool:
+        """The target page's `pma` flag: every pixel this modifier pastes,
+        masks or hashes is premultiplied on such a page (spec 2026-10-26)."""
+        return next(page.pma for page in self.document.pages if page.filename == self.target_page)
+
     def _selected_offsets(self, selected_regions: list[str]) -> list[Optional[list[int]]]:
         """Per selected name, in selection order: its offsets, or None when
         the name is outside this modifier's page scope or has no offsets."""
@@ -590,7 +606,7 @@ class AtlasModifier:
             paste_x = round_half_even(canvas.off_x * scale_x)
             paste_y = canvas.orig_canvas_h - mod_h - round_half_even(canvas.off_y * scale_y)
             image = self.raster.create(canvas.orig_canvas_w, canvas.orig_canvas_h)
-            self.raster.paste(image, mod_image, paste_x, paste_y)
+            self.raster.paste(image, mod_image, paste_x, paste_y, premultiplied=self.pma)
             mod_w, mod_h = canvas.orig_canvas_w, canvas.orig_canvas_h
         else:
             image = self.raster.clone(mod_image)
@@ -667,7 +683,7 @@ class AtlasModifier:
         for name in region_names:
             if name not in sprites:
                 continue
-            digest = canvas_hash(self.raster, sprites[name])
+            digest = canvas_hash(self.raster, sprites[name], premultiplied=self.pma)
             if digest in hash_to_canonical:
                 canonical_map[name] = hash_to_canonical[digest]
             else:
@@ -729,7 +745,7 @@ class AtlasModifier:
         for name in unique_names:
             placement = placement_map[name]
             rotated = rotate_sprite_for_pack(self.raster, sprites[name], rotate_of(name))
-            self.raster.paste(canvas, rotated, placement["x"], placement["y"])
+            self.raster.paste(canvas, rotated, placement["x"], placement["y"], premultiplied=self.pma)
 
         # 4. Build region data. Offsets: full-canvas regions reset to
         #    default, everyone else preserves their pristine offsets
@@ -854,11 +870,11 @@ class AtlasModifier:
             if mesh_lookup_fn is not None and name not in (modded_sprites or {}) and name not in (added_sprites or {}):
                 geom = mesh_lookup_fn(name)
                 if geom is not None:
-                    mask_raw_sprite(self.raster, sprites[name], geom, meta)
+                    mask_raw_sprite(self.raster, sprites[name], geom, meta, premultiplied=self.pma)
         for name, sprite in (modded_sprites or {}).items():
             if name in sprites:
                 sprites[name] = sprite
-        _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn)
+        _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn, premultiplied=self.pma)
         for key, sprite in (added_sprites or {}).items():
             sprites[key] = sprite  # AddBatch -- a new key, never in the pristine parse
         return self._pack_and_emit(
