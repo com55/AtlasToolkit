@@ -46,11 +46,14 @@ class _RecordingRaster(PillowRasterBackend):
     """Records paste positions, comparable with the JS oracle's recorded
     drawImage positions."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_premultiplied: bool = False) -> None:
         super().__init__()
+        # Straight-only unless a pma test opts in (spec 2026-10-26 §3.1).
+        self.allow_premultiplied = allow_premultiplied
         self.pastes: list[list[int]] = []
 
     def paste(self, dest, src, x, y, *, premultiplied=False):
+        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
         self.pastes.append([x, y])
         super().paste(dest, src, x, y, premultiplied=premultiplied)
 

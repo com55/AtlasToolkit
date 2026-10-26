@@ -49,6 +49,17 @@ def test_premultiplied_paste_composites_over():
     assert np.array_equal(pixels(raster, dest), want.astype(np.uint8))
 
 
+def test_premultiplied_paste_saturates_instead_of_wrapping():
+    # Additive (alpha 0) over a bright opaque pixel sums past 255; it must
+    # clamp to 255, never wrap around in uint8.
+    raster = PillowRasterBackend()
+    under = np.full((1, 1, 4), (250, 250, 250, 255), np.uint8)
+    src = np.full((1, 1, 4), GLOW_IN, np.uint8)
+    dest = handle(raster, under)
+    raster.paste(dest, handle(raster, src), 0, 0, premultiplied=True)
+    assert pixels(raster, dest)[0, 0].tolist() == [255, 255, 255, 255]
+
+
 def test_straight_paste_is_unchanged_and_still_drops_alpha_zero_rgb():
     raster = PillowRasterBackend()
     src = premultiplied_pattern(6, 4, 1)
@@ -71,6 +82,20 @@ def test_premultiplied_destination_in_scales_every_channel():
     assert np.array_equal(pixels(raster, dest), want.astype(np.uint8))
     assert pixels(raster, dest)[0, 0].tolist() == [0, 0, 0, 0]
     assert pixels(raster, dest)[0, 1].tolist() == [90, 60, 30, 0]
+
+
+def test_premultiplied_destination_in_alpha_equals_straight_for_every_pair():
+    # Exhaustive over all 65,536 (alpha, mask) pairs: the pma path's alpha is
+    # the straight path's (a*m)//255, so floor-vs-round drift cannot hide.
+    raster = PillowRasterBackend()
+    a, m = np.mgrid[0:256, 0:256].astype(np.uint8)
+    src = np.stack([a, a, a, a], axis=-1)
+    mask = np.zeros((256, 256, 4), np.uint8)
+    mask[..., 3] = m
+    straight, pma = handle(raster, src), handle(raster, src)
+    raster.composite_destination_in(straight, handle(raster, mask))
+    raster.composite_destination_in(pma, handle(raster, mask), premultiplied=True)
+    assert np.array_equal(pixels(raster, pma)[..., 3], pixels(raster, straight)[..., 3])
 
 
 def test_straight_destination_in_is_unchanged():

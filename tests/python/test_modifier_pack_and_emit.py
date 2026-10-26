@@ -85,12 +85,15 @@ class _RecordingRaster(PillowRasterBackend):
     """Records paste positions, comparable with the JS oracle's recorded
     drawImage positions."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_premultiplied: bool = False) -> None:
         super().__init__()
+        # Straight-only unless a pma test opts in (spec 2026-10-26 §3.1).
+        self.allow_premultiplied = allow_premultiplied
         self.pastes: list[list[int]] = []
         self.premultiplied_pastes: list[bool] = []
 
     def paste(self, dest, src, x, y, *, premultiplied=False):
+        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
         self.pastes.append([x, y])
         self.premultiplied_pastes.append(premultiplied)
         super().paste(dest, src, x, y, premultiplied=premultiplied)
@@ -216,7 +219,7 @@ def test_pma_is_preserved_rather_than_dropped():
     # a target page is set, which is always). This port keeps it, so there
     # is deliberately no parity case for a pma page -- one would fail for
     # the right reason. See _page_info's docstring.
-    raster = _RecordingRaster()
+    raster = _RecordingRaster(allow_premultiplied=True)   # a pma page on purpose
     document = AtlasDocument.parse(PAGE_TEXT.replace("size: 64,64", "size: 64,64\npma: true"))
     modifier = AtlasModifier(document, raster.create(64, 64), raster, "p.png")
     sprites = {
