@@ -79,7 +79,7 @@ class RasterBackend(Protocol):
         JS to port independently. degrees=0 is an identity crop of the
         whole image (equivalent to clone())."""
 
-    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
+    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int, *, premultiplied: bool = False) -> None:
         """Mutates dest in place -- same contract as ctx.drawImage(src, x, y):
         a Porter-Duff "source-over" alpha composite of src onto dest at
         (x, y), NOT a raw overwrite. A naive Image.paste(src, box) is wrong
@@ -95,7 +95,13 @@ class RasterBackend(Protocol):
         originally built a full-size transparent overlay and composited the
         whole canvas, and now composites only the overlapping rectangle. Both
         satisfy this contract identically -- no caller can distinguish them,
-        since every caller reaches images only through handles."""
+        since every caller reaches images only through handles.
+
+        With `premultiplied=True` (a pma page, spec 2026-10-26 §3.1) the
+        composite is premultiplied over on the clipped rect, computed
+        through the shared helper (raster/premultiplied.py), rounded
+        half-even once and clipped to 0..255: where dest is (0,0,0,0)
+        under src the result is src byte for byte, alpha-0 RGB included."""
 
     def rasterize_mesh_mask(
         self, uvs: list[float], triangles: list[int], width: int, height: int,
@@ -117,6 +123,7 @@ class RasterBackend(Protocol):
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
         src_rect: tuple[int, int, int, int] | None = None,
+        *, premultiplied: bool = False,
     ) -> None:
         """Mutates dest, keeping only pixels where mask is opaque (Porter-Duff
         destination-in, correct for straight/non-premultiplied alpha).
@@ -127,7 +134,13 @@ class RasterBackend(Protocol):
         two operands share a size (it silently truncates to the smaller
         extent on a mismatch); `putalpha` is what actually raises
         `ValueError` on a size mismatch, turning a caller bug into a hard
-        error rather than a silently truncated composite."""
+        error rather than a silently truncated composite.
+
+        With `premultiplied=True` (a pma page, spec 2026-10-26 §3.1) every
+        channel c, RGB and alpha alike, becomes `(c * m) // 255` where m is
+        the mask alpha -- the same integer formula the straight path uses
+        for alpha: m = 0 gives (0,0,0,0), m = 255 leaves the pixel
+        unchanged, and a partial m scales RGB and alpha together."""
 
     def read_alpha_mask(self, handle: ImageHandle) -> np.ndarray:
         """1-D bool ndarray, one entry per pixel, row-major, True where alpha > 0 -- matches
@@ -146,10 +159,16 @@ class RasterBackend(Protocol):
         GPU-readback bug; it does not apply to Pillow and is not ported --
         a single get_pixels call is sufficient."""
 
-    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int, *, premultiplied: bool = False) -> ImageHandle:
         """New width x height image: Lanczos-3 resample in premultiplied
         alpha, byte-identical to lanczos-resize.js's CPU lanczosResizeRGBA
-        (see raster/lanczos.py). Used by Forced Resizing in the preview."""
+        (see raster/lanczos.py). Used by Forced Resizing in the preview.
+
+        With `premultiplied=True` (a pma page, spec 2026-10-26 §3.1) the
+        handle's pixels are treated as already premultiplied and resized
+        via lanczos_resize_premultiplied: no premultiply / un-premultiply,
+        no a > 0.5 keep-mask, and filtered alpha above 255 scales all four
+        channels by 255/a before the half-up clamp."""
 
     def adopt(self, native: object) -> ImageHandle:
         """Store a COPY of a backend-native in-memory image (a PIL.Image for

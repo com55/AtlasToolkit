@@ -88,10 +88,12 @@ class _RecordingRaster(PillowRasterBackend):
     def __init__(self) -> None:
         super().__init__()
         self.pastes: list[list[int]] = []
+        self.premultiplied_pastes: list[bool] = []
 
-    def paste(self, dest, src, x, y):
+    def paste(self, dest, src, x, y, *, premultiplied=False):
         self.pastes.append([x, y])
-        super().paste(dest, src, x, y)
+        self.premultiplied_pastes.append(premultiplied)
+        super().paste(dest, src, x, y, premultiplied=premultiplied)
 
 
 def _sprite(raster: PillowRasterBackend, w: int, h: int, content: str):

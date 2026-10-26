@@ -14,7 +14,8 @@ import numpy as np
 from PIL import Image, ImageChops
 
 from atlas_toolkit.raster.base import ImageHandle
-from atlas_toolkit.raster.lanczos import lanczos_resize_rgba
+from atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
+from atlas_toolkit.raster.premultiplied import premultiplied_over
 
 
 def _without_metadata(img: Image.Image) -> Image.Image:
@@ -116,14 +117,15 @@ class PillowRasterBackend:
     def export(self, handle: ImageHandle) -> Image.Image:
         return self._images[handle].copy()
 
-    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
-        resized = lanczos_resize_rgba(np.asarray(self._images[handle]), width, height)
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int, *, premultiplied: bool = False) -> ImageHandle:
+        resize = lanczos_resize_premultiplied if premultiplied else lanczos_resize_rgba
+        resized = resize(np.asarray(self._images[handle]), width, height)
         return self._store(Image.frombytes("RGBA", (width, height), resized.tobytes()))
 
     def dispose(self, handle: ImageHandle) -> None:
         del self._images[handle]
 
-    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
+    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int, *, premultiplied: bool = False) -> None:
         # Composites only the overlapping rectangle, not the whole
         # destination. The previous whole-canvas version was O(destination
         # area) per call, which was harmless while the only caller pasted
@@ -150,6 +152,14 @@ class PillowRasterBackend:
 
         region = dest_img.crop((left, top, right, bottom))
         clipped_src = src_img.crop((left - x, top - y, right - x, bottom - y))
+        if premultiplied:
+            # pma page (spec 2026-10-26 §3.1): premultiplied over, rounded
+            # once. Onto a clear dest this is a byte copy, so additive RGB
+            # on alpha-0 pixels survives (alpha_composite would zero it).
+            out = premultiplied_over(np.asarray(clipped_src, np.float64), np.asarray(region, np.float64))
+            data = np.clip(np.rint(out), 0, 255).astype(np.uint8).tobytes()
+            dest_img.paste(Image.frombytes("RGBA", region.size, data), (left, top))
+            return
         dest_img.paste(Image.alpha_composite(region, clipped_src), (left, top))
 
     def get_pixels(self, handle: ImageHandle) -> bytes:
@@ -249,6 +259,7 @@ class PillowRasterBackend:
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
         src_rect: tuple[int, int, int, int] | None = None,
+        *, premultiplied: bool = False,
     ) -> None:
         # Porter-Duff destination-in for straight (non-premultiplied)
         # alpha: new_alpha = dest_alpha * mask_alpha (over [0,1]), RGB
@@ -275,5 +286,15 @@ class PillowRasterBackend:
             x, y, w, h = src_rect
             mask_img = mask_img.crop((x, y, x + w, y + h))
         dest_img = self._images[dest]
+        if premultiplied:
+            # pma page (spec 2026-10-26 §3.1): every channel x mask, the same
+            # integer formula as straight alpha, so outside the mask RGB is
+            # cleared too and partial coverage scales colour with alpha.
+            mask_alpha = np.asarray(mask_img.getchannel("A"), dtype=np.uint16)
+            if mask_alpha.shape != (dest_img.size[1], dest_img.size[0]):
+                raise ValueError("images do not match")
+            scaled = (np.asarray(dest_img, dtype=np.uint16) * mask_alpha[..., None]) // 255
+            dest_img.paste(Image.frombytes("RGBA", dest_img.size, scaled.astype(np.uint8).tobytes()), (0, 0))
+            return
         new_alpha = ImageChops.multiply(dest_img.getchannel("A"), mask_img.getchannel("A"))
         dest_img.putalpha(new_alpha)

@@ -65,9 +65,9 @@ class FaultRaster(RecordingRaster):
         self._before("crop")
         return super().crop_rotate(handle, x, y, w, h, rotate)
 
-    def paste(self, dest, src, x, y):
+    def paste(self, dest, src, x, y, *, premultiplied=False):
         self._before("paste")
-        return super().paste(dest, src, x, y)
+        return super().paste(dest, src, x, y, premultiplied=premultiplied)
 
 
 TWO = """p.png

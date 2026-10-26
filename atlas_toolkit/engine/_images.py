@@ -38,16 +38,17 @@ class _SessionRaster:
     def rotate_image(self, handle: ImageHandle, degrees: int) -> ImageHandle:
         return self._track(self._backend.rotate_image(handle, degrees))
 
-    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int) -> None:
-        self._backend.paste(dest, src, x, y)
+    def paste(self, dest: ImageHandle, src: ImageHandle, x: int, y: int, *, premultiplied: bool = False) -> None:
+        self._backend.paste(dest, src, x, y, premultiplied=premultiplied)
 
     def rasterize_mesh_mask(self, uvs: list[float], triangles: list[int], width: int, height: int) -> ImageHandle:
         return self._track(self._backend.rasterize_mesh_mask(uvs, triangles, width, height))
 
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle, src_rect: tuple[int, int, int, int] | None = None,
+        *, premultiplied: bool = False,
     ) -> None:
-        self._backend.composite_destination_in(dest, mask, src_rect)
+        self._backend.composite_destination_in(dest, mask, src_rect, premultiplied=premultiplied)
 
     def read_alpha_mask(self, handle: ImageHandle) -> np.ndarray:
         return self._backend.read_alpha_mask(handle)
@@ -64,8 +65,8 @@ class _SessionRaster:
     def export(self, handle: ImageHandle) -> object:
         return self._backend.export(handle)
 
-    def resize_lanczos(self, handle: ImageHandle, width: int, height: int) -> ImageHandle:
-        return self._track(self._backend.resize_lanczos(handle, width, height))
+    def resize_lanczos(self, handle: ImageHandle, width: int, height: int, *, premultiplied: bool = False) -> ImageHandle:
+        return self._track(self._backend.resize_lanczos(handle, width, height, premultiplied=premultiplied))
 
     def dispose(self, handle: ImageHandle) -> None:
         if handle in self._owned:

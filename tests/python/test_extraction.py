@@ -147,17 +147,17 @@ class FaultRaster(PillowRasterBackend):
         self._check("create", width, height)
         return super().create(width, height)
 
-    def paste(self, dest, src, x, y):
+    def paste(self, dest, src, x, y, *, premultiplied=False):
         self._check("paste", dest, src, x, y)
-        return super().paste(dest, src, x, y)
+        return super().paste(dest, src, x, y, premultiplied=premultiplied)
 
     def rasterize_mesh_mask(self, uvs, triangles, width, height):
         self._check("mask", width, height)
         return super().rasterize_mesh_mask(uvs, triangles, width, height)
 
-    def composite_destination_in(self, dest, mask, src_rect=None):
+    def composite_destination_in(self, dest, mask, src_rect=None, *, premultiplied=False):
         self._check("composite", dest, mask, src_rect)
-        return super().composite_destination_in(dest, mask, src_rect)
+        return super().composite_destination_in(dest, mask, src_rect, premultiplied=premultiplied)
 
     def encode_png(self, handle):
         raise AssertionError("processor must never encode PNG")
