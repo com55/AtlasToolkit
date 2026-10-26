@@ -124,9 +124,11 @@ def test_scaled_offsets_round_each_axis_before_padding():
 
 
 class FaultRaster(PillowRasterBackend):
-    """Real pixels, bounded allocations and failures at a chosen protocol call."""
-    def __init__(self):
+    """Real pixels, bounded allocations and failures at a chosen protocol call.
+    Straight-only unless a pma test opts in (spec 2026-10-26 §3.1)."""
+    def __init__(self, *, allow_premultiplied=False):
         super().__init__()
+        self.allow_premultiplied = allow_premultiplied
         self.fail = None
         self.remaining = 1
         self.calls = []
@@ -148,6 +150,7 @@ class FaultRaster(PillowRasterBackend):
         return super().create(width, height)
 
     def paste(self, dest, src, x, y, *, premultiplied=False):
+        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
         self._check("paste", dest, src, x, y)
         return super().paste(dest, src, x, y, premultiplied=premultiplied)
 
@@ -156,6 +159,7 @@ class FaultRaster(PillowRasterBackend):
         return super().rasterize_mesh_mask(uvs, triangles, width, height)
 
     def composite_destination_in(self, dest, mask, src_rect=None, *, premultiplied=False):
+        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
         self._check("composite", dest, mask, src_rect)
         return super().composite_destination_in(dest, mask, src_rect, premultiplied=premultiplied)
 

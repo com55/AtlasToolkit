@@ -17,8 +17,11 @@ def png() -> bytes:
 
 
 class RecordingRaster(PillowRasterBackend):
-    def __init__(self):
+    """Straight-only unless a pma test opts in (spec 2026-10-26 §3.1)."""
+
+    def __init__(self, *, allow_premultiplied=False):
         super().__init__()
+        self.allow_premultiplied = allow_premultiplied
         self.disposals: list[ImageHandle] = []
         self.fail: str | None = None
 
@@ -35,8 +38,8 @@ class RecordingRaster(PillowRasterBackend):
 class FaultRaster(RecordingRaster):
     """Real Pillow calls; injected failures occur before allocation/mutation."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *, allow_premultiplied=False):
+        super().__init__(allow_premultiplied=allow_premultiplied)
         self.fail_method: str | None = None
         self.fail_at = 1
         self.calls: dict[str, int] = {}
@@ -66,6 +69,7 @@ class FaultRaster(RecordingRaster):
         return super().crop_rotate(handle, x, y, w, h, rotate)
 
     def paste(self, dest, src, x, y, *, premultiplied=False):
+        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
         self._before("paste")
         return super().paste(dest, src, x, y, premultiplied=premultiplied)
 
