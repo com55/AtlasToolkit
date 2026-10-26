@@ -211,6 +211,7 @@ def test_emitted_offsets_do_not_alias_the_input_document():
     assert emitted.offsets == [3, 4, 40, 30]
     emitted.offsets[0] = 999
     assert modifier.regions["alpha"].offsets == [3, 4, 40, 30]
+    assert not any(raster.premultiplied_pastes)
 
 
 def test_pma_is_preserved_rather_than_dropped():
@@ -230,3 +231,4 @@ def test_pma_is_preserved_rather_than_dropped():
     result = modifier._pack_and_emit(sprites, modifier.region_names, regions, None)
     assert result.document.pages[0].pma is True
     assert "pma: true" in result.document.serialize()
+    assert raster.premultiplied_pastes and all(raster.premultiplied_pastes)
