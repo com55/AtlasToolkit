@@ -66,9 +66,9 @@ class _RecordingRaster(PillowRasterBackend):
         self.pastes: list[list[int]] = []
         self.clones = 0
 
-    def paste(self, dest, src, x, y):
+    def paste(self, dest, src, x, y, *, premultiplied=False):
         self.pastes.append([x, y])
-        super().paste(dest, src, x, y)
+        super().paste(dest, src, x, y, premultiplied=premultiplied)
 
     def clone(self, handle):
         # Counted, not forbidden: the no-clone rule applies to the modded

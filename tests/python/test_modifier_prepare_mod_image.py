@@ -50,9 +50,9 @@ class _RecordingRaster(PillowRasterBackend):
         super().__init__()
         self.pastes: list[list[int]] = []
 
-    def paste(self, dest, src, x, y):
+    def paste(self, dest, src, x, y, *, premultiplied=False):
         self.pastes.append([x, y])
-        super().paste(dest, src, x, y)
+        super().paste(dest, src, x, y, premultiplied=premultiplied)
 
 
 def _python_result(op: str, args: list):
