@@ -10,6 +10,7 @@ from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.region_ops import extracted_canvas_size, scaled_region_geometry
 from atlas_toolkit.engine.modifier import js_object_key_order
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from atlas_toolkit.raster.premultiplied import premultiplied_over
 
 
 class AtlasProcessor:
@@ -45,10 +46,14 @@ class AtlasProcessor:
         region = self.regions.get(name)
         if region is None or self._mesh_lookup is None:
             return None
-        page = self._page_map.get(region.page_filename)
-        if page is None or page.pma:
+        if region.page_filename not in self._page_map:
             return None
+        # pma pages too (spec 2026-10-26 §3.2): every masking call passes
+        # premultiplied=page.pma, so colour is cleared with alpha.
         return self._mesh_lookup.get(name)
+
+    def _is_pma(self, name: str) -> bool:
+        return self._page_map[self.regions[name].page_filename].pma
 
     def get_mesh_geometry(self, name: str) -> dict | None:
         return self._mesh_available_for(name) if self._mask_enabled else None
@@ -94,7 +99,7 @@ class AtlasProcessor:
                 # Keep ownership of the crop if allocation fails.
                 output = raster.create(original_w, original_h)
                 try:
-                    raster.paste(output, sprite, left, original_h - bottom - h)
+                    raster.paste(output, sprite, left, original_h - bottom - h, premultiplied=self._is_pma(name))
                 finally:
                     raster.dispose(sprite)
             if mask:
@@ -113,7 +118,7 @@ class AtlasProcessor:
         raster = self._raster
         mask = raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], *raster.size(image))
         try:
-            raster.composite_destination_in(image, mask)
+            raster.composite_destination_in(image, mask, premultiplied=self._is_pma(name))
         finally:
             raster.dispose(mask)
 
@@ -183,17 +188,18 @@ class AtlasProcessor:
                 [self._raster.size(image) for image in images], force_resize,
             )
             if all(self._page_map[self.regions[name].page_filename].pma for name in image_names):
-                return self._premultiplied_stack(images, frame)
+                return self._premultiplied_stack(images, image_names, frame)
+            # straight composite by definition (spec 2026-10-26 §3.1 exception)
             composite = self._raster.create(frame["width"], frame["height"])
             for image, name in zip(reversed(images), reversed(image_names)):
                 if not frame["scale"] or self._raster.size(image) == (frame["width"], frame["height"]):
                     self._mask_to_mesh(name, image)
-                    self._raster.paste(composite, image, 0, 0)
+                    self._raster.paste(composite, image, 0, 0, premultiplied=False)
                     continue
-                resized = self._raster.resize_lanczos(image, frame["width"], frame["height"])
+                resized = self._raster.resize_lanczos(image, frame["width"], frame["height"], premultiplied=False)
                 try:
                     self._mask_to_mesh(name, resized)
-                    self._raster.paste(composite, resized, 0, 0)
+                    self._raster.paste(composite, resized, 0, 0, premultiplied=False)
                 finally:
                     self._raster.dispose(resized)
             result = composite
@@ -205,49 +211,31 @@ class AtlasProcessor:
             if composite is not None:
                 self._raster.dispose(composite)
 
-    def _premultiplied_stack(self, images: list[ImageHandle], frame: dict) -> ImageHandle:
+    def _premultiplied_stack(self, images: list[ImageHandle], names: list[str], frame: dict) -> ImageHandle:
         """Premultiplied over, bottom first, for regions that all live on pma
-        pages: their stored RGB is already multiplied by alpha, so straight
-        alpha_composite would darken every overlapping semi-transparent
-        pixel (spec 2026-10-21-multi-page-editing §3.7). Accumulates in
-        float64 and rounds half-even once at the end. Mesh masking never
-        applies on a pma page."""
+        pages (spec 2026-10-21 §3.7, 2026-10-26 §3.3). Every image is masked
+        to its mesh (premultiplied); a scaled one is resized with the
+        premultiplied Lanczos first and masked after, like the straight
+        branch. Accumulates in float64 and rounds half-even once."""
         width, height = frame["width"], frame["height"]
         out = np.zeros((height, width, 4), np.float64)
-        for image in reversed(images):
+        for image, name in zip(reversed(images), reversed(names)):
             w, h = self._raster.size(image)
-            pixels = np.frombuffer(self._raster.get_pixels(image), dtype=np.uint8).reshape(h, w, 4)
             if frame["scale"] and (w, h) != (width, height):
-                # resize_lanczos takes straight alpha: un-premultiply, resize,
-                # premultiply again. Colour on alpha-0 pixels is lost here.
-                straight = self._raster.from_pixels(w, h, _unpremultiplied(pixels).tobytes())
+                resized = self._raster.resize_lanczos(image, width, height, premultiplied=True)
                 try:
-                    resized = self._raster.resize_lanczos(straight, width, height)
-                finally:
-                    self._raster.dispose(straight)
-                try:
+                    self._mask_to_mesh(name, resized)
                     w, h = width, height
                     pixels = np.frombuffer(self._raster.get_pixels(resized), dtype=np.uint8).reshape(h, w, 4)
                 finally:
                     self._raster.dispose(resized)
-                src = pixels.astype(np.float64)
-                src[..., :3] *= src[..., 3:4] / 255
             else:
-                src = pixels.astype(np.float64)
-            under = out[:h, :w]
-            out[:h, :w] = src + under * (1 - src[..., 3:4] / 255)
-        # RGB above alpha (additive colour on alpha-0 pixels) can push over
-        # past 255; clip before the cast instead of wrapping.
+                self._mask_to_mesh(name, image)
+                pixels = np.frombuffer(self._raster.get_pixels(image), dtype=np.uint8).reshape(h, w, 4)
+            out[:h, :w] = premultiplied_over(pixels, out[:h, :w])
+        # RGB above alpha (additive colour) can push over past 255; clip.
         data = np.clip(np.rint(out), 0, 255).astype(np.uint8).tobytes()
         return self._raster.from_pixels(width, height, data)
-
-
-def _unpremultiplied(pixels: np.ndarray) -> np.ndarray:
-    """Straight RGBA from premultiplied (h, w, 4) uint8; alpha-0 pixels go to 0."""
-    out = pixels.astype(np.float64)
-    alpha = out[..., 3:4]
-    out[..., :3] = np.divide(out[..., :3] * 255, alpha, out=np.zeros_like(out[..., :3]), where=alpha > 0)
-    return np.clip(np.rint(out), 0, 255).astype(np.uint8)
 
 
 def pick_force_resize_target(sizes: list[tuple[int, int]]) -> tuple[int, int]:
