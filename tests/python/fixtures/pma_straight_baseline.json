@@ -3,14 +3,14 @@
   "composite": [
    12,
    6,
-   "5fff75b0622df618e57d24979b1a75b9cb52ab579e6f1ca974cc5d5da92cb111"
+   "0f9758de133070d49a401539821378d368f2b7217225d745a077dd156b7ec1b3"
   ]
  },
  "mixed_split_rect": {
   "page": [
    16,
    8,
-   "f5989047964f0c73db89bea7d03e96c67344c8d806ee8e246846c85f0a4b5003"
+   "330db924563b6f1097fdc4c2c489afc62ed5db742127802f5315b7dc2f45d2de"
   ],
   "text": "st.png\nsize: 16,8\nS\n  bounds: 0, 0, 16, 8\n"
  },
@@ -18,7 +18,7 @@
   "page": [
    16,
    24,
-   "95ed7ccc06f5311d77844f813ecb288feda19360bdd9da9a35bba0e607dff60e"
+   "a69f05b446e4e34c84a2f079be2e4814b2b1bd076e62561a0fa2bd79011e77ee"
   ],
   "text": "st.png\nsize: 16,24\nS1\n  bounds: 0, 0, 16, 8\nS2\n  rotate: true\n  bounds: 0, 4, 16, 8\n"
  },
@@ -26,7 +26,7 @@
   "page": [
    16,
    24,
-   "f6ec214e6053e961e20dbfdb91395f8e9cb94ecd6ec9c1a1b19aea094b6a9f85"
+   "b8d2ff68cf67c4b2e7bfda5c6441bcef23a199fadc2cceb17d51e43e91d7f1ed"
   ],
   "text": "st.png\nsize: 16,24\nS1\n  bounds: 0, 0, 16, 8\nS2\n  bounds: 0, 12, 16, 8\n"
  },
@@ -34,7 +34,7 @@
   "page": [
    16,
    20,
-   "068ec2673c505a91edd72c485ab3864ee6869b5af7296ebe54ae615fcf59b53c"
+   "757167d5307799b6bb26f5df4c21f369c21cc5a8f45e02be85477cf6b6527e5e"
   ],
   "text": "st.png\nsize: 16,20\nS1\n  bounds: 0, 0, 16, 8\nS2\n  bounds: 0, 10, 16, 8\n"
  },
@@ -42,8 +42,15 @@
   "page": [
    16,
    20,
-   "5753396424f261c204235c0f564dcf729ee0744b2dc759583b1864117520df89"
+   "4553c7d814164f6a005aca02856975cb8c2a07d0d5b4d886e0c86d0ef2888765"
   ],
   "text": "st.png\nsize: 16,20\nS1\n  bounds: 0, 0, 16, 8\nS2\n  bounds: 0, 10, 16, 8\n"
+ },
+ "straight_mesh_crop_extract": {
+  "extract": [
+   16,
+   8,
+   "b7c7c3afd92948df9482209e4feaff92e4310771fb7754675cc486a26e486864"
+  ]
  }
 }
