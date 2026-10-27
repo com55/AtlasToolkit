@@ -187,7 +187,7 @@ class AtlasProcessor:
             frame = preview_composite_frame(
                 [self._raster.size(image) for image in images], force_resize,
             )
-            if all(self._page_map[self.regions[name].page_filename].pma for name in image_names):
+            if all(self._is_pma(name) for name in image_names):
                 return self._premultiplied_stack(images, image_names, frame)
             # straight composite by definition (spec 2026-10-26 §3.1 exception)
             composite = self._raster.create(frame["width"], frame["height"])

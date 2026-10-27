@@ -57,8 +57,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - `pma: true` pages keep additive colour (RGB on alpha-0 pixels) through
   every repack, extract and split. A composite whose regions all live on pma
   pages round-trips exactly through `extract_composite` / `replace_composite`
-  / `build(split_composite=True)` when no region is resized and `mesh_crop`
-  matches the build's ownership; additive colour goes to the topmost region
+  / `build(split_composite=True)` when it is extracted with the same names in
+  the same order, no region is resized and `mesh_crop` matches the build's
+  ownership; additive colour goes to the topmost region
   covering it. In a group that mixes pma and non-pma pages, the pma pieces
   are cleared outside their owner and keep alpha-0 colour only where they
   are the topmost owner. Forced Resizing on pma pages uses a premultiplied Lanczos that

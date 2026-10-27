@@ -1,7 +1,5 @@
 """pma pages with mesh features through the public API (spec 2026-10-26
 §5.1-§5.4, §4 force-resize replacement, Review Focus 1-3, 5)."""
-import warnings
-
 import numpy as np
 import pytest
 from PIL import Image
@@ -13,8 +11,8 @@ from tests.python.pma_cases import (
 )
 
 # 48x16 pma page. 16x8 regions; G, N, K, K2 have left-half hulls, Plain has
-# no mesh. K and K2 hold identical pixels but different meshes (dedup with
-# a footprint union). O has offsets: an 8x8 sprite on a 12x12 canvas.
+# no mesh. K and K2 hold identical pixels but different meshes: pristine
+# sprites are masked before hashing, so they never dedup. O has offsets: an 8x8 sprite on a 12x12 canvas.
 TEXT = (
     "page.png\nsize: 48,16\npma: true\n"
     "G\n bounds: 0,0,16,8\n"
@@ -78,15 +76,15 @@ def test_region_with_offsets_keeps_glow_through_the_canvas_paste(monkeypatch):
     assert not cropped[:, 6:].any()            # hull = left half of the 12-wide canvas
 
 
-@pytest.mark.parametrize("force_resize", [False, True])
-def test_mesh_crop_composite_masks_every_pma_image(monkeypatch, force_resize):
+def test_mesh_crop_composite_masks_every_pma_image(monkeypatch):
+    # G and N are the same size, so force_resize would change nothing; the
+    # scaled branch is test_mesh_crop_force_resize_masks_the_scaled_image.
     atlas = load(monkeypatch)
-    comp = px(atlas.extract_composite(["G", "N"], mesh_crop=True, force_resize=force_resize))
+    comp = px(atlas.extract_composite(["G", "N"], mesh_crop=True))
     assert not comp[:, 8:].any()               # both hulls are the left half
-    if not force_resize:
-        # G's additive pixel over N's at the same spot: premultiplied over
-        # adds them (alpha 0 lets everything under it through).
-        assert comp[IN[1], IN[0]].tolist() == [2 * c for c in GLOW_IN[:3]] + [0]
+    # G's additive pixel over N's at the same spot: premultiplied over
+    # adds them (alpha 0 lets everything under it through).
+    assert comp[IN[1], IN[0]].tolist() == [2 * c for c in GLOW_IN[:3]] + [0]
 
 
 def test_mesh_crop_force_resize_masks_the_scaled_image(monkeypatch):

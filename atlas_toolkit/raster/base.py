@@ -160,9 +160,10 @@ class RasterBackend(Protocol):
         a single get_pixels call is sufficient."""
 
     def resize_lanczos(self, handle: ImageHandle, width: int, height: int, *, premultiplied: bool = False) -> ImageHandle:
-        """New width x height image: Lanczos-3 resample in premultiplied
-        alpha, byte-identical to lanczos-resize.js's CPU lanczosResizeRGBA
-        (see raster/lanczos.py). Used by Forced Resizing in the preview.
+        """New width x height image. With premultiplied=False (straight):
+        Lanczos-3 resample in premultiplied alpha, byte-identical to
+        lanczos-resize.js's CPU lanczosResizeRGBA (see raster/lanczos.py).
+        Used by Forced Resizing in the preview.
 
         With `premultiplied=True` (a pma page, spec 2026-10-26 §3.1) the
         handle's pixels are treated as already premultiplied and resized
