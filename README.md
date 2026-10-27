@@ -117,6 +117,11 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
 - `mesh_crop=True` on the extract methods and `packer="polygons"` or
   `PackerOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
   the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
+- On a `pma: true` page, images are read and written premultiplied: extracts
+  return premultiplied pixels, additive colour on alpha-0 pixels included, and
+  `replace` / `replace_composite` take premultiplied images. Mesh Cropping and
+  mesh-aware packing clear all four channels outside the hull. A composite
+  that mixes pma and non-pma pages is stacked as straight alpha and warns.
 - Multi-page atlases can be edited. Only the pages that own an edited
   region are repacked; the others are kept as they are. `add_region(page=...)`
   picks the page, otherwise the page whose regions cover the least area is

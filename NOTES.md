@@ -309,7 +309,10 @@ accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
 - Regenerate a fixture with `node tests/python/gen_js_reference_<name>.mjs`
   and check that the existing cases did not change.
 - No parity case may use a `pma: true` page or extra page lines such as
-  `scale:`: the Python engine keeps them and the JS engine does not.
+  `scale:`: the Python engine keeps them and the JS engine does not. The
+  Python engine also reads and writes pma pages premultiplied (masking,
+  pasting, deduplication, Lanczos and the composite split keep alpha-0
+  colour), where the JS engine treats them as straight alpha.
 - Byte-exact mask oracles need axis-aligned geometry: a diagonal edge hits
   partly covered pixels, which Canvas antialiases and the Python rasterizer
   does not.

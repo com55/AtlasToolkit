@@ -331,7 +331,9 @@ def test_mixed_pma_composite_stays_straight():
     semi = Image.new("RGBA", (8, 8), (40, 20, 10, 100))
     atlas = SpineAtlas.load(MIXED_PMA, {"one.png": semi, "two.png": semi})
     p, s = atlas.extract("P"), atlas.extract("S")
-    assert np.array_equal(np.asarray(atlas.extract_composite(["P", "S"])), np.asarray(Image.alpha_composite(s, p)))
+    with pytest.warns(UserWarning, match="pma and non-pma"):
+        got = atlas.extract_composite(["P", "S"])
+    assert np.array_equal(np.asarray(got), np.asarray(Image.alpha_composite(s, p)))
 
 
 SIZES = "page.png\nsize: 16,16\nL\n bounds: 0,0,8,6\nM\n bounds: 8,0,4,4\n"

@@ -332,6 +332,9 @@ class SpineAtlas:
     # -- extract -----------------------------------------------------------
 
     def extract(self, names: str | list[str] | None = None, *, mesh_crop: bool = False):
+        """On a pma page pixels are returned premultiplied, alpha-0 colour
+        included. With mesh_crop=True, everything outside the hull is cleared
+        on all four channels."""
         if names is None:
             raise TypeError("extract() needs a name or a list of names; use extract_all() for every region")
         single = isinstance(names, str)
@@ -349,12 +352,26 @@ class SpineAtlas:
     def extract_composite(
         self, names: str | list[str], *, force_resize: bool = False, mesh_crop: bool = False,
     ) -> Image.Image:
+        """On a pma page pixels are returned premultiplied, alpha-0 colour
+        included. With mesh_crop=True, everything outside the hull is cleared
+        on all four channels."""
         wanted = [names] if isinstance(names, str) else list(names)
         if not wanted:
             raise TypeError("extract_composite() needs at least one region name")
         keys = [self._built_key(name) for name in wanted]
+        if self._spans_pma(keys):
+            warnings.warn(
+                "extract_composite spans pma and non-pma pages: the composite is stacked "
+                "as straight alpha, so the pma regions' premultiplied pixels are treated as straight",
+                UserWarning, stacklevel=2,
+            )
         with self._mesh_crop(mesh_crop):
             return self._session.get_preview_image(keys, force_resize)
+
+    def _spans_pma(self, keys: list[str]) -> bool:
+        """True when `keys` (built keys) live on both pma and non-pma pages."""
+        pma = {page.filename: page.pma for page in self._document.pages}
+        return len({pma[self._pristine[key].page_filename] for key in keys}) > 1
 
     def extract_to(self, names: str | list[str], path: str | os.PathLike, *, mesh_crop: bool = False) -> None:
         if isinstance(names, str):
@@ -427,12 +444,15 @@ class SpineAtlas:
         the default behaviour when any of its regions is a nine-patch or has
         malformed offsets (a zero-size canvas). Regions on several pages
         work: each page gets its own copy, or with split_composite=True its
-        own pieces, stored at the image's resolution. Regions on pma pages
-        keep RGB scaled by their alpha share."""
+        own pieces, stored at the image's resolution. On pma pages the image
+        is read premultiplied. A group whose regions all live on pma pages
+        comes back from extract_composite exactly, including additive colour
+        on alpha-0 pixels, which stays with the topmost region covering it. A
+        group that mixes pma and non-pma pages warns and is split as before,
+        except that its pma regions own their mesh hulls."""
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
-        pma = {page.filename: page.pma for page in self._document.pages}
-        if len({pma[self._pristine[key].page_filename] for key in keys}) > 1:
+        if self._spans_pma(keys):
             warnings.warn(
                 "replace_composite spans pma and non-pma pages: the image is read as "
                 "premultiplied on the pma pages and as straight alpha on the others",

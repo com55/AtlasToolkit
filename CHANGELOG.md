@@ -9,6 +9,12 @@ the full notes and screenshots.
 A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
 desktop and web apps are unchanged and still run the JavaScript engine.
 
+### Breaking
+- Mesh-aware packing now applies to `pma: true` pages. `PackerOptions(mesh_aware=None)`
+  (the default) masks them to their mesh hulls whenever mesh data is usable;
+  opt out with `PackerOptions(mesh_aware=False)`. `mesh_crop=True` now crops
+  regions on pma pages too, clearing all four channels outside the hull.
+
 ### Added
 - `SpineAtlas`: open an atlas from disk (`open`) or memory (`load`), list
   regions, extract single, all or composite sprites (with Forced Resizing and
@@ -46,14 +52,25 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   Untouched and rename-only pages keep their pixels.
 - `packer="rectangles"` can be combined with `mesh_aware`: pixels are cut to
   the hull, but the packing uses each region's whole rect.
+- `pma: true` pages keep additive colour (RGB on alpha-0 pixels) through
+  every repack, extract and split. A composite whose regions all live on pma
+  pages round-trips exactly through `extract_composite` / `replace_composite`
+  / `build(split_composite=True)`; additive colour goes to the topmost region
+  covering it. Forced Resizing on pma pages uses a premultiplied Lanczos that
+  scales a pixel down when its filtered alpha overshoots 255.
+- `extract_composite` warns when its regions span pma and non-pma pages, as
+  `replace_composite` already did; such a composite is stacked as straight
+  alpha.
 
 ### Fixed
-- `pma: true` pages: split pieces keep RGB scaled by their alpha share, and
-  composite extracts and previews stack premultiplied colour, so an extract /
-  replace round trip keeps a composite's colours (to within a few levels).
+- `pma: true` pages: composite extracts and previews stack premultiplied
+  colour instead of treating it as straight alpha.
 
 ### Differences from the app's engine
 - `pma` is kept on repack (the app drops it).
+- pma pages are masked to mesh hulls, keep alpha-0 colour when deduplicating
+  sprites, and are resized with a premultiplied Lanczos (the app treats pma
+  pixels as straight alpha).
 - Page lines other than the standard ones, such as `scale:`, are kept on
   repack.
 - Extracted file names keep non-ASCII letters (the app turns them into `_`).
