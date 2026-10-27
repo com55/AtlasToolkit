@@ -333,8 +333,8 @@ class SpineAtlas:
 
     def extract(self, names: str | list[str] | None = None, *, mesh_crop: bool = False):
         """On a pma page pixels are returned premultiplied, alpha-0 colour
-        included. With mesh_crop=True, everything outside the hull is cleared
-        on all four channels."""
+        included, and mesh_crop=True clears all four channels outside the
+        hull (on a straight page it clears alpha only)."""
         if names is None:
             raise TypeError("extract() needs a name or a list of names; use extract_all() for every region")
         single = isinstance(names, str)
@@ -352,9 +352,14 @@ class SpineAtlas:
     def extract_composite(
         self, names: str | list[str], *, force_resize: bool = False, mesh_crop: bool = False,
     ) -> Image.Image:
-        """On a pma page pixels are returned premultiplied, alpha-0 colour
-        included. With mesh_crop=True, everything outside the hull is cleared
-        on all four channels."""
+        """On pma pages pixels are returned premultiplied, alpha-0 colour
+        included, and mesh_crop=True clears all four channels outside the
+        hull (on a straight page it clears alpha only). A group that spans pma
+        and non-pma pages warns and is stacked as straight alpha."""
+        return self._extract_composite(names, force_resize, mesh_crop)
+
+    def _extract_composite(self, names: str | list[str], force_resize: bool, mesh_crop: bool) -> Image.Image:
+        # Called straight from a public method, so stacklevel=3 is its caller.
         wanted = [names] if isinstance(names, str) else list(names)
         if not wanted:
             raise TypeError("extract_composite() needs at least one region name")
@@ -363,7 +368,7 @@ class SpineAtlas:
             warnings.warn(
                 "extract_composite spans pma and non-pma pages: the composite is stacked "
                 "as straight alpha, so the pma regions' premultiplied pixels are treated as straight",
-                UserWarning, stacklevel=2,
+                UserWarning, stacklevel=3,
             )
         with self._mesh_crop(mesh_crop):
             return self._session.get_preview_image(keys, force_resize)
@@ -390,7 +395,7 @@ class SpineAtlas:
         self, names: str | list[str], path: str | os.PathLike, *,
         force_resize: bool = False, mesh_crop: bool = False,
     ) -> None:
-        image = self.extract_composite(names, force_resize=force_resize, mesh_crop=mesh_crop)
+        image = self._extract_composite(names, force_resize, mesh_crop)
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         image.save(target, format="PNG")
@@ -445,11 +450,15 @@ class SpineAtlas:
         malformed offsets (a zero-size canvas). Regions on several pages
         work: each page gets its own copy, or with split_composite=True its
         own pieces, stored at the image's resolution. On pma pages the image
-        is read premultiplied. A group whose regions all live on pma pages
-        comes back from extract_composite exactly, including additive colour
-        on alpha-0 pixels, which stays with the topmost region covering it. A
-        group that mixes pma and non-pma pages warns and is split as before,
-        except that its pma regions own their mesh hulls."""
+        is read premultiplied. A group whose regions all live on pma pages,
+        built with split_composite=True, comes back from extract_composite
+        exactly as long as no region is resized (force_resize over differing
+        canvas sizes is lossy) and mesh_crop matches the build (True after a
+        mesh-aware build). Additive colour on alpha-0 pixels stays with the
+        topmost region covering it. A group that mixes pma and non-pma pages
+        warns and is split as before, except on its pma regions: they own
+        their mesh hulls, are cleared outside them, and keep an alpha-0
+        pixel's colour only when they are the topmost region covering it."""
         keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
         picture = _edit_image(image)
         if self._spans_pma(keys):

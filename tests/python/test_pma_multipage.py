@@ -63,3 +63,13 @@ def test_single_kind_extract_composite_does_not_warn(recwarn):
     text = "a.png\nsize: 16,8\npma: true\nP\n bounds: 0,0,16,8\nQ\n bounds: 0,0,8,8\n"
     SpineAtlas.load(text, Image.new("RGBA", (16, 8))).extract_composite(["P", "Q"])
     assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
+
+
+def test_mixed_warning_points_at_the_caller(tmp_path):
+    text = "a.png\nsize: 16,8\npma: true\nP\n bounds: 0,0,16,8\n\nb.png\nsize: 16,8\nS\n bounds: 0,0,16,8\n"
+    atlas = SpineAtlas.load(text, {"a.png": Image.new("RGBA", (16, 8)), "b.png": Image.new("RGBA", (16, 8))})
+    with pytest.warns(UserWarning, match="pma and non-pma") as caught:
+        atlas.extract_composite(["P", "S"])
+        atlas.extract_composite_to(["P", "S"], tmp_path / "c.png")
+        atlas.replace_composite(["P", "S"], Image.new("RGBA", (16, 8)))
+    assert [w.filename for w in caught] == [__file__] * 3
