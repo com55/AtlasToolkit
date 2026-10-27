@@ -71,7 +71,8 @@ def split_composite(
     """One Piece per survivor (stack order, first = top). Every piece's
     offsets describe a canvas of the source's own size. A survivor whose
     geometry is None is cut to its rect. A survivor in `pma_names` lives on
-    a pma page: its RGB is scaled by its share of the pixel's alpha."""
+    a pma page: an all-pma batch is cut exactly, a mixed one scales pma RGB
+    by its share of the pixel's alpha (spec 2026-10-26 §3.5)."""
     width, height = raster.size(source)
     pixels = np.frombuffer(raster.get_pixels(source), dtype=np.uint8).reshape(height, width, 4)
     rects, offsets, holders = {}, {}, np.zeros((len(survivors), height, width), bool)
@@ -81,14 +82,16 @@ def split_composite(
         offsets[name] = [x0, height - (y0 + h), width, height]
         holders[k, y0:y0 + h, x0:x0 + w] = _hull(raster, geometry[name], offsets[name], w, h)
     pma = [name in pma_names for name in survivors]
+    windows = [np.s_[y0:y0 + h, x0:x0 + w] for x0, y0, w, h in (rects[name] for name in survivors)]
     if survivors and all(pma):
         layers = _exact_premultiplied_layers(pixels, holders)
+        crops = [layers[k][window] for k, window in enumerate(windows)]
     else:
-        layers = _shared_layers(pixels, holders, pma)
+        crops = _shared_layers(pixels, holders, pma, windows)
     pieces: dict[str, Piece] = {}
     for k, name in enumerate(survivors):
         x0, y0, w, h = rects[name]
-        piece = np.ascontiguousarray(layers[k, y0:y0 + h, x0:x0 + w])
+        piece = np.ascontiguousarray(crops[k])
         # An empty piece keeps its full rect: in game the mesh maps the whole
         # canvas around the packed rect, so a smaller rect would let the hull
         # sample a neighbouring sprite.
@@ -96,29 +99,32 @@ def split_composite(
     return pieces
 
 
-def _shared_layers(pixels: np.ndarray, holders: np.ndarray, pma: list[bool]) -> np.ndarray:
+def _shared_layers(pixels: np.ndarray, holders: np.ndarray, pma: list[bool], windows: list) -> list[np.ndarray]:
     """Straight and mixed batches (spec 2026-10-26 §3.5): the SPLIT alpha
-    hand-out. Straight layers are byte-identical to before. pma layers keep
-    RGB x share, give an alpha-0 pixel's colour to the topmost covering
-    holder when it is pma, and are cleared outside their holder."""
+    hand-out, one layer per survivor cut to its rect window. Straight layers
+    are byte-identical to before. pma layers keep RGB x share, give an
+    alpha-0 pixel's colour to the topmost covering holder when it is pma,
+    and are cleared outside their holder."""
     alphas = split_alphas(pixels[..., 3], holders)
-    total = pixels[..., 3].astype(np.float64)
-    covered = holders.any(axis=0)
-    top = np.argmax(holders, axis=0)
-    layers = np.zeros((len(pma), *pixels.shape), np.uint8)
-    for k, is_pma in enumerate(pma):
-        layer = pixels.copy()
-        layer[..., 3] = alphas[k]
+    if any(pma):
+        covered = holders.any(axis=0)
+        top = np.argmax(holders, axis=0)
+    layers = []
+    for k, (is_pma, window) in enumerate(zip(pma, windows)):
+        source = pixels[window]
+        layer = source.copy()
+        layer[..., 3] = alphas[k][window]
         if is_pma:
             # float64: rgb * alpha overflows uint8. A share is <= 1.
-            share = np.divide(alphas[k].astype(np.float64), total, out=np.zeros_like(total), where=total > 0)
-            layer[..., :3] = np.rint(pixels[..., :3].astype(np.float64) * share[..., None]).astype(np.uint8)
-            additive = covered & (top == k) & (total == 0)
-            layer[additive, :3] = pixels[additive, :3]
-            layer[~holders[k]] = 0
+            total = source[..., 3].astype(np.float64)
+            share = np.divide(layer[..., 3].astype(np.float64), total, out=np.zeros_like(total), where=total > 0)
+            layer[..., :3] = np.rint(source[..., :3].astype(np.float64) * share[..., None]).astype(np.uint8)
+            additive = covered[window] & (top[window] == k) & (total == 0)
+            layer[additive, :3] = source[additive, :3]
+            layer[~holders[k][window]] = 0
         else:
             layer[layer[..., 3] == 0] = 0
-        layers[k] = layer
+        layers.append(layer)
     return layers
 
 
@@ -130,53 +136,52 @@ def _exact_premultiplied_layers(pixels: np.ndarray, holders: np.ndarray) -> np.n
     rint((A - above) / T_above) and the holders below it 0. RGB: share
     scaling, except the topmost covering holder takes the residual
     rint(C - attenuate(below)), clipped to 0..255 (additive is legal).
-    Every layer is (0,0,0,0) outside its holder."""
+    Every layer is (0,0,0,0) outside its holder. One pass per holder each
+    way: the alpha above and its transmittance are kept as running sums."""
     count = holders.shape[0]
     big_a = pixels[..., 3].astype(np.int64)
     colour = pixels[..., :3].astype(np.float64)
     opaque = big_a == 255
-    alphas = np.zeros(holders.shape, np.float64)
+    alphas = np.zeros(holders.shape, np.uint8)
     remaining = np.where(opaque, 0, big_a)
     settled = np.zeros(big_a.shape, bool)
     left_below = holders.sum(axis=0)
+    above = np.zeros(big_a.shape, np.float64)       # alpha of the holders above, stacked
+    transmit = np.ones(big_a.shape, np.float64)     # 1 - above / 255
     for k in range(count):
         held = holders[k]
         left_below = left_below - held
         active = held & ~opaque & ~settled
         residual = active & ((left_below == 0) | (remaining < 2))
         shared = active & ~residual
-        value = np.zeros(big_a.shape, np.float64)
-        if residual.any():
-            above = np.zeros((*big_a.shape, 4), np.float64)
-            transmit = np.ones(big_a.shape, np.float64)
-            for j in reversed(range(k)):
-                layer = np.zeros((*big_a.shape, 4), np.float64)
-                layer[..., 3] = alphas[j]
-                above = premultiplied_over(layer, above)
-                transmit = transmit * (1 - alphas[j] / 255)
-            quotient = np.divide(big_a - above[..., 3], transmit, out=np.zeros_like(transmit), where=transmit > 0)
-            value = np.clip(np.rint(quotient), 0, 255)
+        quotient = np.divide(big_a - above, transmit, out=np.zeros_like(transmit), where=transmit > 0)
+        # The clip is reachable: at A in {200, 210, 214} under 9+ shared
+        # holders the chain above overshoots A by up to 0.194, the quotient
+        # rounds to -1 or -2, and 0 is still exact (overshoot < 0.5).
+        value = np.clip(np.rint(quotient), 0, 255)
         alphas[k] = np.where(
             held & opaque, 255,
             np.where(shared, _TOP[remaining.astype(np.uint8)], np.where(residual, value, 0)),
         )
         remaining = np.where(shared, _BOTTOM[remaining.astype(np.uint8)], np.where(residual, 0, remaining))
         settled |= residual
+        taken = alphas[k].astype(np.float64)
+        above = above + taken * transmit
+        transmit = transmit * (1 - taken / 255)
 
     covered = holders.any(axis=0)
     top = np.argmax(holders, axis=0)
     total = big_a.astype(np.float64)
-    layers = np.zeros((count, *pixels.shape), np.float64)
+    layers = np.zeros((count, *pixels.shape), np.uint8)
     layers[..., 3] = alphas
-    for k in range(count):
-        share = np.divide(alphas[k], total, out=np.zeros_like(total), where=total > 0)
-        lower = holders[k] & (top != k)
-        layers[k, ..., :3] = np.where(lower[..., None], np.rint(colour * share[..., None]), 0)
     under = np.zeros((*big_a.shape, 4), np.float64)
     for k in reversed(range(count)):
+        share = np.divide(alphas[k], total, out=np.zeros_like(total), where=total > 0)
+        lower = holders[k] & (top != k)
         is_top = covered & (top == k)
         residual_rgb = np.clip(np.rint(colour - attenuate(under, alphas[k])[..., :3]), 0, 255)
-        layers[k, ..., :3] = np.where(is_top[..., None], residual_rgb, layers[k, ..., :3])
+        rgb = np.where(lower[..., None], np.rint(colour * share[..., None]), 0)
+        layers[k, ..., :3] = np.where(is_top[..., None], residual_rgb, rgb)
         under = premultiplied_over(layers[k], under)
     layers[~holders] = 0
-    return layers.astype(np.uint8)
+    return layers
