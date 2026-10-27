@@ -12,7 +12,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 ### Breaking
 - Mesh-aware packing now applies to `pma: true` pages. `PackerOptions(mesh_aware=None)`
   (the default) masks them to their mesh hulls whenever mesh data is usable;
-  opt out with `PackerOptions(mesh_aware=False)`. `mesh_crop=True` now crops
+  opt out with `PackerOptions(mesh_aware=False)`. `packer="polygons"` now
+  nests and masks pma pages by their mesh hulls too; it always uses the mesh,
+  so the only opt-out there is another packer. `mesh_crop=True` now crops
   regions on pma pages too, clearing all four channels outside the hull.
 
 ### Added
@@ -55,8 +57,11 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - `pma: true` pages keep additive colour (RGB on alpha-0 pixels) through
   every repack, extract and split. A composite whose regions all live on pma
   pages round-trips exactly through `extract_composite` / `replace_composite`
-  / `build(split_composite=True)`; additive colour goes to the topmost region
-  covering it. Forced Resizing on pma pages uses a premultiplied Lanczos that
+  / `build(split_composite=True)` when no region is resized and `mesh_crop`
+  matches the build's ownership; additive colour goes to the topmost region
+  covering it. In a group that mixes pma and non-pma pages, the pma pieces
+  are cleared outside their owner and keep alpha-0 colour only where they
+  are the topmost owner. Forced Resizing on pma pages uses a premultiplied Lanczos that
   scales a pixel down when its filtered alpha overshoots 255.
 - `extract_composite` warns when its regions span pma and non-pma pages, as
   `replace_composite` already did; such a composite is stacked as straight
