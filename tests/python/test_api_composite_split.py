@@ -290,7 +290,7 @@ def premultiplied(arr):
 
 
 def test_pma_split_renders_back_premultiplied():
-    # A pma page has no repack mesh, so every survivor holds its rect. The
+    # Loaded without a skeleton, so every survivor holds its rect. The
     # straight-alpha round trip cannot see a pma bug; render premultiplied.
     atlas = SpineAtlas.load(SAME_PMA, page())
     want = premultiplied(pattern(32, 16))
@@ -302,7 +302,7 @@ def test_pma_split_renders_back_premultiplied():
         piece = np.asarray(built.extract(name).convert("RGBA")).astype(float)
         out = piece + out * (1 - piece[..., 3:4] / 255)
     inside = union(32, 16, SAME_RECTS)
-    assert np.all(np.abs(out[inside] - want[inside]) <= 2)
+    assert np.array_equal(np.rint(out[inside]), want[inside])
     assert np.all(out[~inside] == 0)
 
 
@@ -313,12 +313,12 @@ def test_pma_extract_composite_round_trips():
     want = premultiplied(pattern(32, 16))
     inside = union(32, 16, SAME_RECTS)
     image = Image.fromarray(want, "RGBA")
-    for _ in range(2):
+    for cycle in range(6):
         atlas.replace_composite(["A", "B", "C"], image)
         image = atlas.build(split_composite=True).extract_composite(["A", "B", "C"])
         got = np.asarray(image).astype(int)
-        assert np.all(np.abs(got[inside] - want[inside]) <= 2)
-        assert np.all(got[~inside] == 0)
+        assert np.array_equal(got[inside], want[inside].astype(int)), cycle
+        assert not got[~inside].any(), cycle
 
 
 MIXED_PMA = (
@@ -359,6 +359,64 @@ def test_pma_stack_clips_additive_colour_instead_of_wrapping():
     atlas = SpineAtlas.load(text, Image.fromarray(arr, "RGBA"))
     got = np.asarray(atlas.extract_composite(["T", "B"]))
     assert np.all(got == [255, 255, 250, 255])
+
+
+PMA_ALPHAS = np.array([0, 1, 2, 21, 22, 35, 80, 128, 254, 255], np.uint8)
+
+
+def pma_round_trip_pattern(w, h):
+    """Premultiplied, every spec §5.6 alpha, additive RGB on alpha 0 and on
+    every 7th partial-alpha pixel (RGB > A)."""
+    ys, xs = np.mgrid[0:h, 0:w]
+    alpha = PMA_ALPHAS[(xs + 3 * ys) % len(PMA_ALPHAS)]
+    arr = np.zeros((h, w, 4), np.uint8)
+    arr[..., 0] = (xs * 37 + ys * 11) % 256
+    arr[..., 1] = (xs * 5 + ys * 53) % 256
+    arr[..., 2] = (xs * 17 + 90) % 256
+    capped = np.minimum(arr[..., :3], alpha[..., None])
+    additive = (alpha == 0) | ((xs + ys) % 7 == 0)
+    arr[..., :3] = np.where(additive[..., None], arr[..., :3], capped)
+    arr[..., 3] = alpha
+    return arr
+
+
+def stack_text(k):
+    """k full-canvas 16x16 regions on one pma page: rect ownership, every
+    holder covers every pixel."""
+    return f"page.png\nsize: {16 * k},16\npma: true\n" + "".join(
+        f"R{i}\n bounds: {16 * i},0,16,16\n" for i in range(k))
+
+
+@pytest.mark.parametrize("k", [2, 3, 4, 10])
+def test_pma_rect_round_trip_is_exact_for_six_cycles(k):
+    names = [f"R{i}" for i in range(k)]
+    want = pma_round_trip_pattern(16, 16)
+    atlas = SpineAtlas.load(stack_text(k), Image.new("RGBA", (16 * k, 16)))
+    image = Image.fromarray(want, "RGBA")
+    for cycle in range(6):
+        atlas.replace_composite(names, image)
+        atlas = atlas.build(split_composite=True, packer="shelf", packer_options=PackerOptions(mesh_aware=False))
+        image = atlas.extract_composite(names)
+        assert np.array_equal(np.asarray(image), want), cycle
+
+
+@pytest.mark.parametrize("packer, options, crop", [
+    ("polygons", PackerOptions(padding=4), True),
+    ("shelf", PackerOptions(mesh_aware=True), False),
+])
+def test_pma_hull_round_trip_is_exact_for_six_cycles(monkeypatch, packer, options, crop):
+    text = SAME.replace("size: 64,32\n", "size: 64,32\npma: true\n", 1)
+    atlas = load(monkeypatch, text, SAME_MESH)
+    want = pma_round_trip_pattern(32, 16)
+    inside = union(32, 16, SAME_HULLS)
+    image = Image.fromarray(want, "RGBA")
+    for cycle in range(6):
+        atlas.replace_composite(["A", "B", "C"], image)
+        atlas = atlas.build(split_composite=True, packer=packer, packer_options=options)
+        image = atlas.extract_composite(["A", "B", "C"], mesh_crop=crop)
+        got = np.asarray(image).astype(int)
+        assert np.array_equal(got[inside], want[inside].astype(int)), cycle
+        assert not got[~inside].any(), cycle
 
 
 # Force-resize on pma: see test_pma_mesh.py and test_pma_raster.py (spec 2026-10-26 §4).

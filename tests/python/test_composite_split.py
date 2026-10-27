@@ -5,6 +5,7 @@ from PIL import Image
 from atlas_toolkit.domain.alpha_split import SPLIT
 from atlas_toolkit.engine.composite_split import Piece, scaled_rect, split_composite
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from atlas_toolkit.raster.premultiplied import premultiplied_over
 
 QUAD = [0, 1, 2, 0, 2, 3]
 
@@ -123,6 +124,18 @@ def _two_holders_with_one_semi_pixel():
     return arr, metas, {"T": None, "B": None}
 
 
+def _two_pma_holders(rgb, alpha):
+    """Spec 2026-10-26 §3.5 for two all-pma holders, one pixel: T takes
+    SPLIT's top alpha, B is the residual holder and takes
+    rint((A - top) / (1 - top/255)); B's RGB is its share of the input, T's
+    RGB is the residual rint(C - B_rgb * (1 - top/255))."""
+    top = SPLIT[alpha][0]
+    bottom = int(np.rint((alpha - top) / (1 - top / 255)))
+    b = [int(np.rint(v * bottom / alpha)) for v in rgb]
+    t = [int(np.clip(np.rint(v - w * (1 - top / 255)), 0, 255)) for v, w in zip(rgb, b)]
+    return t + [top], b + [bottom]
+
+
 def test_pma_pieces_keep_rgb_times_their_alpha_share():
     arr, metas, geometry = _two_holders_with_one_semi_pixel()
     straight = _cut(arr, ["T", "B"], metas, geometry)
@@ -130,12 +143,12 @@ def test_pma_pieces_keep_rgb_times_their_alpha_share():
     top, bottom = SPLIT[128]
     assert straight["T"][1][0, 1].tolist() == [64, 32, 16, top]
     assert straight["B"][1][0, 1].tolist() == [64, 32, 16, bottom]
-    assert pma["T"][1][0, 1].tolist() == [int(np.rint(v * top / 128)) for v in (64, 32, 16)] + [top]
-    assert pma["B"][1][0, 1].tolist() == [int(np.rint(v * bottom / 128)) for v in (64, 32, 16)] + [bottom]
+    want_t, want_b = _two_pma_holders((64, 32, 16), 128)
+    assert pma["T"][1][0, 1].tolist() == want_t
+    assert pma["B"][1][0, 1].tolist() == want_b
     assert pma["T"][1][1, 3].tolist() == [200, 100, 50, 255]      # opaque: share 1, unscaled
-    t, b = pma["T"][1][0, 1].astype(float), pma["B"][1][0, 1].astype(float)
-    out = t + b * (1 - t[3] / 255)                                 # premultiplied over, bottom first
-    assert np.all(np.abs(out - [64, 32, 16, 128]) <= 1)
+    out = premultiplied_over(pma["T"][1][0, 1], pma["B"][1][0, 1])  # bottom first
+    assert np.rint(out).tolist() == [64, 32, 16, 128]
 
 
 def test_pma_scaling_follows_each_survivors_own_page():
@@ -146,10 +159,12 @@ def test_pma_scaling_follows_each_survivors_own_page():
     assert pieces["B"][1][0, 1].tolist() == [int(np.rint(v * bottom / 128)) for v in (64, 32, 16)] + [bottom]
 
 
-def test_pma_three_holders_scale_rgb_by_share_and_restack_within_two():
+def test_pma_three_holders_restack_exactly():
     # Every semi alpha on a pma page, three whole-canvas holders (T on top):
-    # each piece is RGB * its share, stays valid premultiplied (RGB <= alpha),
-    # and premultiplied over (bottom first, rounded once) gives back the input.
+    # the lower pieces are RGB * their share, T takes the residual (spec
+    # 2026-10-26 §3.5), every piece stays valid premultiplied (RGB <= alpha),
+    # and premultiplied over (bottom first, rounded once) gives back the
+    # input exactly.
     names = ["T", "M", "B"]
     metas = {n: meta(None, 4, 2) for n in names}
     for colour in [(64, 32, 16), (128, 0, 1), (255, 255, 255), (3, 90, 128)]:
@@ -162,7 +177,8 @@ def test_pma_three_holders_scale_rgb_by_share_and_restack_within_two():
             out = np.zeros(4)
             for name in reversed(names):
                 px = pieces[name][1][0, 1].astype(float)
-                assert px[:3].tolist() == [np.rint(v * (px[3] / alpha)) for v in rgb]
+                if name != "T":
+                    assert px[:3].tolist() == [np.rint(v * (px[3] / alpha)) for v in rgb]
                 assert np.all(px[:3] <= px[3])
-                out = px + out * (1 - px[3] / 255)
-            assert np.all(np.abs(np.rint(out) - [*rgb, alpha]) <= 2), (rgb, alpha)
+                out = premultiplied_over(px, out)
+            assert np.rint(out).tolist() == [*rgb, alpha], (rgb, alpha)
