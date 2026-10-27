@@ -452,9 +452,10 @@ class SpineAtlas:
         own pieces, stored at the image's resolution. On pma pages the image
         is read premultiplied. A group whose regions all live on pma pages,
         built with split_composite=True, comes back from extract_composite
-        exactly as long as no region is resized (force_resize over differing
-        canvas sizes is lossy) and mesh_crop matches the build (True after a
-        mesh-aware build). Additive colour on alpha-0 pixels stays with the
+        exactly as long as it is extracted with the same names in the same
+        order, no region is resized (force_resize over differing canvas sizes
+        is lossy) and mesh_crop matches the build (True after a mesh-aware
+        build). Additive colour on alpha-0 pixels stays with the
         topmost region covering it. A group that mixes pma and non-pma pages
         warns and is split as before, except on its pma regions: they own
         their mesh hulls, are cleared outside them, and keep an alpha-0

@@ -1,7 +1,6 @@
 """Premultiplied raster primitives (spec 2026-10-26 §3.1, §3.9, §4, §5.9)."""
 import numpy as np
 import pytest
-from PIL import Image
 
 from atlas_toolkit.raster import lanczos
 from atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
