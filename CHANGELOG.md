@@ -4,6 +4,13 @@ All notable changes to AtlasToolkit. Versions match the Git tags and the
 [GitHub Releases](https://github.com/com55/AtlasToolkit/releases), which carry
 the full notes and screenshots.
 
+## [0.4.2] - 2026-10-28
+
+### Fixed
+- Extracting several regions to a folder that already holds files with the same
+  names: the "Overwrite files?" dialog was covered by the Processing overlay and
+  could not be clicked. Only the extraction itself shows Processing now.
+
 ## [0.4.1] - 2026-10-12
 
 ### Fixed
