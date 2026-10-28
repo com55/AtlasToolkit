@@ -6,7 +6,7 @@ from __future__ import annotations
 _API_NAMES = frozenset({
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
-    "CanvasTooLarge", "Packer", "PackerOptions",
+    "CanvasTooLarge", "Packer", "PackerOptions", "AlphaMode", "MixedAlphaGroup",
 })
 
 
