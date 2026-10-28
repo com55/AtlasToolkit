@@ -36,8 +36,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   strings) on `replace`, `replace_composite`, `add_region` and every extract
   method: the image is converted to or from each page's own alpha space.
   Without it nothing changes. On a pma page a straight extract drops additive
-  colour and is otherwise exact when replaced back with the same mode. A composite
-  group spanning pma and non-pma pages raises `MixedAlphaGroup` when
+  colour and is otherwise exact when replaced back with the same mode. A
+  composite group spanning pma and non-pma pages raises `MixedAlphaGroup` when
   `alpha_mode` is given.
 - Packed pages are capped at 10000 px per side: `CanvasTooLarge` is raised
   before the page is allocated, with `.page` naming the page on a multi-page

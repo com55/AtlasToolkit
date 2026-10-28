@@ -301,18 +301,25 @@ def test_files_carry_the_conversion(tmp_path):
 ENTRY_POINTS = {
     "replace": lambda a, p, m: a.replace({"A": img(straight_pattern(8, 8, 7))}, alpha_mode=m),
     "replace_unknown_name": lambda a, p, m: a.replace({"nope": img(straight_pattern(8, 8, 7))}, alpha_mode=m),
+    "replace_missing_image": lambda a, p, m: a.replace({"A": p / "missing.png"}, alpha_mode=m),
+    "replace_not_a_mapping": lambda a, p, m: a.replace([("A", img(straight_pattern(8, 8, 7)))], alpha_mode=m),
     "replace_composite": lambda a, p, m: a.replace_composite(["A", "B"], img(straight_pattern(8, 8, 7)), alpha_mode=m),
     "replace_composite_unknown_name": lambda a, p, m: a.replace_composite(["nope"], img(straight_pattern(8, 8, 7)), alpha_mode=m),
+    "replace_composite_missing_image": lambda a, p, m: a.replace_composite(["A", "B"], p / "missing.png", alpha_mode=m),
     "add_region": lambda a, p, m: a.add_region("N", img(straight_pattern(8, 8, 7)), alpha_mode=m),
     "add_region_missing_image": lambda a, p, m: a.add_region("N", p / "missing.png", alpha_mode=m),
     "extract": lambda a, p, m: a.extract("A", alpha_mode=m),
     "extract_unknown_name": lambda a, p, m: a.extract("nope", alpha_mode=m),
+    "extract_none": lambda a, p, m: a.extract(None, alpha_mode=m),
     "extract_all": lambda a, p, m: a.extract_all(alpha_mode=m),
     "extract_composite": lambda a, p, m: a.extract_composite(["A", "B"], alpha_mode=m),
+    "extract_composite_unknown_name": lambda a, p, m: a.extract_composite(["nope"], alpha_mode=m),
+    "extract_composite_empty": lambda a, p, m: a.extract_composite([], alpha_mode=m),
     "extract_to_str": lambda a, p, m: a.extract_to("A", p / "one.png", alpha_mode=m),
     "extract_to_list": lambda a, p, m: a.extract_to(["A", "B"], p / "list", alpha_mode=m),
     "extract_all_to": lambda a, p, m: a.extract_all_to(p / "all", alpha_mode=m),
     "extract_composite_to": lambda a, p, m: a.extract_composite_to(["A", "B"], p / "group.png", alpha_mode=m),
+    "extract_composite_to_unknown_name": lambda a, p, m: a.extract_composite_to(["nope"], p / "group.png", alpha_mode=m),
 }
 
 
