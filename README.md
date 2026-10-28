@@ -122,6 +122,16 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
   `replace` / `replace_composite` take premultiplied images. Mesh Cropping and
   mesh-aware packing clear all four channels outside the hull. A composite
   that mixes pma and non-pma pages is stacked as straight alpha and warns.
+- For straight-alpha images, such as PNGs from an ordinary image editor, pass
+  `alpha_mode="straight"` (or `AlphaMode.STRAIGHT`) to the edit and extract
+  methods: `atlas.replace({"hero": "hero.png"}, alpha_mode="straight")`. Each
+  image is converted to or from its page's own space; `"premultiplied"` does the
+  same for straight pages. Without `alpha_mode` nothing is converted. Only the
+  page's own space (no `alpha_mode`, or `"premultiplied"` on a pma page)
+  round-trips exactly: a straight extract of a pma page drops additive colour
+  (RGB above alpha, including colour on alpha-0 pixels). A composite
+  group that mixes pma and non-pma pages raises `MixedAlphaGroup` when
+  `alpha_mode` is given.
 - Multi-page atlases can be edited. Only the pages that own an edited
   region are repacked; the others are kept as they are. `add_region(page=...)`
   picks the page, otherwise the page whose regions cover the least area is

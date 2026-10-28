@@ -377,7 +377,9 @@ class SpineAtlas:
         hull (on a straight page it clears alpha only). `alpha_mode`
         ("straight" or "premultiplied") converts each image from its page's
         own space; None keeps that space. A straight extract of a pma page
-        loses additive colour (RGB above alpha) and alpha-0 colour."""
+        loses additive colour (RGB above alpha) and alpha-0 colour; a
+        premultiplied extract of a straight page rounds colour at partial
+        alpha and drops alpha-0 colour."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         if names is None:
             raise TypeError("extract() needs a name or a list of names; use extract_all() for every region")
@@ -502,7 +504,9 @@ class SpineAtlas:
         before anything is recorded, so a failing call records nothing.
         `alpha_mode` ("straight" or "premultiplied") says which space the
         images are in; each is converted to its region's page space. None
-        means they are already in it."""
+        means they are already in it. Converting rounds colour at partial
+        alpha; premultiplied input to a straight page also clips additive
+        colour (RGB above alpha) and drops alpha-0 colour."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         if not isinstance(images, Mapping):
             raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
@@ -552,8 +556,9 @@ class SpineAtlas:
         pixel's colour only when they are the topmost region covering it.
 
         `alpha_mode` says which space the image is in and converts it once to
-        the group's page space; with alpha_mode, a group spanning pma and
-        non-pma pages raises MixedAlphaGroup and records nothing."""
+        the group's page space, with the losses replace() describes; with
+        alpha_mode, a group spanning pma and non-pma pages raises
+        MixedAlphaGroup and records nothing."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         wanted = [names] if isinstance(names, str) else list(names)
         keys = [self._built_key(name) for name in wanted]
@@ -581,7 +586,8 @@ class SpineAtlas:
         takes its page's header (filter, pma, ...): pass `page` when that
         matters. An unknown page raises ValueError and records nothing.
         `alpha_mode` says which space the image is in and converts it to the
-        chosen page's space; None means it is already in it."""
+        chosen page's space, with the losses replace() describes; None means
+        it is already in it."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         picture = _edit_image(image)
         if page is None:
