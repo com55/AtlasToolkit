@@ -898,22 +898,27 @@ export const AtlasAPI = {
     const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
-    const run = async () => {
-    const extracted = [];
-
-    let count = 0;
-    for (const { key, label } of targets) {
-      const canvas = _processor.extractRegion(key);
-      if (!canvas) continue;
-      try {
-        const safeName = key.replace(/[^\w.\- ]/g, '_');
-        const blob = await _canvasToBlob(canvas);
-        extracted.push({ filename: `${safeName}.png`, blob });
-        count++;
-      } catch (e) {
-        console.error(`Failed to extract ${key}:`, e);
+    // Only the extraction is painted busy. The save step opens pickers and
+    // the overwrite confirm (z 4500), which #busy-overlay (z 4700) would cover.
+    const extractAll = async () => {
+      const done = [];
+      for (const { key } of targets) {
+        const canvas = _processor.extractRegion(key);
+        if (!canvas) continue;
+        try {
+          const safeName = key.replace(/[^\w.\- ]/g, '_');
+          const blob = await _canvasToBlob(canvas);
+          done.push({ filename: `${safeName}.png`, blob });
+        } catch (e) {
+          console.error(`Failed to extract ${key}:`, e);
+        }
       }
-    }
+      return done;
+    };
+    const extracted = targets.length > 1
+      ? await withBusy(BUSY_LABEL, extractAll)
+      : await extractAll();
+    const count = extracted.length;
 
     if (extracted.length === 0) return 'No regions to extract.';
 
@@ -946,18 +951,15 @@ export const AtlasAPI = {
       }
 
       // Browser tab, multiple images: bundle into a zip.
-      const zipBlob = await createZip(
+      const zipBlob = await withBusy(BUSY_LABEL, () => createZip(
         extracted.map(item => ({ name: item.filename, data: item.blob })),
-      );
+      ));
       await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
       return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
     } catch (e) {
       if (e && e.name === 'AbortError') return 'Cancelled';
       throw e;
     }
-    };
-    if (targets.length > 1) return withBusy(BUSY_LABEL, run);
-    return run();
   },
 
   // ── Modify Mode ────────────────────────────────────────────────────────────
