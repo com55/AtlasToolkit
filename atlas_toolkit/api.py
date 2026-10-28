@@ -505,8 +505,8 @@ class SpineAtlas:
         `alpha_mode` ("straight" or "premultiplied") says which space the
         images are in; each is converted to its region's page space. None
         means they are already in it. Converting rounds colour at partial
-        alpha; premultiplied input to a straight page also clips additive
-        colour (RGB above alpha) and drops alpha-0 colour."""
+        alpha and drops alpha-0 colour; premultiplied input to a straight
+        page also clips additive colour (RGB above alpha)."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         if not isinstance(images, Mapping):
             raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
