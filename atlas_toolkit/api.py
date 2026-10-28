@@ -15,8 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
+import numpy as np
 from PIL import Image
 
+from atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.packing import CanvasTooLargeError
@@ -24,11 +26,12 @@ from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAl
 from atlas_toolkit.packer import Packer, PackerOptions, ResolvedPack, resolve_packer
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
-    "CanvasTooLarge",
+    "CanvasTooLarge", "MixedAlphaGroup",
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
@@ -91,6 +94,20 @@ class CanvasTooLarge(AtlasError, ValueError):
         return type(self), (self.width, self.height, self.limit, self.page), self.__dict__
 
 
+class MixedAlphaGroup(AtlasError, ValueError):
+    """alpha_mode was given for a composite group whose regions sit on both
+    pma and non-pma pages; that group has no single alpha space to convert
+    from. Raised before anything is recorded or extracted."""
+
+    def __init__(self, names: list[str]) -> None:
+        listed = ", ".join(repr(name) for name in names)
+        super().__init__(f"alpha_mode needs a composite group on pages of one kind; {listed} mix pma and non-pma pages")
+        self.names = names
+
+    def __reduce__(self):
+        return type(self), (self.names,), self.__dict__
+
+
 @dataclass(frozen=True)
 class Region:
     name: str
@@ -150,6 +167,26 @@ def _edit_image(value: object) -> Image.Image:
     if image.width == 0 or image.height == 0:
         raise AtlasError("image has zero width or height")
     return image
+
+
+def _same_space(mode: AlphaMode | None, pma: bool) -> bool:
+    return mode is None or (mode is AlphaMode.PREMULTIPLIED) == pma
+
+
+def _to_page(image: Image.Image, mode: AlphaMode | None, pma: bool) -> Image.Image:
+    """An edit image in `mode`, converted to its page's own alpha space."""
+    if _same_space(mode, pma):
+        return image
+    convert = premultiply if pma else unpremultiply
+    return Image.fromarray(convert(np.asarray(image)))
+
+
+def _from_page(image: Image.Image, mode: AlphaMode | None, pma: bool) -> Image.Image:
+    """An extracted image in its page's own alpha space, converted to `mode`."""
+    if _same_space(mode, pma):
+        return image
+    convert = unpremultiply if pma else premultiply
+    return Image.fromarray(convert(np.asarray(image)))
 
 
 def _skeleton_bytes(value: object) -> bytes | None:
@@ -331,10 +368,17 @@ class SpineAtlas:
 
     # -- extract -----------------------------------------------------------
 
-    def extract(self, names: str | list[str] | None = None, *, mesh_crop: bool = False):
+    def extract(
+        self, names: str | list[str] | None = None, *, mesh_crop: bool = False,
+        alpha_mode: AlphaMode | str | None = None,
+    ):
         """On a pma page pixels are returned premultiplied, alpha-0 colour
         included, and mesh_crop=True clears all four channels outside the
-        hull (on a straight page it clears alpha only)."""
+        hull (on a straight page it clears alpha only). `alpha_mode`
+        ("straight" or "premultiplied") converts each image from its page's
+        own space; None keeps that space. A straight extract of a pma page
+        loses additive colour (RGB above alpha) and alpha-0 colour."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         if names is None:
             raise TypeError("extract() needs a name or a list of names; use extract_all() for every region")
         single = isinstance(names, str)
@@ -342,28 +386,44 @@ class SpineAtlas:
         keys = [self._built_key(name) for name in wanted]
         with self._mesh_crop(mesh_crop):
             images = self._session.extract_images(keys)
-        out = {name: images[key] for name, key in zip(wanted, keys)}
+        out = {
+            name: _from_page(images[key], alpha_mode, self._key_pma(key))
+            for name, key in zip(wanted, keys)
+        }
         return out[names] if single else out
 
-    def extract_all(self, *, mesh_crop: bool = False) -> dict[str, Image.Image]:
+    def extract_all(
+        self, *, mesh_crop: bool = False, alpha_mode: AlphaMode | str | None = None,
+    ) -> dict[str, Image.Image]:
+        """extract() of every region; `alpha_mode` as in extract()."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         names = [label for key, label in self._labels if key in self._pristine_keys]
-        return self.extract(names, mesh_crop=mesh_crop)
+        return self.extract(names, mesh_crop=mesh_crop, alpha_mode=alpha_mode)
 
     def extract_composite(
         self, names: str | list[str], *, force_resize: bool = False, mesh_crop: bool = False,
+        alpha_mode: AlphaMode | str | None = None,
     ) -> Image.Image:
         """On pma pages pixels are returned premultiplied, alpha-0 colour
         included, and mesh_crop=True clears all four channels outside the
         hull (on a straight page it clears alpha only). A group that spans pma
-        and non-pma pages warns and is stacked as straight alpha."""
-        return self._extract_composite(names, force_resize, mesh_crop)
+        and non-pma pages warns and is stacked as straight alpha.
+        `alpha_mode` converts the composite from its pages' space, as in
+        extract(); with alpha_mode, a group spanning pma and non-pma pages
+        raises MixedAlphaGroup instead."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
+        return self._extract_composite(names, force_resize, mesh_crop, alpha_mode)
 
-    def _extract_composite(self, names: str | list[str], force_resize: bool, mesh_crop: bool) -> Image.Image:
+    def _extract_composite(
+        self, names: str | list[str], force_resize: bool, mesh_crop: bool, alpha_mode: AlphaMode | None,
+    ) -> Image.Image:
         # Called straight from a public method, so stacklevel=3 is its caller.
         wanted = [names] if isinstance(names, str) else list(names)
         if not wanted:
             raise TypeError("extract_composite() needs at least one region name")
         keys = [self._built_key(name) for name in wanted]
+        if alpha_mode is not None and self._spans_pma(keys):
+            raise MixedAlphaGroup(wanted)
         if self._spans_pma(keys):
             warnings.warn(
                 "extract_composite spans pma and non-pma pages: the composite is stacked "
@@ -371,41 +431,62 @@ class SpineAtlas:
                 UserWarning, stacklevel=3,
             )
         with self._mesh_crop(mesh_crop):
-            return self._session.get_preview_image(keys, force_resize)
+            image = self._session.get_preview_image(keys, force_resize)
+        return _from_page(image, alpha_mode, self._key_pma(keys[0]))
+
+    def _page_pma(self, filename: str) -> bool:
+        """The pma flag of the first page named `filename`, as AtlasModifier.pma reads it."""
+        return next(page.pma for page in self._document.pages if page.filename == filename)
+
+    def _key_pma(self, key: str) -> bool:
+        return self._page_pma(self._pristine[key].page_filename)
 
     def _spans_pma(self, keys: list[str]) -> bool:
         """True when `keys` (built keys) live on both pma and non-pma pages."""
-        pma = {page.filename: page.pma for page in self._document.pages}
-        return len({pma[self._pristine[key].page_filename] for key in keys}) > 1
+        return len({self._key_pma(key) for key in keys}) > 1
 
-    def extract_to(self, names: str | list[str], path: str | os.PathLike, *, mesh_crop: bool = False) -> None:
+    def extract_to(
+        self, names: str | list[str], path: str | os.PathLike, *, mesh_crop: bool = False,
+        alpha_mode: AlphaMode | str | None = None,
+    ) -> None:
+        """Save extract() as PNG: one name to the file `path`, a list into the
+        directory `path`; `alpha_mode` as in extract()."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         if isinstance(names, str):
-            image = self.extract(names, mesh_crop=mesh_crop)
+            image = self.extract(names, mesh_crop=mesh_crop, alpha_mode=alpha_mode)
             target = Path(path)
             target.parent.mkdir(parents=True, exist_ok=True)
             image.save(target, format="PNG")
             return
-        self._write_many(list(names), Path(path), mesh_crop)
+        self._write_many(list(names), Path(path), mesh_crop, alpha_mode)
 
-    def extract_all_to(self, directory: str | os.PathLike, *, mesh_crop: bool = False) -> None:
+    def extract_all_to(
+        self, directory: str | os.PathLike, *, mesh_crop: bool = False,
+        alpha_mode: AlphaMode | str | None = None,
+    ) -> None:
+        """Save extract_all() as PNGs into `directory`; `alpha_mode` as in extract()."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         names = [label for key, label in self._labels if key in self._pristine_keys]
-        self._write_many(names, Path(directory), mesh_crop)
+        self._write_many(names, Path(directory), mesh_crop, alpha_mode)
 
     def extract_composite_to(
         self, names: str | list[str], path: str | os.PathLike, *,
         force_resize: bool = False, mesh_crop: bool = False,
+        alpha_mode: AlphaMode | str | None = None,
     ) -> None:
-        image = self._extract_composite(names, force_resize, mesh_crop)
+        """Save extract_composite() as a PNG; `alpha_mode` as in extract_composite()."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
+        image = self._extract_composite(names, force_resize, mesh_crop, alpha_mode)
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         image.save(target, format="PNG")
 
-    def _write_many(self, names: list[str], directory: Path, mesh_crop: bool) -> None:
+    def _write_many(self, names: list[str], directory: Path, mesh_crop: bool, alpha_mode: AlphaMode | None) -> None:
         files = [_file_name(name) for name in names]
         clashes = sorted(name for name, count in Counter(os.path.normcase(f) for f in files).items() if count > 1)
         if clashes:
             raise AtlasError(f"region names map to the same file name: {', '.join(clashes)}")
-        images = self.extract(names, mesh_crop=mesh_crop)
+        images = self.extract(names, mesh_crop=mesh_crop, alpha_mode=alpha_mode)
         directory.mkdir(parents=True, exist_ok=True)
         for name, file_name in zip(names, files):
             images[name].save(directory / file_name, format="PNG")
@@ -416,12 +497,19 @@ class SpineAtlas:
         self._build_cache = None
         self._refresh_names()
 
-    def replace(self, images: Mapping[str, ImageLike]) -> None:
+    def replace(self, images: Mapping[str, ImageLike], *, alpha_mode: AlphaMode | str | None = None) -> None:
         """Replace each named region's pixels. Every name and image is checked
-        before anything is recorded, so a failing call records nothing."""
+        before anything is recorded, so a failing call records nothing.
+        `alpha_mode` ("straight" or "premultiplied") says which space the
+        images are in; each is converted to its region's page space. None
+        means they are already in it."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         if not isinstance(images, Mapping):
             raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
-        entries = [(self._built_key(name), _edit_image(image)) for name, image in images.items()]
+        entries = []
+        for name, image in images.items():
+            key = self._built_key(name)
+            entries.append((key, _to_page(_edit_image(image), alpha_mode, self._key_pma(key))))
         if not entries:
             return
         try:
@@ -430,7 +518,9 @@ class SpineAtlas:
         finally:
             self._edited()
 
-    def replace_composite(self, names: list[str], image: ImageLike) -> None:
+    def replace_composite(
+        self, names: list[str], image: ImageLike, *, alpha_mode: AlphaMode | str | None = None,
+    ) -> None:
         """Replace several regions with one image.
 
         By default each region's whole canvas becomes the image at the image's
@@ -459,9 +549,17 @@ class SpineAtlas:
         topmost region covering it. A group that mixes pma and non-pma pages
         warns and is split as before, except on its pma regions: they own
         their mesh hulls, are cleared outside them, and keep an alpha-0
-        pixel's colour only when they are the topmost region covering it."""
-        keys = [self._built_key(name) for name in ([names] if isinstance(names, str) else names)]
+        pixel's colour only when they are the topmost region covering it.
+
+        `alpha_mode` says which space the image is in and converts it once to
+        the group's page space; with alpha_mode, a group spanning pma and
+        non-pma pages raises MixedAlphaGroup and records nothing."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
+        wanted = [names] if isinstance(names, str) else list(names)
+        keys = [self._built_key(name) for name in wanted]
         picture = _edit_image(image)
+        if alpha_mode is not None and self._spans_pma(keys):
+            raise MixedAlphaGroup(wanted)
         if self._spans_pma(keys):
             warnings.warn(
                 "replace_composite spans pma and non-pma pages: the image is read as "
@@ -470,15 +568,26 @@ class SpineAtlas:
             )
         if not keys:
             return
+        picture = _to_page(picture, alpha_mode, self._key_pma(keys[0]))
         self._session.apply_mod_image(picture, keys, composite=True)
         self._edited()
 
-    def add_region(self, name: str, image: ImageLike, page: str | None = None) -> None:
+    def add_region(
+        self, name: str, image: ImageLike, page: str | None = None, *,
+        alpha_mode: AlphaMode | str | None = None,
+    ) -> None:
         """Add a region. `page` is a page file name (a key of `pages`); None
         picks the page whose regions cover the least area now. The region
         takes its page's header (filter, pma, ...): pass `page` when that
-        matters. An unknown page raises ValueError and records nothing."""
+        matters. An unknown page raises ValueError and records nothing.
+        `alpha_mode` says which space the image is in and converts it to the
+        chosen page's space; None means it is already in it."""
+        alpha_mode = parse_alpha_mode(alpha_mode)
         picture = _edit_image(image)
+        if page is None:
+            page = self._session.pick_add_page()
+        if page in self._document.page_filenames():
+            picture = _to_page(picture, alpha_mode, self._page_pma(page))
         try:
             self._session.add_region(picture, name, page=page)
         except RegionNameError as error:

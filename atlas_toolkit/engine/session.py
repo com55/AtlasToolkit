@@ -777,6 +777,11 @@ class AtlasSession:
             False,
         )
 
+    def pick_add_page(self) -> str:
+        """The page add_region(page=None) would choose now (spec 2026-10-21 §3.3)."""
+        self._require_open()
+        return self._lightest_page()
+
     def add_region(self, image: bytes | object, name: str, page: str | None = None) -> None:
         """`page` names the page file; None picks the page with the lowest
         add-time weight now (spec 2026-10-21 §3.3)."""
