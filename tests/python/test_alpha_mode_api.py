@@ -320,6 +320,7 @@ ENTRY_POINTS = {
     "extract_all_to": lambda a, p, m: a.extract_all_to(p / "all", alpha_mode=m),
     "extract_composite_to": lambda a, p, m: a.extract_composite_to(["A", "B"], p / "group.png", alpha_mode=m),
     "extract_composite_to_unknown_name": lambda a, p, m: a.extract_composite_to(["nope"], p / "group.png", alpha_mode=m),
+    "extract_composite_to_empty": lambda a, p, m: a.extract_composite_to([], p / "group.png", alpha_mode=m),
 }
 
 
