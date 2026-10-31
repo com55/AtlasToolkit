@@ -39,6 +39,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   colour and is otherwise exact when replaced back with the same mode. A
   composite group spanning pma and non-pma pages raises `MixedAlphaGroup` when
   `alpha_mode` is given.
+- Loading refuses an atlas that lists one page file twice with different
+  `pma` values (`ConflictingPagePma`). Reading a region bigger than its page
+  image raises `ValueError` instead of allocating a padded crop of any size.
 - Packed pages are capped at 10000 px per side: `CanvasTooLarge` is raised
   before the page is allocated, with `.page` naming the page on a multi-page
   atlas.

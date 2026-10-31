@@ -7,7 +7,14 @@ _API_NAMES = frozenset({
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge", "Packer", "PackerOptions", "AlphaMode", "MixedAlphaGroup",
+    "ConflictingPagePma",
 })
+__all__ = sorted(_API_NAMES)
+
+
+def __dir__() -> list[str]:
+    # The API names load lazily, so list them here for dir() and completion.
+    return sorted(set(globals()) | _API_NAMES)
 
 
 def __getattr__(name: str):

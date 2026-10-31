@@ -288,7 +288,12 @@ class AtlasSession:
         cover the least area. Pristine regions count their scaled bounds, a
         replaced region its prepared image (each handle once), an added
         region its source; removed regions count nothing. Ties go to the
-        earlier page. Never hashes or extracts."""
+        earlier page. Never hashes or extracts.
+
+        PERF NOTE (deferred, user ruling 2026-10-31): this rescans every
+        region on every call, so bulk auto-page adds are slower than with
+        page= (300 adds: 7.1 s vs 4.6 s). No real use case adds that many
+        yet; an incremental per-page area total would fix it."""
         filenames = list(dict.fromkeys(self._document.page_filenames()))
         if len(filenames) == 1:
             return filenames[0]

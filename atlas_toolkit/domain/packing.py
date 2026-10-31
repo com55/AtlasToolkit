@@ -302,8 +302,8 @@ def normalize_gap(value: object) -> int:
             return 4  # PEP 515 grouping; Number() yields NaN -> 4
         try:
             number = float(value)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return 4
+        except (TypeError, ValueError, OverflowError):
+            return 4  # an int too big for a float: JS Number() gives Infinity -> 4
     if math.isnan(number) or math.isinf(number):
         return 4
     n = math.floor(number)
@@ -340,7 +340,6 @@ def _rotation_variants(item: dict, gap: int) -> list[dict]:
             if cells_y.size else np.zeros(0, dtype=np.intp)
         variants.append({
             "deg": deg, "w": width, "h": height, "mask": mask,
-            "solid": bool(mask.all()), "empty": not mask.any(),
             "samples": (cells_y[picks], cells_x[picks]),
             "dilated_mask": _dilate_grid(mask, gap),
         })
