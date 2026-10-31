@@ -136,6 +136,11 @@ def test_normalize_gap_matches_real_js(value, run_packing_oracle):
     assert normalize_gap(value) == expected
 
 
+def test_normalize_gap_falls_back_on_an_int_too_big_for_a_float():
+    # JS Number(10 ** 400) is Infinity, which normalizeGap maps to 4.
+    assert normalize_gap(10**400) == 4
+
+
 def test_rotations_are_not_interchangeable():
     # Guards against a future edit silently reintroducing 180-degree
     # symmetry, which would make the CW/CCW distinction untestable.

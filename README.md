@@ -139,8 +139,11 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
 - A region added with `add_region` can be extracted only after `build()`.
 - Errors derive from `AtlasError`: `RegionNotFound`, `DuplicateRegionName`,
   `InvalidRegionName`, `MissingPageImage`, `SkeletonUnavailable`,
-  `CanvasTooLarge` and `MixedAlphaGroup`. `CanvasTooLarge` is raised when a packed page would be over
+  `CanvasTooLarge`, `MixedAlphaGroup` and `ConflictingPagePma`. `CanvasTooLarge` is raised when a packed page would be over
   10000 px on a side; `.page` names the page on a multi-page atlas.
+  `ConflictingPagePma` is raised on load when one page file is listed twice
+  with different `pma` values. A region bigger than its page image raises
+  `ValueError` when it is read.
 
 ## Features
 

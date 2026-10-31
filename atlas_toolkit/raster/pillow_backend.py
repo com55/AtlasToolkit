@@ -89,6 +89,12 @@ class PillowRasterBackend:
         img = self._images[handle]
         is_swapped = rotate in (90, 270)
         crop_w, crop_h = (h, w) if is_swapped else (w, h)
+        # Pillow zero-pads a crop past the edge, so atlas text could make it
+        # allocate any size. A real region never outgrows its own page.
+        if crop_w > img.width or crop_h > img.height:
+            raise ValueError(
+                f"crop {crop_w}x{crop_h} is larger than its {img.width}x{img.height} source image",
+            )
         cropped = img.crop((x, y, x + crop_w, y + crop_h))
         if rotate == 90:
             result = cropped.transpose(Image.Transpose.ROTATE_270)

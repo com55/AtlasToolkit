@@ -31,7 +31,7 @@ from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
-    "CanvasTooLarge", "MixedAlphaGroup",
+    "CanvasTooLarge", "MixedAlphaGroup", "ConflictingPagePma",
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
@@ -54,6 +54,18 @@ class DuplicateRegionName(AtlasError, ValueError):
     def __init__(self, names: list[str]) -> None:
         super().__init__(f"atlas has duplicate region names: {', '.join(names)}")
         self.names = names
+
+
+class ConflictingPagePma(AtlasError, ValueError):
+    """The atlas text names one page file more than once with different
+    `pma` values, so the page has no single alpha space. Raised on load."""
+
+    def __init__(self, page: str) -> None:
+        super().__init__(f"page {page!r} is listed more than once with different pma values")
+        self.page = page
+
+    def __reduce__(self):
+        return type(self), (self.page,), self.__dict__
 
 
 class InvalidRegionName(AtlasError, ValueError):
@@ -265,8 +277,10 @@ class SpineAtlas:
     @classmethod
     def _create(
         cls, atlas_text: str, pages: dict[str, Image.Image], skeleton: bytes | None,
-        allowed: frozenset[str] | None,
+        allowed: frozenset[str] | None, mesh: tuple[str | None, dict | None] | None = None,
     ) -> "SpineAtlas":
+        """`mesh` is a parent atlas's (_mesh_reason, _mesh_lookup) for the
+        same skeleton, so a built atlas does not parse the .skel again."""
         document = AtlasDocument.parse(auto_convert_atlas(atlas_text))
         counts = Counter(
             region.atlas_name or region.name for page in document.pages for region in page.regions
@@ -274,6 +288,10 @@ class SpineAtlas:
         duplicates = sorted(name for name, count in counts.items() if count > 1)
         if duplicates:
             raise DuplicateRegionName(duplicates)
+        page_pma: dict[str, bool] = {}
+        for page in document.pages:
+            if page_pma.setdefault(page.filename, page.pma) != page.pma:
+                raise ConflictingPagePma(page.filename)
         self = object.__new__(cls)
         self._text = atlas_text
         self._document = document
@@ -284,7 +302,8 @@ class SpineAtlas:
         )
         self._skeleton = skeleton
         self._allowed = allowed
-        self._mesh_reason, lookup = _mesh_state(skeleton)
+        self._mesh_reason, lookup = mesh if mesh is not None else _mesh_state(skeleton)
+        self._mesh_lookup = lookup
         if lookup is not None:
             self._session.set_mesh_data(
                 {name: mesh for name, mesh in lookup.items() if allowed is None or name in allowed}
@@ -670,13 +689,16 @@ class SpineAtlas:
         if needs_mesh:
             self._require_mesh()
         if not self.has_changes:
-            return SpineAtlas._create(self._text, self._session.export_pages(), self._skeleton, self._allowed)
+            return SpineAtlas._create(
+                self._text, self._session.export_pages(), self._skeleton, self._allowed,
+                (self._mesh_reason, self._mesh_lookup),
+            )
         options = (resolved, bool(split_composite))
         if self._build_cache is None or self._build_cache[0] != options:
             text, pages = self._pack(*options)
             self._build_cache = (options, text, pages, self._child_allowed())
         _, text, pages, allowed = self._build_cache
-        return SpineAtlas._create(text, pages, self._skeleton, allowed)
+        return SpineAtlas._create(text, pages, self._skeleton, allowed, (self._mesh_reason, self._mesh_lookup))
 
     def save(
         self, atlas_path: str | os.PathLike, *, packer: Packer | str = Packer.SHELF,
