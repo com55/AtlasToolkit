@@ -12,6 +12,16 @@ def solid(name, w, h):
     return {"name": name, "w": w, "h": h, "footprint": bytes([1]) * (w * h)}
 
 
+def test_an_over_cap_page_still_takes_adds_that_fit(monkeypatch):
+    import atlas_toolkit.domain.packing as packing
+    monkeypatch.setattr(packing, "MAX_CANVAS", 16)
+    live = np.ones((20, 20), bool)
+    live[0:8, 0:8] = False
+    out = packing.nest_place_into([solid("N", 2, 2)], 20, 20, live, gap_distance=1)
+    assert out["placements"][0]["x"] == 0 and out["placements"][0]["y"] == 0
+    assert (out["canvas_w"], out["canvas_h"]) == (20, 20)
+
+
 def triangle(name, uvs, w, h):
     raster = PillowRasterBackend()
     mask = raster.read_alpha_mask(raster.rasterize_mesh_mask(uvs, [0, 1, 2], w, h))

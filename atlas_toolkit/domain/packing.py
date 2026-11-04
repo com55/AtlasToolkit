@@ -604,7 +604,7 @@ def nest_place_into(
     cells = int(np.count_nonzero(live)) + sum(
         int(np.count_nonzero(_grid(item["footprint"], item["w"], item["h"]))) for item in items
     )
-    if cells > limit * limit:
+    if cells > max(limit * limit, canvas_w * canvas_h):
         raise CanvasTooLargeError(limit, -(-cells // limit), limit)
 
     width, height = canvas_w, canvas_h

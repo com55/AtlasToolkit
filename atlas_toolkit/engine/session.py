@@ -906,7 +906,9 @@ class AtlasSession:
         added undoes the add -- its AddBatch and the renames of that key are
         dropped, nothing is recorded. A pristine key still present records
         one remove. Anything else (already undone or removed, unknown) is
-        skipped, so no remove can name a key a later add might reuse."""
+        skipped, so no remove can name a key a later add might reuse.
+        Mod batches are left alone: SpineAtlas never records a mod on an added
+        key (replace resolves names through _built_key)."""
         batches = list(self._mod_batches)
         for key in targets:
             if any(b.get("type") == "add" and b["internal_key"] == key for b in batches):
@@ -957,12 +959,17 @@ class AtlasSession:
         patch_padding: int = 0,
         added_mesh_lookup=None,
     ) -> tuple[str, dict[str, object]]:
-        """Pack the recorded batches once and return (text, {page: native image}).
+        """Pack the recorded batches once and return
+        (text, {page: native image}).
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released.
-        `patch_adds` (SpineAtlas only, spec 2026-10-31): pages whose only edits are adds and renames
-        get the adds placed into their free space with `patch_padding` px of gap instead of a repack.
-        `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry for added regions."""
+        `patch_adds` (SpineAtlas only, spec 2026-10-31): pages whose only edits
+        are adds and renames get the adds placed into their free space with
+        `patch_padding` px of gap instead of a repack. `patch_padding` is
+        normalized like the nest gap (0 or invalid becomes 4); SpineAtlas
+        always passes its padding (>= 1).
+        `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry
+        for added regions."""
         self._require_open()
         if not self._mod_batches:
             return self._document.serialize(), self.export_pages()

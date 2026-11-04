@@ -702,13 +702,15 @@ class SpineAtlas:
         `padding` (pixels between images, default 2) and `mesh_aware`
         (default auto: on when the atlas has usable mesh data, which
         SpineAtlas.open picks up from a sibling .skel file).
-        `PackerOptions.repack`: "auto" (default) places additions into the free space
-        of a page whose only edits are adds and renames, growing it right/down only
-        when they do not fit; existing regions do not move. "always" repacks every
-        edited page.
+        `PackerOptions.repack`: "auto" (default) places additions into the free
+        space of a page whose only edits are adds and renames, growing it
+        right/down only when they do not fit. Existing regions keep their
+        place and every pixel Spine renders. "always" repacks every edited
+        page.
         Mesh-aware cuts each region's pixels outside its mesh hull on repacked
-        pages. On patched pages it cuts only added regions; existing regions
-        keep their pixels. Untouched and rename-only pages keep their pixels.
+        pages. On patched pages it cuts only added regions; never-rendered
+        pixels outside an existing mesh hull may be cleared where a new region
+        lands. Untouched and rename-only pages keep their pixels.
         An unedited atlas is returned as is, never repacked or masked, but its
         settings are still checked."""
         resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)

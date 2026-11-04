@@ -111,11 +111,13 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
       next to the atlas changes the default output.
     - `repack`: `"auto"` (default) or `"always"`. With `"auto"`, a page whose
       only edits are additions (and renames) is not repacked: the new regions
-      go into its free space, existing regions keep their place and pixels,
-      and the page grows right or down only when they do not fit (both sides
-      stay multiples of 4). Free space is everything outside existing
-      regions' rects and visible pixels; with mesh data, outside their mesh
-      hulls. Any packer works; new regions may be stored rotated 90/180/270.
+      go into its free space, existing regions keep their place and every
+      pixel Spine renders (never-rendered pixels outside a mesh hull may be
+      cleared where a new region lands), and the page grows right or down
+      only when they do not fit (both sides stay multiples of 4). Free space
+      is everything outside existing regions' rects and visible pixels; with
+      mesh data, outside their mesh hulls. Any packer works; new regions may
+      be stored rotated 90/180/270.
       `"always"` repacks every edited page.
   - `split_composite`.
 

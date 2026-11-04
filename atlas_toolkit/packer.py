@@ -54,7 +54,7 @@ class ResolvedPack:
     padding: int
     mesh_aware: bool
     mesh_footprint: bool
-    patch_adds: bool = False
+    patch_adds: bool
 
 
 def _type_name(value: object) -> str:
