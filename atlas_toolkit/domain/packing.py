@@ -569,7 +569,7 @@ def rotate_grid_for_pack(grid: np.ndarray, degrees: int) -> np.ndarray:
         return _rot_180_grid(grid)
     if degrees == 270:
         return _rot_cw_grid(grid)
-    return np.ascontiguousarray(grid)
+    return np.array(grid, copy=True)
 
 
 def nest_place_into(
@@ -614,6 +614,8 @@ def nest_place_into(
         variants = _rotation_variants(item, gap)
         spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
         while spot is None:  # growth is monotonic and capped, as in nest_pack
+            if max(canvas_w, canvas_h) > limit:
+                raise CanvasTooLargeError(canvas_w, canvas_h, limit)
             canvas_w, canvas_h, occupied = _grow_grid(canvas_w, canvas_h, occupied, variants[0], gap, limit)
             spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
         _stamp_occupied(occupied, gap, spot["rot"], spot["x"], spot["y"])

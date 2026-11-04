@@ -99,3 +99,27 @@ def test_live_shape_must_match_the_canvas():
 def test_rotate_grid_for_pack_matches_the_stored_orientation(degrees, k):
     grid = np.arange(6).reshape(2, 3)
     assert np.array_equal(rotate_grid_for_pack(grid, degrees), np.rot90(grid, k))
+
+
+def test_a_page_past_the_cap_that_must_grow_raises_canvas_too_large():
+    live = np.ones((4, MAX_CANVAS + 2), bool)
+    with pytest.raises(CanvasTooLargeError):
+        nest_place_into([solid("N", 2, 2)], MAX_CANVAS + 2, 4, live, gap_distance=2)
+
+
+def test_growth_is_trimmed_on_the_width_too():
+    out = nest_place_into([solid("N", 10, 10)], 10, 30, np.ones((30, 10), bool), gap_distance=2)
+    assert out["placements"][0]["x"] == 12
+    assert (out["canvas_w"], out["canvas_h"]) == (24, 32)
+
+
+def test_rotate_grid_for_pack_never_returns_its_input():
+    grid = np.zeros((2, 3), bool)
+    for degrees in (0, 90, 180, 270):
+        assert not np.shares_memory(rotate_grid_for_pack(grid, degrees), grid)
+
+
+@pytest.mark.parametrize("w, h", [(0, 4), (4, 0)])
+def test_non_positive_canvas_raises(w, h):
+    with pytest.raises(ValueError, match="positive"):
+        nest_place_into([solid("N", 1, 1)], w, h, np.zeros((h, w), bool))
