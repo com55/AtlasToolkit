@@ -558,6 +558,77 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
         "placements": placements,
     }
 
+
+def rotate_grid_for_pack(grid: np.ndarray, degrees: int) -> np.ndarray:
+    """An unrotated (h, w) mask turned into the orientation a region packed
+    with `degrees` (0/90/180/270) is stored in on its page -- the mapping
+    _rotation_variants uses (rotate:90 is stored 90 CCW)."""
+    if degrees == 90:
+        return _rot_ccw_grid(grid)
+    if degrees == 180:
+        return _rot_180_grid(grid)
+    if degrees == 270:
+        return _rot_cw_grid(grid)
+    return np.ascontiguousarray(grid)
+
+
+def nest_place_into(
+    items: list[dict], canvas_w: int, canvas_h: int, live: np.ndarray, gap_distance: int = 4,
+) -> dict:
+    """nest_pack's search on a canvas that already holds pixels (spec
+    2026-10-31 §5.2, "patch mode"). `live` is a (canvas_h, canvas_w) mask,
+    nonzero = must stay uncovered; it is dilated by the gap and seeded into
+    the occupied grid exactly as a placed nest item is stamped, so new
+    items keep the gap from it. Same order, rotations, first-fit, growth
+    and cap as nest_pack. The output size is trimmed to the original
+    canvas plus the placements (the search can overshoot when it grows)
+    and both axes are rounded up to a multiple of 4, grown or not."""
+    gap = normalize_gap(gap_distance)
+    live = np.asarray(live) != 0
+    if canvas_w <= 0 or canvas_h <= 0:
+        raise ValueError(f"nest_place_into: canvas must be positive, got {canvas_w}x{canvas_h}")
+    if live.shape != (canvas_h, canvas_w):
+        raise ValueError(
+            f"nest_place_into: live mask is {live.shape[1]}x{live.shape[0]}, canvas is {canvas_w}x{canvas_h}"
+        )
+    for item in items:
+        if item["w"] <= 0 or item["h"] <= 0:
+            raise ValueError(
+                f'nest_place_into: item "{item["name"]}" has non-positive dimensions '
+                f'({item["w"]}x{item["h"]})'
+            )
+    limit = MAX_CANVAS
+    for item in items:
+        if max(item["w"], item["h"]) > limit:  # too big in every rotation
+            raise CanvasTooLargeError(item["w"], item["h"], limit)
+    cells = int(np.count_nonzero(live)) + sum(
+        int(np.count_nonzero(_grid(item["footprint"], item["w"], item["h"]))) for item in items
+    )
+    if cells > limit * limit:
+        raise CanvasTooLargeError(limit, -(-cells // limit), limit)
+
+    width, height = canvas_w, canvas_h
+    occupied = _dilate_grid(live.astype(np.uint8), gap)
+    placements: list[dict] = []
+    for item in sorted(items, key=lambda item: -max(item["w"], item["h"])):
+        variants = _rotation_variants(item, gap)
+        spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
+        while spot is None:  # growth is monotonic and capped, as in nest_pack
+            canvas_w, canvas_h, occupied = _grow_grid(canvas_w, canvas_h, occupied, variants[0], gap, limit)
+            spot = _find_first_fit(variants, occupied, canvas_w, canvas_h, gap)
+        _stamp_occupied(occupied, gap, spot["rot"], spot["x"], spot["y"])
+        placements.append({
+            "name": item["name"], "x": spot["x"], "y": spot["y"],
+            "pw": spot["rot"]["w"], "ph": spot["rot"]["h"], "rotate": spot["rot"]["deg"],
+        })
+    extent_w = max([width, *(p["x"] + p["pw"] for p in placements)])
+    extent_h = max([height, *(p["y"] + p["ph"] for p in placements)])
+    return {
+        "canvas_w": round_up_to_multiple(extent_w),
+        "canvas_h": round_up_to_multiple(extent_h),
+        "placements": placements,
+    }
+
 # ─── Occupied footprint from mesh geometry ──────────────────────────────
 
 def solid_mask(w: int, h: int) -> bytearray:
