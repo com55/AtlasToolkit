@@ -207,3 +207,25 @@ def test_rejected_zero_area_edit_leaves_the_session_packable_with_nest():
     text, pages = atlas._session.pack_pending()
     assert "Z" not in text.splitlines()
     assert pages["page.png"].width > 0
+
+
+_UNDO_TEXT = "p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
+_UNDO_TEXT_2 = _UNDO_TEXT + "\nq.png\nsize: 16,16\nC\n bounds: 0,0,16,16\n"
+
+
+def _undo_pages(two=False):
+    pages = {"p.png": Image.new("RGBA", (32, 16), (1, 2, 3, 255))}
+    if two:
+        pages["q.png"] = Image.new("RGBA", (16, 16), (4, 5, 6, 255))
+    return pages
+
+
+@pytest.mark.parametrize("two", [False, True])
+def test_add_then_remove_builds_the_original(two):
+    atlas = SpineAtlas.load(_UNDO_TEXT_2 if two else _UNDO_TEXT, _undo_pages(two))
+    atlas.add_region("N", Image.new("RGBA", (5, 5), (9, 9, 9, 255)), page="p.png")
+    atlas.remove_region("N")
+    assert not atlas.has_changes
+    built = atlas.build()
+    assert built.atlas_text == atlas.atlas_text
+    assert {k: v.tobytes() for k, v in built.pages.items()} == {k: v.tobytes() for k, v in atlas.pages.items()}

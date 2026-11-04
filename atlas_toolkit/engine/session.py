@@ -839,13 +839,36 @@ class AtlasSession:
         if not targets:
             return
         self._require_single_page_structural()
-        candidate_batches = [
-            *self._mod_batches,
-            *({"type": "remove", "target_key": key} for key in targets),
-        ]
-        if self._defer_repack and not self._raw_effective_model(candidate_batches)["region_names"]:
-            raise RemoveAllRegionsError("cannot remove every region")
+        if self._defer_repack:
+            candidate_batches = self._remove_or_undo(list(dict.fromkeys(targets)))
+            if not self._raw_effective_model(candidate_batches)["region_names"]:
+                raise RemoveAllRegionsError("cannot remove every region")
+        else:
+            candidate_batches = [
+                *self._mod_batches,
+                *({"type": "remove", "target_key": key} for key in targets),
+            ]
         self._apply_structural_batches(candidate_batches)
+
+    def _remove_or_undo(self, targets: list[str]) -> list[dict]:
+        """Deferred mode (spec 2026-10-31 §3.1): removing a key this session
+        added undoes the add -- its AddBatch and the renames of that key are
+        dropped, nothing is recorded. A pristine key still present records
+        one remove. Anything else (already undone or removed, unknown) is
+        skipped, so no remove can name a key a later add might reuse."""
+        batches = list(self._mod_batches)
+        for key in targets:
+            if any(b.get("type") == "add" and b["internal_key"] == key for b in batches):
+                batches = [
+                    b for b in batches
+                    if not (b.get("type") == "add" and b["internal_key"] == key)
+                    and not (b.get("type") == "rename" and b["target_key"] == key)
+                ]
+            elif key in self._processor.regions and not any(
+                b.get("type") == "remove" and b["target_key"] == key for b in batches
+            ):
+                batches.append({"type": "remove", "target_key": key})
+        return batches
 
     def repack(self) -> RepackResult:
         self._require_open()
