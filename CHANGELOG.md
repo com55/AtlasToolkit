@@ -18,6 +18,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   regions on pma pages too, clearing all four channels outside the hull.
 
 ### Added
+- `PackerOptions(repack=...)`: `"auto"` (default) places additions into a
+  page's free space instead of repacking it; `"always"` keeps the old
+  behaviour.
 - `SpineAtlas`: open an atlas from disk (`open`) or memory (`load`), list
   regions, extract single, all or composite sprites (with Forced Resizing and
   Mesh Cropping), record edits (`replace`, `replace_composite`, `add_region`,
@@ -49,6 +52,16 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   desktop shell's dependencies moved to the `app` extra.
 
 ### Changed
+- A page whose only edits are additions and renames is no longer repacked by
+  default (pass `repack="always"`).
+- Removing a region added in the same atlas undoes the add; a single-page
+  atlas used to repack every region.
+- With `repack="auto"`, a single-page atlas with only renames keeps its image.
+- Added regions with mesh data are cut to their hull when mesh-aware is on,
+  nest by hull under `polygons`, and stay mesh regions in the built atlas.
+- Patch placement may store new regions rotated 180/270 under every packer,
+  shelf included, and may clear never-rendered pixels outside an existing mesh
+  hull where a new region lands.
 - `build()` / `save()` take `packer=` and `packer_options=PackerOptions(...)`
   instead of `nest`, `gap` and `mesh_aware`, which are removed.
 - `padding` (formerly the Smart Packing gap) follows the Spine Texture Packer:
@@ -83,6 +96,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   colour instead of treating it as straight alpha.
 
 ### Differences from the app's engine
+- Patch mode, undo-on-remove and hull cutting of added regions are
+  Python-only; the app always repacks and keeps added sprites whole.
 - `pma` is kept on repack (the app drops it).
 - pma pages are masked to mesh hulls, keep alpha-0 colour when deduplicating
   sprites, and are resized with a premultiplied Lanczos (the app treats pma

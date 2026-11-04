@@ -167,6 +167,13 @@ def test_renamed_region_keeps_mesh_in_its_own_build(monkeypatch):
     assert plain.getchannel("A").getextrema()[0] == 255
 
 
+def test_rename_only_single_page_keeps_its_pixels_under_auto(monkeypatch):
+    atlas = with_mesh(monkeypatch, {"Head": LEFT})
+    atlas.rename_region("Head", "H2")
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=True))
+    assert built.extract("H2").getchannel("A").getextrema()[0] == 255
+
+
 def test_swap_rename_gets_no_mesh_after_build(monkeypatch):
     atlas = with_mesh(monkeypatch, {"Head": LEFT, "Body": RIGHT})
     atlas.rename_region("Body", "X")

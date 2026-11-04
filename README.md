@@ -109,11 +109,22 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
     - `mesh_aware` cuts each region outside its mesh hull before packing. It
       defaults to on whenever the atlas has usable mesh data, so a `.skel`
       next to the atlas changes the default output.
+    - `repack`: `"auto"` (default) or `"always"`. With `"auto"`, a page whose
+      only edits are additions (and renames) is not repacked: the new regions
+      go into its free space, existing regions keep their place and pixels,
+      and the page grows right or down only when they do not fit (both sides
+      stay multiples of 4). Free space is everything outside existing
+      regions' rects and visible pixels; with mesh data, outside their mesh
+      hulls. Any packer works; new regions may be stored rotated 90/180/270.
+      `"always"` repacks every edited page.
   - `split_composite`.
 
   `atlas.build(packer="polygons", packer_options=PackerOptions(padding=4))`
 - With `split_composite=True`, a `replace_composite` image is cut back into one
   piece per region: the inverse of `extract_composite(force_resize=True)`.
+- Removing a region added since the atlas was loaded or built undoes the add.
+  An added region whose name has a mesh in the `.skel` is cut to its hull when
+  `mesh_aware` is on, and stays a mesh region in the built atlas.
 - `mesh_crop=True` on the extract methods and `packer="polygons"` or
   `PackerOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
   the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.

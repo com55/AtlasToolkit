@@ -152,10 +152,11 @@ def test_pristine_lines_equal_the_canonical_form():
 
 
 @pytest.mark.parametrize("padding, x", [(1, 36), (8, 40)])
-def test_padding_reaches_the_shelf_patch(padding, x):
+@pytest.mark.parametrize("packer", ("shelf", "rectangles"))
+def test_padding_reaches_the_patch(padding, x, packer):
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
-    assert bounds(atlas.build(packer_options=PackerOptions(padding=padding)), "N")[0] == x
+    assert bounds(atlas.build(packer=packer, packer_options=PackerOptions(padding=padding)), "N")[0] == x
 
 
 def test_many_adds_keep_padding_between_everything():
@@ -199,6 +200,16 @@ def test_renamed_pristine_region_keeps_its_hull(monkeypatch):
     atlas.rename_region("M", "Z")
     atlas.add_region("N", img(6, 6))
     assert atlas.build(packer_options=PackerOptions(padding=1)).pages["p.png"].size == (32, 32)
+
+
+def test_renamed_pristine_region_keeps_its_hull_under_polygons(monkeypatch):
+    mesh = {"M": {"type": "Mesh", "uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 1, 2], "hull_length": 3}}
+    monkeypatch.setattr(api, "_parse_skeleton", lambda data: {"attachments": mesh})
+    atlas = SpineAtlas.load("p.png\nsize: 32,32\nM\n bounds: 0,0,32,32\n",
+                            {"p.png": Image.fromarray(pattern(32, 32), "RGBA")}, skeleton=b"x")
+    atlas.rename_region("M", "Z")
+    atlas.add_region("N", img(6, 6))
+    assert atlas.build(packer="polygons", packer_options=PackerOptions(padding=1)).pages["p.png"].size == (32, 32)
 
 
 def test_pma_pristine_regions_extract_unchanged():

@@ -268,6 +268,7 @@ class AtlasSession:
         """Spec 2026-10-31 §3.2: pages with a surviving add, no mod or remove
         of a pristine region, and an image the size their text declares."""
         pristine = self._processor.regions
+        # Defensive: after deferred undo (spec 2026-10-31 §3.1) every AddBatch present survives.
         survivors = set(self._raw_effective_model(batches)["region_names"])
         candidates = {b["page"] for b in batches if b.get("type") == "add" and b["internal_key"] in survivors}
         for batch in batches:

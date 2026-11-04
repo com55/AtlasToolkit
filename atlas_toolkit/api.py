@@ -705,11 +705,12 @@ class SpineAtlas:
         `PackerOptions.repack`: "auto" (default) places additions into the free space
         of a page whose only edits are adds and renames, growing it right/down only
         when they do not fit; existing regions do not move. "always" repacks every
-        edited page. Mesh-aware cuts
-        each region's pixels outside its mesh hull, on repacked pages only;
-        untouched and rename-only pages keep their pixels. An unedited atlas
-        is returned as is, never repacked or masked, but its settings are
-        still checked."""
+        edited page.
+        Mesh-aware cuts each region's pixels outside its mesh hull on repacked
+        pages. On patched pages it cuts only added regions; existing regions
+        keep their pixels. Untouched and rename-only pages keep their pixels.
+        An unedited atlas is returned as is, never repacked or masked, but its
+        settings are still checked."""
         resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
         if needs_mesh:
             self._require_mesh()
