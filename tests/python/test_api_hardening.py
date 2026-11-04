@@ -1,5 +1,5 @@
-"""Load and export hardening (backlog sweep 2026-10-31): conflicting pma on
-one page file, oversized crops, the skeleton parsed once per lineage, and
+"""Load and export hardening (backlog sweep 2026-10-31): a page file listed
+twice, oversized crops, the skeleton parsed once per lineage, and
 the package's lazy exports."""
 import pickle
 
@@ -9,7 +9,7 @@ from PIL import Image
 
 import atlas_toolkit
 import atlas_toolkit.api as api
-from atlas_toolkit.api import ConflictingPagePma, SpineAtlas
+from atlas_toolkit.api import DuplicatePage, SpineAtlas
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from tests.python.pma_cases import mesh
 
@@ -21,21 +21,23 @@ def page(w=8, h=8):
     return Image.fromarray(np.arange(w * h * 4, dtype=np.uint8).reshape(h, w, 4))
 
 
-def test_conflicting_pma_on_one_page_file_is_refused_on_load():
-    with pytest.raises(ConflictingPagePma, match="'p.png'") as caught:
-        SpineAtlas.load(CONFLICT, {"p.png": page()})
+@pytest.mark.parametrize("text", [CONFLICT, SAME])
+def test_page_file_listed_twice_is_refused_on_load(text):
+    with pytest.raises(DuplicatePage, match="'p.png'") as caught:
+        SpineAtlas.load(text, {"p.png": page()})
     assert caught.value.page == "p.png"
     assert isinstance(caught.value, ValueError)
 
 
-def test_repeated_page_file_with_the_same_pma_still_loads():
-    atlas = SpineAtlas.load(SAME, {"p.png": page()})
+def test_distinct_page_files_still_load():
+    text = SAME.replace("\n\np.png", "\n\nq.png")
+    atlas = SpineAtlas.load(text, {"p.png": page(), "q.png": page()})
     assert atlas.extract("B").size == (4, 4)
 
 
-def test_conflicting_page_pma_pickles_with_its_page():
-    error = pickle.loads(pickle.dumps(ConflictingPagePma("p.png")))
-    assert error.page == "p.png" and str(error) == str(ConflictingPagePma("p.png"))
+def test_duplicate_page_pickles_with_its_page():
+    error = pickle.loads(pickle.dumps(DuplicatePage("p.png")))
+    assert error.page == "p.png" and str(error) == str(DuplicatePage("p.png"))
 
 
 @pytest.mark.parametrize("bounds, rotate", [("0,0,9,4", ""), ("0,0,4,9", ""), ("0,0,9,4", " rotate: 90\n")])
@@ -78,9 +80,9 @@ def test_built_atlases_reuse_the_parsed_skeleton(monkeypatch):
 
 
 def test_package_lists_its_lazy_api_names():
-    assert "ConflictingPagePma" in api.__all__
+    assert "DuplicatePage" in api.__all__
     assert atlas_toolkit.__all__ == sorted(atlas_toolkit._API_NAMES)
     assert set(atlas_toolkit.__all__) <= set(api.__all__) | {"Packer", "PackerOptions", "AlphaMode"}
     listed = dir(atlas_toolkit)
-    assert "SpineAtlas" in listed and "ConflictingPagePma" in listed and "__getattr__" in listed
-    assert atlas_toolkit.ConflictingPagePma is ConflictingPagePma
+    assert "SpineAtlas" in listed and "DuplicatePage" in listed and "__getattr__" in listed
+    assert atlas_toolkit.DuplicatePage is DuplicatePage

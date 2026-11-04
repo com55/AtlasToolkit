@@ -31,7 +31,7 @@ from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 __all__ = [
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
-    "CanvasTooLarge", "MixedAlphaGroup", "ConflictingPagePma",
+    "CanvasTooLarge", "MixedAlphaGroup", "DuplicatePage",
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
@@ -56,12 +56,12 @@ class DuplicateRegionName(AtlasError, ValueError):
         self.names = names
 
 
-class ConflictingPagePma(AtlasError, ValueError):
-    """The atlas text names one page file more than once with different
-    `pma` values, so the page has no single alpha space. Raised on load."""
+class DuplicatePage(AtlasError, ValueError):
+    """The atlas text names one page file more than once, which Spine does
+    not allow. Raised on load."""
 
     def __init__(self, page: str) -> None:
-        super().__init__(f"page {page!r} is listed more than once with different pma values")
+        super().__init__(f"page {page!r} is listed more than once")
         self.page = page
 
     def __reduce__(self):
@@ -288,10 +288,11 @@ class SpineAtlas:
         duplicates = sorted(name for name, count in counts.items() if count > 1)
         if duplicates:
             raise DuplicateRegionName(duplicates)
-        page_pma: dict[str, bool] = {}
+        seen: set[str] = set()
         for page in document.pages:
-            if page_pma.setdefault(page.filename, page.pma) != page.pma:
-                raise ConflictingPagePma(page.filename)
+            if page.filename in seen:
+                raise DuplicatePage(page.filename)
+            seen.add(page.filename)
         self = object.__new__(cls)
         self._text = atlas_text
         self._document = document

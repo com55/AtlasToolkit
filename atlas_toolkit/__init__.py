@@ -7,7 +7,7 @@ _API_NAMES = frozenset({
     "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge", "Packer", "PackerOptions", "AlphaMode", "MixedAlphaGroup",
-    "ConflictingPagePma",
+    "DuplicatePage",
 })
 __all__ = sorted(_API_NAMES)
 
