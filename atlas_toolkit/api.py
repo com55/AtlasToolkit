@@ -679,6 +679,7 @@ class SpineAtlas:
                 split_composite=split_composite,  # by keyword: tests patch pack_pending(self, **kw)
                 shelf_padding=0 if resolved.nest else resolved.padding,
                 mesh_footprint=resolved.mesh_footprint,
+                patch_adds=resolved.patch_adds, patch_padding=resolved.padding,
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
             )
         except CanvasTooLargeError as error:
@@ -700,7 +701,11 @@ class SpineAtlas:
         NotImplementedError for now. `packer_options` is a PackerOptions:
         `padding` (pixels between images, default 2) and `mesh_aware`
         (default auto: on when the atlas has usable mesh data, which
-        SpineAtlas.open picks up from a sibling .skel file). Mesh-aware cuts
+        SpineAtlas.open picks up from a sibling .skel file).
+        `PackerOptions.repack`: "auto" (default) places additions into the free space
+        of a page whose only edits are adds and renames, growing it right/down only
+        when they do not fit; existing regions do not move. "always" repacks every
+        edited page. Mesh-aware cuts
         each region's pixels outside its mesh hull, on repacked pages only;
         untouched and rename-only pages keep their pixels. An unedited atlas
         is returned as is, never repacked or masked, but its settings are

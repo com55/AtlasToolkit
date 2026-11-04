@@ -258,13 +258,38 @@ class AtlasSession:
                 pages[batch["internal_key"]] = batch["page"]
         return pages
 
-    def _touched_pages(self, batches: list[dict], region_pages: dict[str, str]) -> list[str]:
+    def _declared_size_matches(self, page) -> bool:
+        """Spec 2026-10-31 §3.2 rule 4: a non-zero declared size equal to the
+        loaded image's (else the modifier rescales every region)."""
+        width, height = page.size
+        return width > 0 and height > 0 and tuple(self._raster.size(self._page_images[page.filename])) == (width, height)
+
+    def _patch_pages(self, batches: list[dict], region_pages: dict[str, str]) -> set[str]:
+        """Spec 2026-10-31 §3.2: pages with a surviving add, no mod or remove
+        of a pristine region, and an image the size their text declares."""
+        pristine = self._processor.regions
+        survivors = set(self._raw_effective_model(batches)["region_names"])
+        candidates = {b["page"] for b in batches if b.get("type") == "add" and b["internal_key"] in survivors}
+        for batch in batches:
+            kind = batch.get("type")
+            if kind == "mod":
+                candidates.difference_update(region_pages[n] for n in batch["names"] if n in pristine)
+            elif kind == "remove" and batch["target_key"] in pristine:
+                candidates.discard(region_pages[batch["target_key"]])
+        first = {}
+        for page in self._document.pages:
+            first.setdefault(page.filename, page)
+        return {filename for filename in candidates if self._declared_size_matches(first[filename])}
+
+    def _touched_pages(self, batches: list[dict], region_pages: dict[str, str], *, single_page_shortcut: bool = True) -> list[str]:
         """Spec 2026-10-21 §3.2: pages that own a region a mod names, receive
         an add, or lose a region to a remove, in page order. A rename touches
         nothing (text-only rewrite, §3.4). A region added and then removed
         again nets out and touches nothing either. A one-page atlas repacks
-        for any batch, exactly as before multi-page support."""
-        if len(self._document.pages) == 1:
+        for any batch, exactly as before multi-page support.
+        With `single_page_shortcut` False (patch mode), a single page follows
+        the multi-page rule, so renames alone do not touch it."""
+        if single_page_shortcut and len(self._document.pages) == 1:
             return [self._document.pages[0].filename] if batches else []
         added = {batch["internal_key"] for batch in batches if batch.get("type") == "add"}
         gone = added & {batch["target_key"] for batch in batches if batch.get("type") == "remove"}
@@ -410,6 +435,8 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
+        patch_adds: bool = False,
+        patch_padding: int = 0,
         added_mesh_lookup=None,
     ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
         """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
@@ -417,7 +444,9 @@ class AtlasSession:
         replacePageInAtlas); every other page keeps its pristine image. Never
         mutates self._document or its pages: every build reuses them."""
         region_pages = self._region_pages(batches)
-        touched = self._touched_pages(batches, region_pages)
+        patching = self._patch_pages(batches, region_pages) if patch_adds else set()
+        shortcut = not patch_adds or not self._declared_size_matches(self._document.pages[0])
+        touched = self._touched_pages(batches, region_pages, single_page_shortcut=shortcut)
         remaining = {region_pages[key] for key in self._raw_effective_model(batches)["region_names"]}
         renames = {
             batch["target_key"]: batch["new_atlas_name"]
@@ -432,15 +461,22 @@ class AtlasSession:
             if filename not in remaining:
                 continue
             try:
-                result = self._pack_page(
-                    modifiers[filename],
-                    self._page_batches(filename, batches, region_pages),
-                    sprites,
-                    pieces,
-                    shelf_padding=shelf_padding,
-                    mesh_footprint=mesh_footprint,
-                    added_mesh_lookup=added_mesh_lookup,
-                )
+                if filename in patching:
+                    result = modifiers[filename].patch(
+                        batches=self._page_batches(filename, batches, region_pages),
+                        mesh_lookup_fn=self._repack_mesh_lookup(added_mesh_lookup),
+                        gap=patch_padding,
+                    )
+                else:
+                    result = self._pack_page(
+                        modifiers[filename],
+                        self._page_batches(filename, batches, region_pages),
+                        sprites,
+                        pieces,
+                        shelf_padding=shelf_padding,
+                        mesh_footprint=mesh_footprint,
+                        added_mesh_lookup=added_mesh_lookup,
+                    )
             except CanvasTooLargeError as error:
                 if len(self._document.pages) > 1:
                     error.page = filename
@@ -916,11 +952,15 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
+        patch_adds: bool = False,
+        patch_padding: int = 0,
         added_mesh_lookup=None,
     ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return (text, {page: native image}).
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released.
+        `patch_adds` (SpineAtlas only, spec 2026-10-31): pages whose only edits are adds and renames
+        get the adds placed into their free space with `patch_padding` px of gap instead of a repack.
         `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry for added regions."""
         self._require_open()
         if not self._mod_batches:
@@ -930,6 +970,7 @@ class AtlasSession:
             document, images = self._build_pages(
                 self._mod_batches, self._modded_sprites, split_composite,
                 shelf_padding=shelf_padding, mesh_footprint=mesh_footprint,
+                patch_adds=patch_adds, patch_padding=patch_padding,
                 added_mesh_lookup=added_mesh_lookup,
             )
             return document.serialize(), {

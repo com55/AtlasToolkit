@@ -158,12 +158,12 @@ def test_no_png_work_from_memory(monkeypatch):
 def test_renamed_region_keeps_mesh_in_its_own_build(monkeypatch):
     atlas = with_mesh(monkeypatch, {"Head": LEFT})
     atlas.rename_region("Head", "H2")
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True))
+    built = atlas.build(packer_options=PackerOptions(mesh_aware=True, repack="always"))
     h2 = built.extract("H2")
     # mesh-aware repack masks the sprite with Head's LEFT mesh (key unchanged by the rename)
     assert h2.getpixel((1, 2))[3] == 255
     assert h2.getchannel("A").getextrema()[0] == 0
-    plain = atlas.build(packer_options=PackerOptions(mesh_aware=False)).extract("H2")  # no-mask control
+    plain = atlas.build(packer_options=PackerOptions(mesh_aware=False, repack="always")).extract("H2")  # no-mask control
     assert plain.getchannel("A").getextrema()[0] == 255
 
 
