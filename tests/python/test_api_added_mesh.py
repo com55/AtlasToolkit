@@ -51,6 +51,26 @@ def test_mesh_aware_off_keeps_the_added_region_whole(monkeypatch):
     assert built.extract("X").getpixel((11, 11))[3] == 255
 
 
+def test_a_cut_never_touches_the_added_source(monkeypatch):
+    atlas = load(monkeypatch)
+    atlas.add_region("X", opaque())
+    first = atlas.build(packer_options=PackerOptions(repack="always"))
+    assert cut(first.extract("X"))
+    second = atlas.build(packer_options=PackerOptions(mesh_aware=False, repack="always"))
+    assert second.extract("X").getpixel((11, 11))[3] == 255
+
+
+def test_a_child_atlas_finds_the_mesh_of_a_new_add(monkeypatch):
+    atlas = load(monkeypatch, TEXT_WITH_X)
+    atlas.rename_region("X", "Old")
+    child = atlas.build(packer_options=PackerOptions(repack="always"))
+    assert child._allowed is not None and "X" not in child._allowed
+    child.add_region("X", opaque())
+    grandchild = child.build(packer_options=PackerOptions(repack="always"))
+    assert cut(grandchild.extract("X"))
+    assert "X" in grandchild._allowed
+
+
 def test_looked_up_by_label_when_the_key_differs(monkeypatch):
     atlas = load(monkeypatch, TEXT_WITH_X)
     atlas.rename_region("X", "Old")
