@@ -116,7 +116,7 @@ def test_options_do_not_validate_themselves():
 
 
 def test_resolved_pack_is_hashable_and_equal_by_value():
-    assert {ResolvedPack(False, 2, True, False)} == {resolve("shelf")[0]}
+    assert {ResolvedPack(False, 2, True, False, True)} == {resolve("shelf")[0]}
 
 
 def test_packer_module_imports_only_the_standard_library():
@@ -129,3 +129,28 @@ def test_packer_module_imports_only_the_standard_library():
             assert node.level == 0
             roots.add(node.module.split(".")[0])
     assert roots <= {"__future__", "dataclasses", "enum", "operator"}
+
+
+@pytest.mark.parametrize("value, expected", [(None, True), ("auto", True), ("always", False)])
+@pytest.mark.parametrize("packer", ["shelf", "rectangles", "polygons"])
+def test_repack_resolves_to_patch_adds(packer, value, expected):
+    resolved, _ = resolve_packer(packer, PackerOptions(repack=value), mesh_ready=True)
+    assert resolved.patch_adds is expected
+
+
+@pytest.mark.parametrize("value", ["never", "AUTO", ""])
+def test_unknown_repack_value_raises_value_error(value):
+    with pytest.raises(ValueError, match="repack"):
+        resolve_packer("shelf", PackerOptions(repack=value), mesh_ready=True)
+
+
+@pytest.mark.parametrize("value", [1, True, b"auto"])
+def test_repack_of_wrong_type_raises_type_error(value):
+    with pytest.raises(TypeError, match="repack"):
+        resolve_packer("shelf", PackerOptions(repack=value), mesh_ready=True)
+
+
+def test_auto_and_always_are_different_cache_keys():
+    auto, _ = resolve_packer("shelf", PackerOptions(repack="auto"), mesh_ready=True)
+    always, _ = resolve_packer("shelf", PackerOptions(repack="always"), mesh_ready=True)
+    assert auto != always and len({auto, always}) == 2

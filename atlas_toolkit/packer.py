@@ -35,10 +35,15 @@ class PackerOptions:
     packing. None is auto: on when the atlas has usable mesh data.
     "polygons" always uses it.
 
+    `repack`: "auto" (None) patches a page whose only edits are additions
+    and renames -- the new regions go into its free space and nothing else
+    moves; "always" repacks every edited page.
+
     Validated by build() / save(), not here."""
 
     padding: int | None = None
     mesh_aware: bool | None = None
+    repack: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +54,7 @@ class ResolvedPack:
     padding: int
     mesh_aware: bool
     mesh_footprint: bool
+    patch_adds: bool = False
 
 
 def _type_name(value: object) -> str:
@@ -82,6 +88,19 @@ def _padding(value: object) -> int:
     return number
 
 
+_REPACK_MODES = ("auto", "always")
+
+
+def _patch_adds(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        raise TypeError(f"repack must be 'auto', 'always' or None, not {_type_name(value)}")
+    if value not in _REPACK_MODES:
+        raise ValueError(f"repack must be 'auto' or 'always', got {value!r}")
+    return value == "auto"
+
+
 def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tuple[ResolvedPack, bool]:
     """Validate the pack settings and resolve them. Returns (resolved,
     needs_mesh); the caller raises SkeletonUnavailable when needs_mesh and
@@ -94,17 +113,19 @@ def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tupl
     elif not isinstance(options, PackerOptions):
         raise TypeError(f"packer_options must be a PackerOptions, not {_type_name(options)}")
     padding = _padding(options.padding)
+    patch_adds = _patch_adds(options.repack)
     mesh_aware = options.mesh_aware
     if mesh_aware is not None and not isinstance(mesh_aware, bool):
         raise TypeError(f"mesh_aware must be True, False or None, not {_type_name(mesh_aware)}")
     if mode is Packer.POLYGONS:
         if mesh_aware is False:
             raise ValueError("packer 'polygons' always uses the mesh; mesh_aware cannot be False")
-        return ResolvedPack(nest=True, padding=padding, mesh_aware=True, mesh_footprint=True), True
+        return ResolvedPack(nest=True, padding=padding, mesh_aware=True, mesh_footprint=True, patch_adds=patch_adds), True
     resolved = ResolvedPack(
         nest=mode is Packer.RECTANGLES,
         padding=padding,
         mesh_aware=mesh_ready if mesh_aware is None else mesh_aware,
         mesh_footprint=False,
+        patch_adds=patch_adds,
     )
     return resolved, mesh_aware is True
