@@ -90,6 +90,7 @@ def test_pma_page_pastes_the_sprite_byte_for_byte():
     modifier, raster, f = setup(text, rgba)
     sprite = pattern(10, 10, 5)
     sprite[2, 2] = (40, 30, 20, 128)  # a valid premultiplied partial pixel
+    sprite[3, 3] = (40, 0, 0, 0)
     result = modifier.patch(batches=[add(raster, f, "N", sprite)], mesh_lookup_fn=None, gap=2)
     assert np.array_equal(pixels(raster, result)[0:10, 36:46], sprite)
     assert result.document.pages[0].pma is True
@@ -170,6 +171,36 @@ def test_rotated_region_keeps_its_hull_in_the_stored_orientation(rotate, k):
     assert np.array_equal(pixels(raster, result)[stored], rgba[stored])
 
 
+def test_trimmed_rotated_region_keeps_its_hull():
+    # unrotated sprite 20x10, trimmed out of an original 24x12 at offsets (2, 1); rotate 90 -> stored 10x20
+    text = "p.png\nsize: 12,20\nR\n bounds: 0,0,20,10\n offsets: 2,1,24,12\n rotate: 90\n"
+    rgba = pattern(12, 20)
+    modifier, raster, f = setup(text, rgba)
+    result = modifier.patch(batches=[add(raster, f, "N", pattern(3, 3, 5))], mesh_lookup_fn={"R": UPPER_LEFT}.get, gap=1)
+    assert result.document.pages[0].size == [12, 20]
+    full = np.asarray(raster.read_alpha_mask(raster.rasterize_mesh_mask(UPPER_LEFT["uvs"], [0, 1, 2], 24, 12)), bool).reshape(12, 24)
+    # crop back the 20x10 sprite: x from offsets.left, y = orig_h - bottom - h
+    unrotated = full[12 - 1 - 10:12 - 1, 2:22]
+    stored = np.rot90(unrotated, 1)  # 20 rows x 10 cols: the region's stored rect at (0, 0)
+    assert np.array_equal(pixels(raster, result)[:20, :10][stored], rgba[:20, :10][stored])
+
+
+def test_region_partly_off_the_left_edge_keeps_its_hull():
+    text = "p.png\nsize: 16,16\nR\n bounds: -8,0,24,16\n"
+    rgba = pattern(16, 16)
+    modifier, raster, f = setup(text, rgba)
+    result = modifier.patch(batches=[add(raster, f, "N", pattern(3, 3, 5))], mesh_lookup_fn={"R": UPPER_LEFT}.get, gap=1)
+    hull = np.asarray(raster.read_alpha_mask(raster.rasterize_mesh_mask(UPPER_LEFT["uvs"], [0, 1, 2], 24, 16)), bool).reshape(16, 24)[:, 8:]
+    assert np.array_equal(pixels(raster, result)[:16, :16][hull], rgba[hull])
+
+
+def test_malformed_offsets_do_not_raise():
+    text = "p.png\nsize: 32,16\nR\n bounds: 0,0,20,12\n offsets: 0,0,10,10\n"
+    modifier, raster, f = setup(text, pattern(32, 16))
+    result = modifier.patch(batches=[add(raster, f, "N", pattern(3, 3, 5))], mesh_lookup_fn={"R": UPPER_LEFT}.get, gap=1)
+    assert "N" in regions(result)
+
+
 def test_regions_sharing_a_rect_union_their_hulls():
     text = "p.png\nsize: 16,16\nA\n bounds: 0,0,16,16\nA2\n bounds: 0,0,16,16\n"
     modifier, raster, f = setup(text, pattern(16, 16))
@@ -196,6 +227,10 @@ def test_added_sprite_with_mesh_is_cut_and_nested_by_its_hull():
     result = modifier.patch(batches=batches, mesh_lookup_fn=lookup, gap=1)
     assert result.document.pages[0].size == [20, 20]
     assert regions(result)["T1"][:2] == (0, 0) and regions(result)["T2"][:2] == (4, 0)
+    out = pixels(raster, result)
+    for x, geometry, expected in [(0, UPPER_LEFT, pattern(12, 12, 3)), (4, LOWER_RIGHT, pattern(12, 12, 4))]:
+        hull = np.asarray(raster.read_alpha_mask(raster.rasterize_mesh_mask(geometry["uvs"], [0, 1, 2], 12, 12)), bool).reshape(12, 12)
+        assert np.array_equal(out[:12, x:x + 12][hull], expected[hull])
 
 
 def test_added_sprite_with_mesh_is_cut_to_its_hull():
@@ -229,6 +264,23 @@ def test_text_keeps_pristine_regions_and_applies_renames():
     assert (b.name, b.atlas_name) == ("B", "B2")
     assert (n.name, n.atlas_name, n.offsets, n.index) == ("N", "N", None, -1)
     assert page.filter == ["Linear", "Linear"]
+
+
+@pytest.mark.parametrize("batch", [
+    {"type": "remove", "target_key": "A"},
+    {"type": "mod", "names": ["A"], "source": None, "is_full_canvas": False, "composite": False},
+])
+def test_refuses_a_page_with_a_pristine_edit(batch):
+    modifier, raster, f = setup(TWO, page_rgba(64, 32, [(0, 0, 16, 16), (16, 0, 16, 16)]))
+    with pytest.raises(ValueError, match="patch"):
+        modifier.patch(batches=[add(raster, f, "N", pattern(10, 10, 5)), batch], mesh_lookup_fn=None, gap=2)
+
+
+def test_a_mod_naming_another_pages_key_is_fine():
+    modifier, raster, f = setup(TWO, page_rgba(64, 32, [(0, 0, 16, 16), (16, 0, 16, 16)]))
+    other = {"type": "mod", "names": ["ElsewhereKey"], "source": None, "is_full_canvas": False, "composite": False}
+    result = modifier.patch(batches=[add(raster, f, "N", pattern(10, 10, 5)), other], mesh_lookup_fn=None, gap=2)
+    assert "N" in regions(result)
 
 
 def test_identical_adds_share_one_rect():

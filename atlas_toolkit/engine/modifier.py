@@ -285,7 +285,14 @@ def mesh_mask_grid(
     else:
         rect = mask_crop_rect_for_offsets(offsets, w, h)
         full = raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], offsets[2], offsets[3])
-        handle = raster.crop_rotate(full, rect["x"], rect["y"], rect["w"], rect["h"], 0)
+        full_grid = np.asarray(raster.read_alpha_mask(full), dtype=bool).reshape(offsets[3], offsets[2])
+        grid = np.zeros((h, w), dtype=bool)
+        x, y = rect["x"], rect["y"]
+        left, top = max(x, 0), max(y, 0)
+        right, bottom = min(x + w, offsets[2]), min(y + h, offsets[3])
+        if left < right and top < bottom:
+            grid[top - y:bottom - y, left - x:right - x] = full_grid[top:bottom, left:right]
+        return grid
     return np.asarray(raster.read_alpha_mask(handle), dtype=bool).reshape(h, w)
 
 
@@ -932,6 +939,11 @@ class AtlasModifier:
         are never cut to their hulls (a mesh-aware repack would cut them);
         only never-rendered ones under a placement are cleared."""
         _pristine_names, pristine_regions = self._scoped_region_meta()
+        for batch in batches:
+            kind = batch.get("type")
+            names = batch["names"] if kind == "mod" else [batch.get("target_key")] if kind == "remove" else []
+            if any(name in pristine_regions for name in names):
+                raise ValueError("patch() is only for pages whose pristine regions are not modified or removed")
         effective = derive_effective_model(pristine_regions, list(batches))
         region_names, regions = effective["region_names"], effective["regions"]
         sources = {b["internal_key"]: b["source"] for b in batches if b.get("type") == "add"}
