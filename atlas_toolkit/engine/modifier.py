@@ -40,7 +40,10 @@ from atlas_toolkit.domain.effective_model import derive_effective_model
 from atlas_toolkit.domain.packing import (
     footprint_for_canonical,
     nest_pack,
+    nest_place_into,
+    rotate_grid_for_pack,
     shelf_pack,
+    solid_mask,
 )
 from atlas_toolkit.domain.region_ops import round_half_even
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
@@ -269,6 +272,21 @@ def mask_raw_sprite(
     rect = mask_crop_rect_for_offsets(offsets, *raster.size(sprite))
     full_mask = raster.rasterize_mesh_mask(mesh_geometry["uvs"], mesh_geometry["triangles"], orig_w, orig_h)
     raster.composite_destination_in(sprite, full_mask, (rect["x"], rect["y"], rect["w"], rect["h"]), premultiplied=premultiplied)
+
+
+def mesh_mask_grid(
+    raster: RasterBackend, geometry: dict, offsets: Optional[list[int]], w: int, h: int,
+) -> np.ndarray:
+    """(h, w) bool: a region's mesh hull over its raw w x h crop -- the
+    rasterization mask_raw_sprite cuts with (UVs over the crop when there
+    are no offsets, else over the full original size, cropped back)."""
+    if offsets is None:
+        handle = raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], w, h)
+    else:
+        rect = mask_crop_rect_for_offsets(offsets, w, h)
+        full = raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], offsets[2], offsets[3])
+        handle = raster.crop_rotate(full, rect["x"], rect["y"], rect["w"], rect["h"], 0)
+    return np.asarray(raster.read_alpha_mask(handle), dtype=bool).reshape(h, w)
 
 
 def _mask_modded_sprites(
@@ -890,3 +908,134 @@ class AtlasModifier:
             sprites, effective_region_names, effective_regions, full_canvas_regions,
             nest_options, modded_sprites, added_sprites, mesh_lookup_fn,
         )
+
+    def patch(
+        self,
+        *,
+        batches: Sequence[dict],
+        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]],
+        gap: int,
+    ) -> PackResult:
+        """Spec 2026-10-31 §5 ("patch mode"): place this page's added regions
+        into its free space and leave every pristine region where it is.
+        `batches` are this page's (adds, renames; never a mod or remove of a
+        pristine region -- the session routes those pages to repack()).
+        `mesh_lookup_fn` (None when mesh-aware is off) gives pristine hulls
+        by key and added hulls by internal key.
+
+        Live = pixels nothing may cover: each pristine rect group's hull
+        (regions with identical stored rect and rotate share one group; a
+        group with any mesh-less member is its whole rect), and alpha > 0
+        pixels outside every hulled rect. Added sprites with mesh data are
+        cut to their hull and nest by it. Before any paste, every non-live
+        pixel under a placed rect is cleared to (0,0,0,0). Pristine pixels
+        are never cut to their hulls (a mesh-aware repack would cut them);
+        only never-rendered ones under a placement are cleared."""
+        _pristine_names, pristine_regions = self._scoped_region_meta()
+        effective = derive_effective_model(pristine_regions, list(batches))
+        region_names, regions = effective["region_names"], effective["regions"]
+        sources = {b["internal_key"]: b["source"] for b in batches if b.get("type") == "add"}
+        added = [name for name in region_names if name in sources]
+        width, height = self.raster.size(self.base_image)
+
+        # §4: cut each added sprite with mesh data to its hull, on a clone.
+        sprites: dict[str, ImageHandle] = {}
+        geometry: dict[str, Optional[dict]] = {}
+        for name in added:
+            sprite = sources[name]
+            geometry[name] = mesh_lookup_fn(name) if mesh_lookup_fn is not None else None
+            if geometry[name] is not None:
+                sprite = self.raster.clone(sprite)
+                mask_raw_sprite(self.raster, sprite, geometry[name], {"offsets": None}, premultiplied=self.pma)
+            sprites[name] = sprite
+
+        # Identical added sprites share one placement (repack's dedup rule).
+        canonical: dict[str, str] = {}
+        by_hash: dict[str, str] = {}
+        for name in added:
+            canonical[name] = by_hash.setdefault(canvas_hash(self.raster, sprites[name], premultiplied=self.pma), name)
+        groups: dict[str, list[str]] = {}
+        for name in added:
+            groups.setdefault(canonical[name], []).append(name)
+        items = []
+        for name, members in groups.items():
+            w, h = self.raster.size(sprites[name])
+            if all(geometry[m] is not None for m in members):
+                grid = np.zeros((h, w), dtype=bool)
+                for m in members:
+                    grid |= mesh_mask_grid(self.raster, geometry[m], None, w, h)
+                footprint = grid.astype(np.uint8).tobytes()
+            else:
+                footprint = bytes(solid_mask(w, h))
+            items.append({"name": name, "w": w, "h": h, "footprint": footprint})
+
+        # §5.1: the live set.
+        alpha = np.asarray(self.raster.read_alpha_mask(self.base_image), dtype=bool).reshape(height, width)
+        live = np.zeros((height, width), dtype=bool)
+        meshed = np.zeros((height, width), dtype=bool)
+        rect_groups: dict[tuple, list[str]] = {}
+        for name in region_names:
+            if name in pristine_regions:
+                x, y, w, h = regions[name]["bounds"]
+                rect_groups.setdefault((x, y, w, h, regions[name]["rotate"]), []).append(name)
+        for (x, y, w, h, rotate), names in rect_groups.items():
+            stored_w, stored_h = (h, w) if rotate in (90, 270) else (w, h)
+            window = (slice(max(y, 0), max(y + stored_h, 0)), slice(max(x, 0), max(x + stored_w, 0)))
+            target = live[window]
+            hull = None
+            if mesh_lookup_fn is not None:
+                geoms = [mesh_lookup_fn(name) for name in names]
+                if all(g is not None for g in geoms):
+                    grid = np.zeros((h, w), dtype=bool)
+                    for name, g in zip(names, geoms):
+                        grid |= mesh_mask_grid(self.raster, g, regions[name]["offsets"], w, h)
+                    hull = rotate_grid_for_pack(grid, rotate)
+            if hull is None:
+                live[window] = True
+            else:
+                oy, ox = max(-y, 0), max(-x, 0)
+                target |= hull[oy:oy + target.shape[0], ox:ox + target.shape[1]]
+                meshed[window] = True
+        live |= alpha & ~meshed
+
+        # §5.2: search.
+        placed = nest_place_into(items, width, height, live, gap_distance=gap)
+        out_w, out_h = placed["canvas_w"], placed["canvas_h"]
+        where = {p["name"]: p for p in placed["placements"]}
+
+        # §5.3: byte copy, clear every non-live pixel under a placement, then paste.
+        canvas = np.zeros((out_h, out_w, 4), dtype=np.uint8)
+        canvas[:height, :width] = np.frombuffer(
+            self.raster.get_pixels(self.base_image), dtype=np.uint8,
+        ).reshape(height, width, 4)
+        covered = np.zeros((out_h, out_w), dtype=bool)
+        for p in placed["placements"]:
+            covered[p["y"]:p["y"] + p["ph"], p["x"]:p["x"] + p["pw"]] = True
+        covered[:height, :width] &= ~live
+        canvas[covered] = 0
+        image = self.raster.from_pixels(out_w, out_h, canvas.tobytes())
+        for name in groups:
+            p = where[name]
+            rotated = rotate_sprite_for_pack(self.raster, sprites[name], p["rotate"])
+            self.raster.paste(image, rotated, p["x"], p["y"], premultiplied=self.pma)
+
+        # §5.4: text -- the pristine page, renames applied, new size, adds appended.
+        page = next(page for page in self.document.pages if page.filename == self.target_page).clone()
+        page.size = [out_w, out_h]
+        renames = {b["target_key"]: b["new_atlas_name"] for b in batches if b.get("type") == "rename"}
+        for region in page.regions:
+            if region.name in renames:
+                region.atlas_name = renames[region.name]
+        region_data = {}
+        for name in added:
+            p = where[canonical[name]]
+            w, h = self.raster.size(sprites[name])
+            meta = regions[name]
+            region_data[name] = (
+                [p["x"], p["y"], w, h], None, p["rotate"],
+                {"atlasName": meta["atlasName"], "index": meta["index"], "split": None, "pad": None, "extraPairs": []},
+            )
+        appended = AtlasDocument.from_rebuild_args(self._page_info(), [out_w, out_h], added, region_data)
+        page.regions.extend(appended.pages[0].regions)
+        region_bounds = {r.name: [r.x, r.y, r.w, r.h, r.rotate] for r in page.regions}
+        return PackResult(image, AtlasDocument([page]), region_bounds)
