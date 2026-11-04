@@ -835,8 +835,9 @@ class AtlasModifier:
            mesh geometry that is neither modded nor added gets masked via
            mask_raw_sprite before packing, and every modded-sprite identity
            group with real mesh geometry gets masked via _mask_modded_sprites
-           -- mirroring atlas-modifier.js:845-862 and 871-889 (an AddBatch
-           sprite never had a pristine region to look mesh geometry up for).
+           -- mirroring atlas-modifier.js:845-862 and 871-889; an AddBatch
+           sprite is masked only when `mesh_lookup_fn` returns geometry for
+           its key (spec 2026-10-31 §4).
            Pass `mesh_lookup_fn=None` when mesh masking is not wanted.
         3. `piece_sprites` maps a name to a pre-cut piece (`.image`,
            `.offsets`; engine/composite_split.py's Piece): the piece is
@@ -876,7 +877,15 @@ class AtlasModifier:
                 sprites[name] = sprite
         _mask_modded_sprites(self.raster, sprites, modded_sprites, mesh_lookup_fn, premultiplied=self.pma)
         for key, sprite in (added_sprites or {}).items():
-            sprites[key] = sprite  # AddBatch -- a new key, never in the pristine parse
+            # AddBatch -- a new key, never in the pristine parse. Spec
+            # 2026-10-31 §4: with a lookup that knows added keys (SpineAtlas
+            # passes one), a sprite with mesh data is cut to its hull on a
+            # clone; the session's own lookup returns None for added keys.
+            geometry = mesh_lookup_fn(key) if mesh_lookup_fn is not None else None
+            if geometry is not None:
+                sprite = self.raster.clone(sprite)
+                mask_raw_sprite(self.raster, sprite, geometry, {"offsets": None}, premultiplied=self.pma)
+            sprites[key] = sprite
         return self._pack_and_emit(
             sprites, effective_region_names, effective_regions, full_canvas_regions,
             nest_options, modded_sprites, added_sprites, mesh_lookup_fn,

@@ -349,6 +349,17 @@ class AtlasSession:
         """Immediate mode: the one page of a single-page atlas (never split)."""
         return self._pack_page(self._fresh_modifier(), batches, sprites, {})
 
+    def _repack_mesh_lookup(self, added_mesh_lookup):
+        """The mesh lookup a build masks and nests with. Pristine keys use the
+        session's (keyed and filtered by original name); with
+        `added_mesh_lookup` (SpineAtlas only, spec 2026-10-31 §4) every other
+        key -- an added one -- goes to it."""
+        base = self._processor.get_repack_mesh_geometry
+        if added_mesh_lookup is None:
+            return base
+        pristine = self._processor.regions
+        return lambda name: base(name) if name in pristine else added_mesh_lookup(name)
+
     def _pack_page(
         self,
         modifier: AtlasModifier,
@@ -358,6 +369,7 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
+        added_mesh_lookup=None,
     ) -> PackResult:
         """Today's single-page repack, for one page: `batches` are that page's
         (_page_batches), `sprites` and `pieces` may name other pages' keys;
@@ -368,7 +380,7 @@ class AtlasSession:
             if batch.get("type") == "mod" and batch.get("is_full_canvas")
             for name in batch["names"]
         }
-        mesh_lookup_fn = self._processor.get_repack_mesh_geometry
+        mesh_lookup_fn = self._repack_mesh_lookup(added_mesh_lookup)
         # Python-only switches (spec 2026-10-22 §4.3) ride on a copy;
         # get_nest_options() itself stays the JS port.
         nest_options = {
@@ -398,6 +410,7 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
+        added_mesh_lookup=None,
     ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
         """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
         own and splice it into the pristine document (port of JS
@@ -426,6 +439,7 @@ class AtlasSession:
                     pieces,
                     shelf_padding=shelf_padding,
                     mesh_footprint=mesh_footprint,
+                    added_mesh_lookup=added_mesh_lookup,
                 )
             except CanvasTooLargeError as error:
                 if len(self._document.pages) > 1:
@@ -902,10 +916,12 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
+        added_mesh_lookup=None,
     ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return (text, {page: native image}).
         Never publishes: batches, sprites, pristine pages and snapshot are
-        unchanged, and every handle the call allocated is released."""
+        unchanged, and every handle the call allocated is released.
+        `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry for added regions."""
         self._require_open()
         if not self._mod_batches:
             return self._document.serialize(), self.export_pages()
@@ -914,6 +930,7 @@ class AtlasSession:
             document, images = self._build_pages(
                 self._mod_batches, self._modded_sprites, split_composite,
                 shelf_padding=shelf_padding, mesh_footprint=mesh_footprint,
+                added_mesh_lookup=added_mesh_lookup,
             )
             return document.serialize(), {
                 filename: self._raster.export(images[filename])

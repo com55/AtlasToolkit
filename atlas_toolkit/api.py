@@ -639,14 +639,33 @@ class SpineAtlas:
 
     # -- result ------------------------------------------------------------
 
+    def _added_mesh_lookup(self, resolved: ResolvedPack):
+        """Spec 2026-10-31 §4: an added region's mesh, looked up by its current
+        label in this lineage's UNFILTERED skeleton lookup (an added region has
+        no original attachment name). None when mesh-aware is off for the
+        build or the atlas has no usable mesh."""
+        lookup = self._mesh_lookup
+        if not resolved.mesh_aware or self._mesh_reason is not None or lookup is None:
+            return None
+        labels = dict(self._labels)
+        return lambda key: lookup.get(labels.get(key, key))
+
     def _child_allowed(self) -> frozenset[str]:
         """Names the built atlas may look up in the skeleton: pristine regions
-        whose current name is still their own (spec §3, mesh across renames)."""
-        return frozenset(
+        whose current name is still their own (spec §3, mesh across renames),
+        plus every added region whose label has mesh data (spec 2026-10-31 R7,
+        whatever the build's mesh_aware)."""
+        allowed = {
             label for key, label in self._labels
             if key in self._pristine_keys and label == key
             and (self._allowed is None or key in self._allowed)
-        )
+        }
+        if self._mesh_reason is None and self._mesh_lookup is not None:
+            allowed.update(
+                label for key, label in self._labels
+                if key not in self._pristine_keys and label in self._mesh_lookup
+            )
+        return frozenset(allowed)
 
     def _pack(self, resolved: ResolvedPack, split_composite: bool) -> tuple[str, dict]:
         session = self._session
@@ -660,6 +679,7 @@ class SpineAtlas:
                 split_composite=split_composite,  # by keyword: tests patch pack_pending(self, **kw)
                 shelf_padding=0 if resolved.nest else resolved.padding,
                 mesh_footprint=resolved.mesh_footprint,
+                added_mesh_lookup=self._added_mesh_lookup(resolved),
             )
         except CanvasTooLargeError as error:
             raise CanvasTooLarge(error.width, error.height, error.limit, getattr(error, "page", None)) from None
