@@ -22,6 +22,15 @@ def test_an_over_cap_page_still_takes_adds_that_fit(monkeypatch):
     assert (out["canvas_w"], out["canvas_h"]) == (20, 20)
 
 
+def test_live_cells_count_toward_the_cell_bound(monkeypatch):
+    import atlas_toolkit.domain.packing as packing
+    monkeypatch.setattr(packing, "MAX_CANVAS", 16)
+    # 64 live + 225 item cells = 289 > 16*16; the item alone (225) is under it.
+    with pytest.raises(CanvasTooLargeError) as caught:
+        packing.nest_place_into([solid("N", 15, 15)], 8, 8, np.ones((8, 8), bool), gap_distance=1)
+    assert (caught.value.width, caught.value.height) == (16, 19)  # the early-out's estimate
+
+
 def triangle(name, uvs, w, h):
     raster = PillowRasterBackend()
     mask = raster.read_alpha_mask(raster.rasterize_mesh_mask(uvs, [0, 1, 2], w, h))
