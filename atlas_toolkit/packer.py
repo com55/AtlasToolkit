@@ -37,11 +37,12 @@ class PackerOptions:
 
     `mesh_aware`: cut each region's pixels outside its mesh hull before
     packing. None is auto: on when the atlas has usable mesh data.
-    "polygons" always uses it.
+    "polygons" and "polygons_in_place" always use it.
 
     `repack`: "auto" (None) patches a page whose only edits are additions
     and renames -- the new regions go into its free space and nothing else
-    moves; "always" repacks every edited page.
+    moves; "always" repacks every edited page. "rectangles_in_place" /
+    "polygons_in_place" refuse "always".
 
     Validated by build() / save(), not here."""
 

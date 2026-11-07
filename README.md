@@ -99,11 +99,17 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
   - `packer`: `"shelf"` (default), `"rectangles"` (Smart Packing on solid
     rects) or `"polygons"` (Smart Packing on mesh silhouettes, needs mesh
     data; `PackerOptions(mesh_aware=False)` with it raises `ValueError`). A
-    string or a `Packer` member. `"grid"`, `"rectangles_in_place"` and
-    `"polygons_in_place"` are reserved and raise `NotImplementedError`. With
+    string or a `Packer` member. `"grid"` is reserved and raises
+    `NotImplementedError`. With
     `"polygons"`, a region's rect can contain pixels of neighbours nested
     into its empty corners; extract with `mesh_crop=True` to see only the
     region.
+    `"rectangles_in_place"` / `"polygons_in_place"` keep a page's layout when
+    its edits fit: removed regions leave empty space, replacements keep their
+    rects and offsets, and additions go into free space. Other edited pages
+    repack with `"rectangles"` / `"polygons"`. Composite images are always
+    split into region pieces; `split_composite` is ignored and
+    `PackerOptions(repack="always")` is refused.
   - `packer_options`: a `PackerOptions`:
     - `padding` is the pixels between images, default 2, 1 to 256.
     - `mesh_aware` cuts each region outside its mesh hull before packing. It
