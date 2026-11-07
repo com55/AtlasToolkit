@@ -268,7 +268,7 @@ def test_transparent_part_of_an_unhulled_mod_is_not_free():
     arr = pattern(16, 16, 9)
     arr[:, 8:] = 0
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
-    atlas.add_region("N", img(6, 6))
+    atlas.add_region("N", img(3, 3))
     built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(padding=1))
     assert layout(built)["A"] == layout(atlas)["A"]
     nx, ny = next(r.bounds[:2] for r in built.regions if r.name == "N")
@@ -356,3 +356,49 @@ def test_page_image_not_its_declared_size_is_not_tried_in_place():
     atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])})
     atlas.remove_region("B")
     refused(atlas)
+
+
+def test_wrong_size_sprite_transparent_outside_the_window_refuses():
+    # 2a: a 17x16 sprite whose content is only inside A's window still refuses.
+    atlas = trimmed()
+    arr = np.zeros((16, 17, 4), np.uint8)
+    arr[5:13, 2:12] = pattern(10, 8, 9)
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas)
+
+
+def test_window_past_the_canvas_edge_refuses():
+    # The trimmed window (x 8..18) leaves the 16-wide canvas; content only in the on-canvas part.
+    text = "p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 8,3,16,16\nB\n bounds: 16,0,12,12\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+    arr = np.zeros((16, 16, 4), np.uint8)
+    arr[5:13, 8:16] = pattern(8, 8, 9)
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas)
+
+
+def test_edited_rect_past_the_page_edge_refuses():
+    text = "p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nB\n bounds: 24,0,16,16\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (24, 0, 8, 16)])})
+    atlas.replace({"B": img(16, 16, 9)})
+    refused(atlas)
+
+
+def test_aliases_with_content_inside_both_windows_refuse():
+    # 2c: one image, content only where both aliases' windows overlap: each passes 2b alone,
+    # but their blocks differ.
+    atlas = aliases(o2="5,6,16,16")
+    arr = np.zeros((16, 16, 4), np.uint8)
+    arr[5:10, 5:12] = pattern(7, 5, 7)
+    full = Image.fromarray(arr, "RGBA")
+    atlas.replace({"A": full, "A2": full})
+    refused(atlas)
+
+
+def test_pma_mod_inside_its_hull_keeps_the_neighbour_byte_exact(monkeypatch):
+    atlas = overlap(monkeypatch, LOWER_RIGHT, pma=True)
+    before_b = np.asarray(atlas.extract("B", mesh_crop=True)).copy()
+    atlas.replace({"A": img(16, 16, 9)})
+    built = atlas.build(packer="polygons_in_place")
+    assert layout(built) == layout(atlas)
+    assert (np.asarray(built.extract("B", mesh_crop=True)) == before_b).all()
