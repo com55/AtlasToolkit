@@ -1,4 +1,4 @@
-"""AtlasModifier.patch: place adds into a page's free space (spec 2026-10-31 §5)."""
+"""AtlasModifier.place_in_place: keep a page's layout when its edits fit (spec 2026-11-05)."""
 import numpy as np
 import pytest
 from PIL import Image
@@ -116,13 +116,6 @@ def test_vacate_keeps_a_neighbours_hull_inside_the_removed_rect():
     assert (out[:, :8, 3] == 0).all()                                           # A's rect outside B's rect: cleared
 
 
-def test_a_modded_group_refuses_for_now():
-    rgba = page_rgba(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])
-    modifier, raster, _ = setup(TWO_FULL, rgba)
-    sprite = raster.adopt(Image.fromarray(pattern(16, 16, 9), "RGBA"))
-    batch = {"type": "mod", "names": ["A"], "source": sprite, "is_full_canvas": True, "composite": False}
-    assert run(modifier, [batch], sprites={"A": sprite}) is None
-
 
 def test_patch_delegates_with_identical_bytes():
     rgba = page_rgba(64, 32, [(0, 0, 16, 16), (16, 0, 16, 16)])
@@ -133,3 +126,37 @@ def test_patch_delegates_with_identical_bytes():
     two = run(b, [add(raster_b, f, "N", pattern(10, 10, 4))], gap=2)
     assert (pixels(raster_a, one) == pixels(raster_b, two)).all()
     assert one.document.serialize() == two.document.serialize()
+
+
+def test_each_group_is_masked_by_its_own_hull():
+    text = "p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
+    modifier, raster, _ = setup(text, page_rgba(32, 16, [(0, 0, 32, 16)]))
+    sprite = raster.adopt(Image.fromarray(pattern(16, 16, 9), "RGBA"))
+    batch = {"type": "mod", "names": ["A", "B"], "source": sprite, "is_full_canvas": True, "composite": True}
+    mesh = {"A": UPPER_LEFT, "B": LOWER_RIGHT}
+    out = pixels(raster, run(modifier, [batch], mesh=mesh, sprites={"A": sprite, "B": sprite}))
+    from atlas_toolkit.engine.modifier import mesh_mask_grid
+    a_hull = mesh_mask_grid(raster, UPPER_LEFT, None, 16, 16)
+    assert (out[:, :16][~a_hull][:, 3] == 0).all()     # nothing of B's hull inside A's rect
+    assert (out[:, :16][a_hull][:, 3] == 255).all()
+
+
+def test_removing_a_meshed_alias_keeps_the_whole_group_rect():
+    # The surviving group's rect is not vacated, even outside its own hull.
+    text = "p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nA2\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
+    rgba = page_rgba(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])
+    modifier, raster, _ = setup(text, rgba)
+    out = pixels(raster, run(modifier, [remove("A2")], mesh={"A": UPPER_LEFT, "A2": LOWER_RIGHT, "B": LOWER_RIGHT}))
+    assert (out == rgba).all()
+
+
+@pytest.mark.parametrize("rotate", [90, 180, 270])
+def test_remove_clears_a_rotated_stored_rect(rotate):
+    text = f"p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,12,16\n rotate: {rotate}\n"
+    sw, sh = (16, 12) if rotate in (90, 270) else (12, 16)
+    rgba = page_rgba(32, 16, [(0, 0, 32, 16)])
+    modifier, raster, _ = setup(text, rgba)
+    out = pixels(raster, run(modifier, [remove("B")]))
+    expected = rgba.copy()
+    expected[0:sh, 16:16 + sw] = 0
+    assert (out == expected).all()

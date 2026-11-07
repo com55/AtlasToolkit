@@ -67,14 +67,6 @@ def two():
     return SpineAtlas.load(TWO, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])})
 
 
-@pytest.mark.parametrize("packer", ["rectangles_in_place", "polygons_in_place"])
-def test_in_place_builds_like_the_base_packer_for_now(monkeypatch, packer):
-    # Task 1 only plumbs the mode: a page with a mod still repacks.
-    mesh(monkeypatch, {"A": UPPER_LEFT, "B": LOWER_RIGHT})
-    atlas = SpineAtlas.load(TWO, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])}, skeleton=b"x")
-    atlas.replace({"A": img(16, 16, 9)})
-    refused(atlas, packer)
-
 
 def test_split_composite_is_forced_and_shares_the_cache(monkeypatch):
     from atlas_toolkit.engine.session import AtlasSession
@@ -131,11 +123,6 @@ def test_remove_then_add_reuses_the_space():
     assert layout(built)["A"] == layout(atlas)["A"]
 
 
-def test_a_replace_still_repacks_in_task_2():
-    atlas = two()
-    atlas.replace({"A": img(16, 16, 9)})
-    refused(atlas)
-
 
 def test_every_region_removed_gives_the_empty_page():
     text = TWO + "\nq.png\nsize: 8,8\nC\n bounds: 0,0,8,8\n"
@@ -167,3 +154,205 @@ def test_session_in_place_defaults_off():
     from atlas_toolkit.engine.session import AtlasSession
     for fn in (AtlasSession.pack_pending, AtlasSession._build_pages):
         assert inspect.signature(fn).parameters["in_place"].default is False
+
+
+TRIM = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n{rot}"
+        "B\n bounds: 16,0,12,12\n")
+
+
+def trimmed(rotate=0, pma=False):
+    rot = f" rotate: {rotate}\n" if rotate else ""
+    text = TRIM.format(rot=rot)
+    if pma:
+        text = text.replace("size: 48,16\n", "size: 48,16\npma: true\n")
+    a_stored = (0, 0, 8, 10) if rotate in (90, 270) else (0, 0, 10, 8)
+    rects = [a_stored, (16, 0, 12, 12)]
+    h = 16
+    return SpineAtlas.load(text, {"p.png": page(48, h, rects)})
+
+
+def edited_a(atlas, seed=9):
+    """A's extract (16x16 canvas, window x 2..12, y 5..13) with new pixels inside the window."""
+    arr = np.asarray(atlas.extract("A")).copy()
+    arr[5:13, 2:12] = pattern(10, 8, seed)
+    return arr
+
+
+@pytest.mark.parametrize("rotate", [0, 90, 180, 270])
+def test_extract_edit_replace_goes_in_place(rotate):
+    atlas = trimmed(rotate)
+    want = edited_a(atlas)
+    atlas.replace({"A": Image.fromarray(want, "RGBA")})
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    assert built.pages["p.png"].size == (48, 16)
+    assert (np.asarray(built.extract("A")) == want).all()
+    assert built.extract("B").tobytes() == atlas.extract("B").tobytes()
+
+
+def test_trimmed_size_mod_refuses():
+    atlas = trimmed()
+    atlas.replace({"A": img(10, 8, 9)})
+    refused(atlas)
+
+
+def test_pixel_outside_the_window_refuses():
+    atlas = trimmed()
+    arr = edited_a(atlas)
+    arr[0, 0] = (1, 2, 3, 255)
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas)
+
+
+def test_window_outside_the_canvas_refuses():
+    text = "p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,12,16,16\nB\n bounds: 16,0,12,12\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+    atlas.replace({"A": img(16, 16, 9)})
+    refused(atlas)
+
+
+ALIASES = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
+           "A2\n bounds: 0,0,10,8\n offsets: {o2}\nB\n bounds: 16,0,12,12\n")
+
+
+def aliases(o2="2,3,16,16"):
+    return SpineAtlas.load(ALIASES.format(o2=o2), {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+
+
+def test_partially_modded_alias_group_refuses():
+    atlas = aliases()
+    atlas.replace({"A": Image.fromarray(edited_a(atlas), "RGBA")})
+    refused(atlas)
+
+
+def test_aliases_with_the_same_window_go_in_place():
+    atlas = aliases()
+    want = edited_a(atlas)
+    atlas.replace({"A": Image.fromarray(want, "RGBA"), "A2": Image.fromarray(want, "RGBA")})
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    assert (np.asarray(built.extract("A2")) == want).all()
+
+
+def test_aliases_with_different_offsets_and_one_image_refuse():
+    # Spec I-3: same sprite bytes, different windows -> different blocks.
+    atlas = aliases(o2="5,6,16,16")
+    full = Image.fromarray(pattern(16, 16, 7), "RGBA")
+    atlas.replace({"A": full, "A2": full})
+    refused(atlas)
+
+
+def test_mod_then_remove_equals_a_remove_only_build():
+    atlas = trimmed()
+    atlas.replace({"A": Image.fromarray(edited_a(atlas), "RGBA")})
+    atlas.remove_region("A")
+    other = trimmed()
+    other.remove_region("A")
+    same_build(atlas.build(packer="rectangles_in_place"), other.build(packer="rectangles_in_place"))
+    assert layout(atlas.build(packer="rectangles_in_place"))["B"] == layout(trimmed())["B"]
+
+
+def test_modded_alias_with_its_partner_removed_goes_in_place():
+    atlas = aliases()
+    want = edited_a(atlas)
+    atlas.replace({"A": Image.fromarray(want, "RGBA")})
+    atlas.remove_region("A2")
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built)["A"] == layout(atlas)["A"]
+    assert (np.asarray(built.extract("A")) == want).all()
+
+
+def test_transparent_part_of_an_unhulled_mod_is_not_free():
+    # Spec C-1: mesh off, A's right half transparent; the add must not land inside A's rect.
+    atlas = two()
+    arr = pattern(16, 16, 9)
+    arr[:, 8:] = 0
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    atlas.add_region("N", img(6, 6))
+    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(padding=1))
+    assert layout(built)["A"] == layout(atlas)["A"]
+    nx, ny = next(r.bounds[:2] for r in built.regions if r.name == "N")
+    assert not (nx < 16 and ny < 16)
+
+
+def test_pma_round_trip_is_byte_exact():
+    atlas = trimmed(pma=True)
+    want = edited_a(atlas)
+    atlas.replace({"A": Image.fromarray(want, "RGBA")})
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    assert (np.asarray(built.extract("A")) == want).all()
+
+
+def test_pma_additive_pixel_outside_the_window_refuses():
+    atlas = trimmed(pma=True)
+    arr = edited_a(atlas)
+    arr[0, 0] = (40, 0, 0, 0)       # alpha 0 but visible on a pma page
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas)
+
+
+def test_straight_alpha_zero_pixel_outside_the_window_is_ignored():
+    atlas = trimmed()
+    arr = edited_a(atlas)
+    arr[0, 0] = (40, 0, 0, 0)
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    assert layout(atlas.build(packer="rectangles_in_place")) == layout(atlas)
+
+
+OVERLAP = "p.png\nsize: 24,24\nA\n bounds: 0,0,16,16\nB\n bounds: 4,4,16,16\n"
+
+
+def overlap(monkeypatch, b_mesh, pma=False):
+    mesh(monkeypatch, {"A": UPPER_LEFT, "B": b_mesh})
+    text = OVERLAP.replace("size: 24,24\n", "size: 24,24\npma: true\n") if pma else OVERLAP
+    return SpineAtlas.load(text, {"p.png": page(24, 24, [(0, 0, 20, 20)])}, skeleton=b"x")
+
+
+def test_mod_inside_its_hull_keeps_the_neighbour(monkeypatch):
+    atlas = overlap(monkeypatch, LOWER_RIGHT)
+    before_b = np.asarray(atlas.extract("B", mesh_crop=True)).copy()
+    atlas.replace({"A": img(16, 16, 9)})
+    built = atlas.build(packer="polygons_in_place")
+    assert layout(built) == layout(atlas)
+    after_b = np.asarray(built.extract("B", mesh_crop=True))
+    visible = before_b[..., 3] > 0
+    assert visible.any()
+    assert (after_b[..., 3] == before_b[..., 3]).all()
+    assert (after_b[visible] == before_b[visible]).all()
+
+
+def test_mod_onto_a_neighbours_hull_refuses(monkeypatch):
+    atlas = overlap(monkeypatch, UPPER_LEFT)    # B's hull reaches into A's hull
+    atlas.replace({"A": img(16, 16, 9)})
+    refused(atlas, packer="polygons_in_place")
+
+
+def test_pma_additive_pixel_onto_a_neighbours_hull_refuses(monkeypatch):
+    # A has no mesh (unhulled), B's hull covers part of A's rect; the mod is empty except
+    # one alpha-0 additive pixel at (10, 10), inside B's hull.
+    mesh(monkeypatch, {"B": UPPER_LEFT})
+    text = OVERLAP.replace("size: 24,24\n", "size: 24,24\npma: true\n")
+    atlas = SpineAtlas.load(text, {"p.png": page(24, 24, [(0, 0, 20, 20)])}, skeleton=b"x")
+    arr = np.zeros((16, 16, 4), np.uint8)
+    arr[10, 10] = (40, 0, 0, 0)
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas)
+
+
+def test_refused_attempt_leaves_nothing_behind():
+    text = TWO + "\nq.png\nsize: 32,16\nC\n bounds: 0,0,16,16\nD\n bounds: 16,0,16,16\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)]),
+                                   "q.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)], seed=2)})
+    atlas.replace({"A": img(16, 16, 9), "C": img(20, 20, 9)})
+    first = atlas.build(packer="rectangles_in_place")
+    atlas.build(packer="rectangles")                       # evicts the one-slot cache
+    same_build(first, atlas.build(packer="rectangles_in_place"))
+    assert layout(first)["A"] == layout(atlas)["A"]
+
+
+def test_page_image_not_its_declared_size_is_not_tried_in_place():
+    text = TWO.replace("size: 32,16", "size: 64,32")
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])})
+    atlas.remove_region("B")
+    refused(atlas)

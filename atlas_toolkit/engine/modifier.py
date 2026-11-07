@@ -957,6 +957,48 @@ class AtlasModifier:
                 raise ValueError("patch() is only for pages whose pristine regions are not modified or removed")
         return self.place_in_place(batches=batches, modded_sprites={}, pieces={}, mesh_lookup_fn=mesh_lookup_fn, gap=gap)
 
+    def _pixels(self, handle: ImageHandle) -> np.ndarray:
+        w, h = self.raster.size(handle)
+        return np.frombuffer(self.raster.get_pixels(handle), dtype=np.uint8).reshape(h, w, 4).copy()
+
+    def _non_empty(self, block: np.ndarray) -> np.ndarray:
+        """Spec 2026-11-05 §4: a pixel Spine shows -- alpha > 0, or on a pma
+        page any channel > 0 (alpha-0 colour is additive there)."""
+        return block.any(axis=2) if self.pma else block[..., 3] > 0
+
+    def _canvas_hull(self, geometries: list[dict], width: int, height: int) -> np.ndarray:
+        """Union of the meshes rasterized over a width x height canvas."""
+        grid = np.zeros((height, width), dtype=bool)
+        for geometry in geometries:
+            handle = self.raster.rasterize_mesh_mask(geometry["uvs"], geometry["triangles"], width, height)
+            grid |= np.asarray(self.raster.read_alpha_mask(handle), dtype=bool).reshape(height, width)
+            self.raster.dispose(handle)
+        return grid
+
+    def _plain_block(
+        self, sprite: ImageHandle, meta: dict, rotate: int, hull_geoms: Optional[list[dict]],
+    ) -> Optional[np.ndarray]:
+        """Spec 2026-11-05 §4.2 plain mod: the full-canvas sprite cut back to
+        the region's trimmed window, in stored orientation; None when it does
+        not fit (2a, window inside the canvas, 2b)."""
+        _x, _y, w, h = meta["bounds"]
+        offsets = meta["offsets"]
+        ox, oy, cw, ch = offsets if offsets is not None else (0, 0, w, h)
+        if tuple(self.raster.size(sprite)) != (cw, ch):
+            return None
+        rect = mask_crop_rect_for_offsets([ox, oy, cw, ch], w, h)
+        x, y = rect["x"], rect["y"]
+        if x < 0 or y < 0 or x + w > cw or y + h > ch:
+            return None
+        block = self._pixels(sprite)
+        if hull_geoms is not None:
+            block[~self._canvas_hull(hull_geoms, cw, ch)] = 0
+        outside = self._non_empty(block)
+        outside[y:y + h, x:x + w] = False
+        if outside.any():
+            return None
+        return _rotate_pixels(block[y:y + h, x:x + w], rotate)
+
     def place_in_place(
         self,
         *,
@@ -1001,6 +1043,7 @@ class AtlasModifier:
 
         count = np.zeros((height, width), dtype=np.uint16)
         masks: dict[tuple, np.ndarray] = {}
+        geoms_of: dict[tuple, list[dict]] = {}
         hulled = np.zeros((height, width), dtype=bool)
         excluded = np.zeros((height, width), dtype=bool)
         for key, names in groups.items():
@@ -1010,6 +1053,7 @@ class AtlasModifier:
             if mesh_lookup_fn is not None:
                 geoms = [mesh_lookup_fn(name) for name in names]
                 if all(g is not None for g in geoms):
+                    geoms_of[key] = geoms
                     grid = np.zeros((h, w), dtype=bool)
                     for name, g in zip(names, geoms):
                         grid |= mesh_mask_grid(self.raster, g, regions[name]["offsets"], w, h)
@@ -1031,9 +1075,31 @@ class AtlasModifier:
         alpha = np.asarray(self.raster.read_alpha_mask(self.base_image), dtype=bool).reshape(height, width)
         stray = alpha & ~excluded
 
-        # §4.2 fit test (Task 3 fills this in). Task 2: any edited group refuses.
-        if any(any(name in modded for name in names) for names in groups.values()):
-            return None
+        # §4.2: fit test, before any output is allocated.
+        blocks: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+        for key, names in groups.items():
+            if not any(name in modded for name in names):
+                continue
+            x, y, sw, sh = _stored_window(*key)
+            if x < 0 or y < 0 or x + sw > width or y + sh > height:
+                return None                      # an edited rect must lie on its page
+            if any(name not in modded for name in names):
+                return None                      # 2c: every survivor of the group is modded
+            per = []
+            for name in names:
+                if name in pieces:
+                    return None                  # composite pieces: Task 4
+                block = self._plain_block(modded_sprites[name], regions[name], key[4], geoms_of.get(key))
+                if block is None:
+                    return None
+                per.append(block)
+            if any(not np.array_equal(per[0], block) for block in per[1:]):
+                return None                      # 2c: identical blocks
+            window = window_of(key)[0]
+            others = ((count[window] - masks[key].astype(np.uint16)) > 0) | stray[window]
+            if (self._non_empty(per[0]) & others).any():
+                return None                      # 2d
+            blocks[key] = (per[0], others)
 
         # §4.1: vacate.
         canvas_px = np.frombuffer(self.raster.get_pixels(self.base_image), dtype=np.uint8).reshape(height, width, 4).copy()
@@ -1042,6 +1108,11 @@ class AtlasModifier:
             window = window_of(key)[0]
             view = canvas_px[window]
             view[nonlive[window]] = 0
+
+        # §4.3: clear each edited rect outside others' live, then paste its block there.
+        for key, (block, others) in blocks.items():
+            view = canvas_px[window_of(key)[0]]
+            view[~others] = block[~others]
 
         # §4.4: adds -- patch's placement, over the post-vacate canvas.
         live = (count > 0) | ((canvas_px[..., 3] > 0) & ~hulled)
