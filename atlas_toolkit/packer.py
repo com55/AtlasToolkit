@@ -23,7 +23,11 @@ class Packer(StrEnum):
     POLYGONS_IN_PLACE = "polygons_in_place"
 
 
-_NOT_IMPLEMENTED = frozenset({Packer.GRID, Packer.RECTANGLES_IN_PLACE, Packer.POLYGONS_IN_PLACE})
+_NOT_IMPLEMENTED = frozenset({Packer.GRID})
+_IN_PLACE_BASE = {
+    Packer.RECTANGLES_IN_PLACE: Packer.RECTANGLES,
+    Packer.POLYGONS_IN_PLACE: Packer.POLYGONS,
+}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -48,13 +52,16 @@ class PackerOptions:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedPack:
-    """The values that reach the engine; also the build cache key."""
+    """The values that reach the engine; also the build cache key.
+
+    `in_place`: pages whose edits fit keep their layout (spec 2026-11-05)."""
 
     nest: bool
     padding: int
     mesh_aware: bool
     mesh_footprint: bool
     patch_adds: bool
+    in_place: bool = False
 
 
 def _type_name(value: object) -> str:
@@ -114,18 +121,26 @@ def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tupl
         raise TypeError(f"packer_options must be a PackerOptions, not {_type_name(options)}")
     padding = _padding(options.padding)
     patch_adds = _patch_adds(options.repack)
+    in_place = mode in _IN_PLACE_BASE
+    base = _IN_PLACE_BASE.get(mode, mode)
+    if in_place and options.repack == "always":
+        raise ValueError(f"packer {mode.value!r} keeps the layout; use packer={base.value!r} to always repack")
     mesh_aware = options.mesh_aware
     if mesh_aware is not None and not isinstance(mesh_aware, bool):
         raise TypeError(f"mesh_aware must be True, False or None, not {_type_name(mesh_aware)}")
-    if mode is Packer.POLYGONS:
+    if base is Packer.POLYGONS:
         if mesh_aware is False:
-            raise ValueError("packer 'polygons' always uses the mesh; mesh_aware cannot be False")
-        return ResolvedPack(nest=True, padding=padding, mesh_aware=True, mesh_footprint=True, patch_adds=patch_adds), True
+            raise ValueError(f"packer {mode.value!r} always uses the mesh; mesh_aware cannot be False")
+        return ResolvedPack(
+            nest=True, padding=padding, mesh_aware=True, mesh_footprint=True,
+            patch_adds=patch_adds, in_place=in_place,
+        ), True
     resolved = ResolvedPack(
-        nest=mode is Packer.RECTANGLES,
+        nest=base is Packer.RECTANGLES,
         padding=padding,
         mesh_aware=mesh_ready if mesh_aware is None else mesh_aware,
         mesh_footprint=False,
         patch_adds=patch_adds,
+        in_place=in_place,
     )
     return resolved, mesh_aware is True

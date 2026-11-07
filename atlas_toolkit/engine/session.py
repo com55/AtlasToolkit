@@ -439,6 +439,7 @@ class AtlasSession:
         patch_adds: bool = False,
         patch_padding: int = 0,
         added_mesh_lookup=None,
+        in_place: bool = False,
     ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
         """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
         own and splice it into the pristine document (port of JS
@@ -958,6 +959,7 @@ class AtlasSession:
         patch_adds: bool = False,
         patch_padding: int = 0,
         added_mesh_lookup=None,
+        in_place: bool = False,
     ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return
         (text, {page: native image}).
@@ -969,7 +971,9 @@ class AtlasSession:
         normalized like the nest gap (0 or invalid becomes 4); SpineAtlas
         always passes its padding (>= 1).
         `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry
-        for added regions."""
+        for added regions.
+        `in_place` (SpineAtlas only, spec 2026-11-05): every touched page whose
+        image is its declared size is tried in place; a page that does not fit repacks."""
         self._require_open()
         if not self._mod_batches:
             return self._document.serialize(), self.export_pages()
@@ -980,6 +984,7 @@ class AtlasSession:
                 shelf_padding=shelf_padding, mesh_footprint=mesh_footprint,
                 patch_adds=patch_adds, patch_padding=patch_padding,
                 added_mesh_lookup=added_mesh_lookup,
+                in_place=in_place,
             )
             return document.serialize(), {
                 filename: self._raster.export(images[filename])

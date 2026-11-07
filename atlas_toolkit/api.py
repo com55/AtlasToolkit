@@ -551,7 +551,10 @@ class SpineAtlas:
         own size (offsets are dropped), as in the app; the regions share that
         one sprite. With build(split_composite=True) the image is instead
         taken as the inverse of extract_composite(force_resize=True): it is
-        stored at its own size and cut into one piece per region. When the
+        stored at its own size and cut into one piece per region.
+        build(packer="rectangles_in_place" / "polygons_in_place") always splits,
+        and draws each piece into its region's own slot when the image is
+        exactly that region's canvas size. When the
         build is mesh-aware (packer "polygons", or PackerOptions mesh_aware
         on, which is the default whenever the atlas has usable mesh data), a
         region with mesh owns its mesh hull; otherwise each region owns its
@@ -682,6 +685,7 @@ class SpineAtlas:
                 mesh_footprint=resolved.mesh_footprint,
                 patch_adds=resolved.patch_adds, patch_padding=resolved.padding,
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
+                in_place=resolved.in_place,
             )
         except CanvasTooLargeError as error:
             raise CanvasTooLarge(error.width, error.height, error.limit, getattr(error, "page", None)) from None
@@ -697,9 +701,16 @@ class SpineAtlas:
         """Pack the recorded edits once and return a new SpineAtlas.
 
         `packer`: "shelf" (default), "rectangles" (nest packing, solid
-        rects) or "polygons" (nest packing on mesh silhouettes; needs mesh
-        data). "grid", "rectangles_in_place" and "polygons_in_place" raise
-        NotImplementedError for now. `packer_options` is a PackerOptions:
+        rects), "polygons" (nest packing on mesh silhouettes; needs mesh
+        data), or "rectangles_in_place" / "polygons_in_place": a page whose
+        edits fit keeps its layout -- removed regions leave empty space, a
+        replaced region whose new pixels fit its old slot is drawn there
+        (its rect and offsets unchanged), additions go into free space --
+        and any other edited page is repacked with "rectangles" /
+        "polygons". These two always split replace_composite images
+        (split_composite is ignored) and refuse PackerOptions(repack="always").
+        "grid" raises NotImplementedError for now.
+        `packer_options` is a PackerOptions:
         `padding` (pixels between images, default 2) and `mesh_aware`
         (default auto: on when the atlas has usable mesh data, which
         SpineAtlas.open picks up from a sibling .skel file).
@@ -722,7 +733,9 @@ class SpineAtlas:
                 self._text, self._session.export_pages(), self._skeleton, self._allowed,
                 (self._mesh_reason, self._mesh_lookup),
             )
-        options = (resolved, bool(split_composite))
+        # Spec 2026-11-05 R5: in-place modes always split composites, so both
+        # split_composite values share one cache entry.
+        options = (resolved, bool(split_composite) or resolved.in_place)
         if self._build_cache is None or self._build_cache[0] != options:
             text, pages = self._pack(*options)
             self._build_cache = (options, text, pages, self._child_allowed())

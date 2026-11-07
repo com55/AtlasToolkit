@@ -97,8 +97,8 @@ def test_rectangles_with_mesh_aware_masks_pixels_but_packs_solid_rects(monkeypat
 
 @pytest.mark.parametrize("packer, options, error", [
     ("grid", None, NotImplementedError),
-    ("rectangles_in_place", None, NotImplementedError),
-    ("polygons_in_place", None, NotImplementedError),
+    ("rectangles_in_place", PackerOptions(repack="always"), ValueError),
+    ("polygons_in_place", PackerOptions(mesh_aware=False), ValueError),
     ("nest", None, ValueError),
     (3, None, TypeError),
     ("shelf", {"padding": 2}, TypeError),

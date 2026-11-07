@@ -46,10 +46,40 @@ def test_modes_map_to_engine_switches(packer, nest, footprint):
     assert (resolved.nest, resolved.mesh_footprint, resolved.padding) == (nest, footprint, 2)
 
 
-@pytest.mark.parametrize("packer", ["grid", "rectangles_in_place", "polygons_in_place", Packer.GRID])
-def test_future_modes_are_not_implemented(packer):
-    with pytest.raises(NotImplementedError, match=str(Packer(packer).value)):
+@pytest.mark.parametrize("packer", ["grid", Packer.GRID])
+def test_grid_is_not_implemented(packer):
+    with pytest.raises(NotImplementedError, match="grid"):
         resolve(packer)
+
+
+@pytest.mark.parametrize("packer, base", [
+    ("rectangles_in_place", "rectangles"), ("polygons_in_place", "polygons"),
+])
+def test_in_place_modes_resolve_like_their_base(packer, base):
+    resolved, needs = resolve(packer)
+    base_resolved, base_needs = resolve(base)
+    assert resolved.in_place and not base_resolved.in_place
+    assert (resolved.nest, resolved.padding, resolved.mesh_aware, resolved.mesh_footprint, resolved.patch_adds, needs) == (
+        base_resolved.nest, base_resolved.padding, base_resolved.mesh_aware, base_resolved.mesh_footprint,
+        base_resolved.patch_adds, base_needs)
+
+
+@pytest.mark.parametrize("packer, base", [
+    ("rectangles_in_place", "rectangles"), ("polygons_in_place", "polygons"),
+])
+def test_in_place_refuses_repack_always(packer, base):
+    with pytest.raises(ValueError, match=f"packer '{packer}' keeps the layout; use packer='{base}' to always repack"):
+        resolve_packer(packer, PackerOptions(repack="always"), mesh_ready=True)
+
+
+def test_in_place_accepts_repack_auto():
+    resolved, _ = resolve_packer("rectangles_in_place", PackerOptions(repack="auto"), mesh_ready=True)
+    assert resolved.patch_adds and resolved.in_place
+
+
+def test_polygons_in_place_names_itself_when_mesh_aware_false():
+    with pytest.raises(ValueError, match="'polygons_in_place'"):
+        resolve("polygons_in_place", mesh_aware=False)
 
 
 def test_unknown_packer_lists_the_valid_names():
