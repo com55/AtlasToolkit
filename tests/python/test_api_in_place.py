@@ -73,8 +73,7 @@ def test_in_place_builds_like_the_base_packer_for_now(monkeypatch, packer):
     mesh(monkeypatch, {"A": UPPER_LEFT, "B": LOWER_RIGHT})
     atlas = SpineAtlas.load(TWO, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)])}, skeleton=b"x")
     atlas.replace({"A": img(16, 16, 9)})
-    built = atlas.build(packer=packer)
-    assert built.atlas_text  # builds; exact layout is pinned by later tasks
+    refused(atlas, packer)
 
 
 def test_split_composite_is_forced_and_shares_the_cache(monkeypatch):
@@ -112,3 +111,59 @@ def test_polygons_in_place_needs_mesh():
 def test_repack_always_with_in_place_raises_even_unedited():
     with pytest.raises(ValueError, match="keeps the layout"):
         two().build(packer="rectangles_in_place", packer_options=PackerOptions(repack="always"))
+
+
+def test_remove_only_keeps_the_layout():
+    atlas = two()
+    atlas.remove_region("B")
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built)["A"] == layout(atlas)["A"]
+    assert built.pages["p.png"].size == (32, 16)
+    assert built.extract("A").tobytes() == atlas.extract("A").tobytes()
+
+
+def test_remove_then_add_reuses_the_space():
+    atlas = two()
+    atlas.remove_region("B")
+    atlas.add_region("N", img(6, 6))
+    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(padding=1))
+    assert built.pages["p.png"].size == (32, 16)
+    assert layout(built)["A"] == layout(atlas)["A"]
+
+
+def test_a_replace_still_repacks_in_task_2():
+    atlas = two()
+    atlas.replace({"A": img(16, 16, 9)})
+    refused(atlas)
+
+
+def test_every_region_removed_gives_the_empty_page():
+    text = TWO + "\nq.png\nsize: 8,8\nC\n bounds: 0,0,8,8\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)]),
+                                   "q.png": page(8, 8, [(0, 0, 8, 8)])})
+    atlas.remove_region("C")
+    built = atlas.build(packer="rectangles_in_place")
+    assert built.pages["q.png"].size == (10, 10)
+    assert built.pages["p.png"].tobytes() == atlas.pages["p.png"].tobytes()
+
+
+def test_multi_page_one_in_place_one_refused():
+    text = TWO + "\nq.png\nsize: 32,16\nC\n bounds: 0,0,16,16\nD\n bounds: 16,0,16,16\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)]),
+                                   "q.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)], seed=2)})
+    atlas.remove_region("B")
+    atlas.replace({"C": img(20, 20, 9)})          # wrong size: q.png refuses (any mod refuses in Task 2)
+    built = atlas.build(packer="rectangles_in_place")
+    base = atlas.build(packer="rectangles", split_composite=True)
+    assert layout(built)["A"] == layout(atlas)["A"]
+    q_built = [line for line in built.atlas_text.split("\n\n") if line.startswith("q.png")]
+    q_base = [line for line in base.atlas_text.split("\n\n") if line.startswith("q.png")]
+    assert q_built == q_base
+    assert built.pages["q.png"].tobytes() == base.pages["q.png"].tobytes()
+
+
+def test_session_in_place_defaults_off():
+    import inspect
+    from atlas_toolkit.engine.session import AtlasSession
+    for fn in (AtlasSession.pack_pending, AtlasSession._build_pages):
+        assert inspect.signature(fn).parameters["in_place"].default is False

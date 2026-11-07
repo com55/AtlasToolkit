@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Optional
 
@@ -556,6 +556,17 @@ class PackResult:
     region_bounds: dict[str, list[int]]
 
 
+def _rotate_pixels(block: np.ndarray, degrees: int) -> np.ndarray:
+    """An unrotated (h, w, 4) pixel block in its stored orientation -- the
+    same mapping rotate_grid_for_pack applies to hull grids."""
+    return np.stack([rotate_grid_for_pack(block[..., c], degrees) for c in range(4)], axis=-1)
+
+
+def _stored_window(x: int, y: int, w: int, h: int, rotate: int) -> tuple[int, int, int, int]:
+    """(x, y, stored_w, stored_h) of a rect on its page."""
+    return (x, y, h, w) if rotate in (90, 270) else (x, y, w, h)
+
+
 class AtlasModifier:
     """Port of atlas-modifier.js's AtlasModifier, production-live surface
     only (see the module docstring). One instance per (document, page
@@ -944,10 +955,99 @@ class AtlasModifier:
             names = batch["names"] if kind == "mod" else [batch.get("target_key")] if kind == "remove" else []
             if any(name in pristine_regions for name in names):
                 raise ValueError("patch() is only for pages whose pristine regions are not modified or removed")
+        return self.place_in_place(batches=batches, modded_sprites={}, pieces={}, mesh_lookup_fn=mesh_lookup_fn, gap=gap)
+
+    def place_in_place(
+        self,
+        *,
+        batches: Sequence[dict],
+        modded_sprites: Mapping[str, ImageHandle],
+        pieces: Mapping[str, object],
+        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]],
+        gap: int,
+    ) -> Optional[PackResult]:
+        """Spec 2026-11-05 §4: keep this page's layout. Removed rects are
+        vacated, edited groups are pasted into their own slots when they fit
+        (§4.2), adds go into free space (patch §5.2-5.3). Returns None when an
+        edited group does not fit; nothing it allocated is used then (the
+        session releases it). Never mutates base_image, a sprite or a piece.
+        With no mods and no removes this is patch mode, byte for byte."""
+        _pristine_names, pristine_regions = self._scoped_region_meta()
         effective = derive_effective_model(pristine_regions, list(batches))
         region_names, regions = effective["region_names"], effective["regions"]
+        survivors = [name for name in region_names if name in pristine_regions]
+        survivor_set = set(survivors)
+        modded = {
+            name for batch in batches if batch.get("type") == "mod"
+            for name in batch["names"] if name in survivor_set
+        }
         sources = {b["internal_key"]: b["source"] for b in batches if b.get("type") == "add"}
         added = [name for name in region_names if name in sources]
+        width, height = self.raster.size(self.base_image)
+
+        # §4 terms: rect groups over survivors; vacated rects of removed regions.
+        groups: dict[tuple, list[str]] = {}
+        for name in survivors:
+            x, y, w, h = regions[name]["bounds"]
+            groups.setdefault((x, y, w, h, regions[name]["rotate"]), []).append(name)
+        vacated = {
+            (*pristine_regions[name]["bounds"], pristine_regions[name]["rotate"])
+            for name in pristine_regions if name not in survivor_set
+        } - groups.keys()
+
+        def window_of(key):
+            x, y, sw, sh = _stored_window(*key)
+            return (slice(max(y, 0), max(y + sh, 0)), slice(max(x, 0), max(x + sw, 0))), max(-y, 0), max(-x, 0)
+
+        count = np.zeros((height, width), dtype=np.uint16)
+        masks: dict[tuple, np.ndarray] = {}
+        hulled = np.zeros((height, width), dtype=bool)
+        excluded = np.zeros((height, width), dtype=bool)
+        for key, names in groups.items():
+            x, y, w, h, rotate = key
+            _, _, sw, sh = _stored_window(*key)
+            mask = None
+            if mesh_lookup_fn is not None:
+                geoms = [mesh_lookup_fn(name) for name in names]
+                if all(g is not None for g in geoms):
+                    grid = np.zeros((h, w), dtype=bool)
+                    for name, g in zip(names, geoms):
+                        grid |= mesh_mask_grid(self.raster, g, regions[name]["offsets"], w, h)
+                    mask = rotate_grid_for_pack(grid, rotate)
+            window, oy, ox = window_of(key)
+            target_h, target_w = count[window].shape
+            if mask is None:
+                mask = np.ones((sh, sw), dtype=bool)
+            else:
+                hulled[window] = True
+                excluded[window] = True
+            masks[key] = mask[oy:oy + target_h, ox:ox + target_w]
+            count[window] += masks[key].astype(np.uint16)
+            if any(name in modded for name in names):
+                excluded[window] = True
+        for key in vacated:
+            excluded[window_of(key)[0]] = True
+
+        alpha = np.asarray(self.raster.read_alpha_mask(self.base_image), dtype=bool).reshape(height, width)
+        stray = alpha & ~excluded
+
+        # §4.2 fit test (Task 3 fills this in). Task 2: any edited group refuses.
+        if any(any(name in modded for name in names) for names in groups.values()):
+            return None
+
+        # §4.1: vacate.
+        canvas_px = np.frombuffer(self.raster.get_pixels(self.base_image), dtype=np.uint8).reshape(height, width, 4).copy()
+        nonlive = ~((count > 0) | stray)
+        for key in vacated:
+            window = window_of(key)[0]
+            view = canvas_px[window]
+            view[nonlive[window]] = 0
+
+        # §4.4: adds -- patch's placement, over the post-vacate canvas.
+        live = (count > 0) | ((canvas_px[..., 3] > 0) & ~hulled)
+        return self._place_adds(canvas_px, live, added, sources, regions, mesh_lookup_fn, gap, survivor_set, batches)
+
+    def _place_adds(self, canvas_px, live, added, sources, regions, mesh_lookup_fn, gap, survivor_set, batches) -> PackResult:
         width, height = self.raster.size(self.base_image)
 
         # §4: cut each added sprite with mesh data to its hull, on a clone.
@@ -981,45 +1081,17 @@ class AtlasModifier:
                 footprint = bytes(solid_mask(w, h))
             items.append({"name": name, "w": w, "h": h, "footprint": footprint})
 
-        # §5.1: the live set.
-        alpha = np.asarray(self.raster.read_alpha_mask(self.base_image), dtype=bool).reshape(height, width)
-        live = np.zeros((height, width), dtype=bool)
-        meshed = np.zeros((height, width), dtype=bool)
-        rect_groups: dict[tuple, list[str]] = {}
-        for name in region_names:
-            if name in pristine_regions:
-                x, y, w, h = regions[name]["bounds"]
-                rect_groups.setdefault((x, y, w, h, regions[name]["rotate"]), []).append(name)
-        for (x, y, w, h, rotate), names in rect_groups.items():
-            stored_w, stored_h = (h, w) if rotate in (90, 270) else (w, h)
-            window = (slice(max(y, 0), max(y + stored_h, 0)), slice(max(x, 0), max(x + stored_w, 0)))
-            target = live[window]
-            hull = None
-            if mesh_lookup_fn is not None:
-                geoms = [mesh_lookup_fn(name) for name in names]
-                if all(g is not None for g in geoms):
-                    grid = np.zeros((h, w), dtype=bool)
-                    for name, g in zip(names, geoms):
-                        grid |= mesh_mask_grid(self.raster, g, regions[name]["offsets"], w, h)
-                    hull = rotate_grid_for_pack(grid, rotate)
-            if hull is None:
-                live[window] = True
-            else:
-                oy, ox = max(-y, 0), max(-x, 0)
-                target |= hull[oy:oy + target.shape[0], ox:ox + target.shape[1]]
-                meshed[window] = True
-        live |= alpha & ~meshed
-
         # §5.2: search.
-        placed = nest_place_into(items, width, height, live, gap_distance=gap)
-        out_w, out_h = placed["canvas_w"], placed["canvas_h"]
-        where = {p["name"]: p for p in placed["placements"]}
+        if added:
+            placed = nest_place_into(items, width, height, live, gap_distance=gap)
+            out_w, out_h = placed["canvas_w"], placed["canvas_h"]
+            where = {p["name"]: p for p in placed["placements"]}
+        else:
+            out_w, out_h, where, placed = width, height, {}, {"placements": []}
 
         # §5.3: byte copy, clear every non-live pixel under a placement, then paste.
         canvas = np.zeros((out_h, out_w, 4), dtype=np.uint8)
-        canvas[:height, :width] = np.frombuffer(
-            self.raster.get_pixels(self.base_image), dtype=np.uint8,
-        ).reshape(height, width, 4)
+        canvas[:height, :width] = canvas_px
         covered = np.zeros((out_h, out_w), dtype=bool)
         for p in placed["placements"]:
             covered[p["y"]:p["y"] + p["ph"], p["x"]:p["x"] + p["pw"]] = True
@@ -1034,6 +1106,7 @@ class AtlasModifier:
         # §5.4: text -- the pristine page, renames applied, new size, adds appended.
         page = next(page for page in self.document.pages if page.filename == self.target_page).clone()
         page.size = [out_w, out_h]
+        page.regions = [region for region in page.regions if region.name in survivor_set]
         renames = {b["target_key"]: b["new_atlas_name"] for b in batches if b.get("type") == "rename"}
         for region in page.regions:
             if region.name in renames:

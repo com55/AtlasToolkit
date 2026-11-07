@@ -446,9 +446,15 @@ class AtlasSession:
         replacePageInAtlas); every other page keeps its pristine image. Never
         mutates self._document or its pages: every build reuses them."""
         region_pages = self._region_pages(batches)
-        patching = self._patch_pages(batches, region_pages) if patch_adds else set()
-        shortcut = not patch_adds or not self._declared_size_matches(self._document.pages[0])
+        shortcut = not (patch_adds or in_place) or not self._declared_size_matches(self._document.pages[0])
         touched = self._touched_pages(batches, region_pages, single_page_shortcut=shortcut)
+        if in_place:
+            first = {}
+            for page in self._document.pages:
+                first.setdefault(page.filename, page)
+            patching = {filename for filename in touched if self._declared_size_matches(first[filename])}
+        else:
+            patching = self._patch_pages(batches, region_pages) if patch_adds else set()
         remaining = {region_pages[key] for key in self._raw_effective_model(batches)["region_names"]}
         renames = {
             batch["target_key"]: batch["new_atlas_name"]
@@ -463,13 +469,19 @@ class AtlasSession:
             if filename not in remaining:
                 continue
             try:
+                result = None
                 if filename in patching:
-                    result = modifiers[filename].patch(
+                    before = self._raster.checkpoint()
+                    result = modifiers[filename].place_in_place(
                         batches=self._page_batches(filename, batches, region_pages),
+                        modded_sprites=sprites,
+                        pieces={name: piece for name, piece in pieces.items() if name in modifiers[filename].regions},
                         mesh_lookup_fn=self._repack_mesh_lookup(added_mesh_lookup),
                         gap=patch_padding,
                     )
-                else:
+                    if result is None:
+                        self._raster.release_except(before)  # spec M-5: a refused attempt leaves nothing behind
+                if result is None:
                     result = self._pack_page(
                         modifiers[filename],
                         self._page_batches(filename, batches, region_pages),
