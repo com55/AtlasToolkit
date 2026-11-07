@@ -402,3 +402,77 @@ def test_pma_mod_inside_its_hull_keeps_the_neighbour_byte_exact(monkeypatch):
     built = atlas.build(packer="polygons_in_place")
     assert layout(built) == layout(atlas)
     assert (np.asarray(built.extract("B", mesh_crop=True)) == before_b).all()
+COMP = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
+        "B\n bounds: 16,0,6,12\n offsets: 8,1,16,16\nC\n bounds: 32,0,12,12\n")
+
+
+def comp():
+    return SpineAtlas.load(COMP, {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 6, 12), (32, 0, 12, 12)])})
+
+
+def same_extracts(a, b, names):
+    for name in names:
+        x, y = np.asarray(a.extract(name)), np.asarray(b.extract(name))
+        assert x.shape == y.shape, name
+        ex, ey = x[..., 3] > 0, y[..., 3] > 0
+        assert (ex == ey).all() and (x[ex] == y[ey]).all(), name
+
+
+def test_composite_at_canvas_size_goes_in_place():
+    atlas = comp()
+    arr = np.asarray(atlas.extract_composite(["A", "B"])).copy()
+    assert arr.shape == (16, 16, 4)
+    arr[6:12, 3:14] = pattern(11, 6, 9)            # straddles both windows
+    atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
+    built = atlas.build(packer="rectangles_in_place", split_composite=False)
+    assert layout(built) == layout(atlas)
+    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B", "C"])
+    assert built.extract("C").tobytes() == atlas.extract("C").tobytes()
+
+
+def test_composite_at_another_scale_refuses():
+    atlas = comp()
+    atlas.replace_composite(["A", "B"], img(32, 32, 9))
+    refused(atlas)
+
+
+def test_composite_with_other_offsets_only_refuses():
+    # Review-2 M-1: the piece is w x h but its offsets describe a 31x16 canvas.
+    text = "p.png\nsize: 32,16\nA\n bounds: 0,0,10,8\n offsets: 0,8,32,16\nB\n bounds: 16,0,12,12\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+    atlas.replace_composite(["A"], img(31, 16, 9))
+    refused(atlas)
+
+
+def test_single_nine_patch_composite_is_a_plain_mod():
+    text = COMP.replace(" offsets: 2,3,16,16\n", " offsets: 2,3,16,16\n split: 1,1,1,1\n")
+    atlas = SpineAtlas.load(text, {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 6, 12), (32, 0, 12, 12)])})
+    arr = np.asarray(atlas.extract("A")).copy()
+    arr[5:13, 2:12] = pattern(10, 8, 9)
+    atlas.replace_composite(["A"], Image.fromarray(arr, "RGBA"))
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    assert "split" in built.atlas_text
+    assert (np.asarray(built.extract("A")) == arr).all()
+
+
+def test_multi_name_nine_patch_composite_refuses():
+    text = COMP.replace(" offsets: 2,3,16,16\n", " offsets: 2,3,16,16\n split: 1,1,1,1\n")
+    atlas = SpineAtlas.load(text, {"p.png": page(48, 16, [(0, 0, 10, 8), (16, 0, 6, 12), (32, 0, 12, 12)])})
+    atlas.replace_composite(["A", "B"], Image.fromarray(np.asarray(comp().extract_composite(["A", "B"])), "RGBA"))
+    refused(atlas)
+
+
+def test_composite_over_two_pages_goes_in_place_only_where_it_fits():
+    text = ("p.png\nsize: 32,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n\n"
+            "q.png\nsize: 32,32\nB\n bounds: 0,0,12,12\n offsets: 4,4,20,20\n")
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 10, 8)]),
+                                   "q.png": page(32, 32, [(0, 0, 12, 12)], seed=2)})
+    atlas.replace_composite(["A", "B"], img(16, 16, 9))
+    built = atlas.build(packer="rectangles_in_place")
+    base = atlas.build(packer="rectangles", split_composite=True)
+    assert layout(built)["A"] == layout(atlas)["A"]
+    assert built.pages["p.png"].size == (32, 16)
+    same_extracts(built, base, ["A", "B"])
+    assert built.pages["q.png"].tobytes() == base.pages["q.png"].tobytes()
+    assert [r for r in built.regions if r.page == "q.png"] == [r for r in base.regions if r.page == "q.png"]

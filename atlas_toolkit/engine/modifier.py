@@ -999,6 +999,17 @@ class AtlasModifier:
             return None
         return _rotate_pixels(block[y:y + h, x:x + w], rotate)
 
+    def _piece_block(self, piece, meta: dict, rotate: int) -> Optional[np.ndarray]:
+        """Spec 2026-11-05 §4.2 composite mod: a split piece goes back into its
+        slot only when the composite was exactly the region's canvas (piece
+        size == w x h and offsets unchanged); it is already cut and
+        alpha-split."""
+        _x, _y, w, h = meta["bounds"]
+        offsets = meta["offsets"] if meta["offsets"] is not None else [0, 0, w, h]
+        if tuple(self.raster.size(piece.image)) != (w, h) or list(piece.offsets) != list(offsets):
+            return None
+        return _rotate_pixels(self._pixels(piece.image), rotate)
+
     def place_in_place(
         self,
         *,
@@ -1088,8 +1099,9 @@ class AtlasModifier:
             per = []
             for name in names:
                 if name in pieces:
-                    return None                  # composite pieces: Task 4
-                block = self._plain_block(modded_sprites[name], regions[name], key[4], geoms_of.get(key))
+                    block = self._piece_block(pieces[name], regions[name], key[4])
+                else:
+                    block = self._plain_block(modded_sprites[name], regions[name], key[4], geoms_of.get(key))
                 if block is None:
                     return None
                 per.append(block)
