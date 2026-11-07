@@ -402,6 +402,8 @@ def test_pma_mod_inside_its_hull_keeps_the_neighbour_byte_exact(monkeypatch):
     built = atlas.build(packer="polygons_in_place")
     assert layout(built) == layout(atlas)
     assert (np.asarray(built.extract("B", mesh_crop=True)) == before_b).all()
+
+
 COMP = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
         "B\n bounds: 16,0,6,12\n offsets: 8,1,16,16\nC\n bounds: 32,0,12,12\n")
 
@@ -476,3 +478,34 @@ def test_composite_over_two_pages_goes_in_place_only_where_it_fits():
     same_extracts(built, base, ["A", "B"])
     assert built.pages["q.png"].tobytes() == base.pages["q.png"].tobytes()
     assert [r for r in built.regions if r.page == "q.png"] == [r for r in base.regions if r.page == "q.png"]
+
+
+ROT_COMP = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n{rot}"
+            "B\n bounds: 16,0,12,12\n offsets: 2,2,16,16\n")
+
+
+@pytest.mark.parametrize("rotate", [90, 180, 270])
+def test_rotated_composite_piece_goes_in_place_in_stored_orientation(rotate):
+    a_stored = (0, 0, 8, 10) if rotate in (90, 270) else (0, 0, 10, 8)
+    atlas = SpineAtlas.load(ROT_COMP.format(rot=f" rotate: {rotate}\n"),
+                            {"p.png": page(48, 16, [a_stored, (16, 0, 12, 12)])})
+    arr = np.asarray(atlas.extract_composite(["A", "B"])).copy()
+    assert arr.shape == (16, 16, 4)
+    arr[4:13, 3:13] = pattern(10, 9, 9)            # straddles A's window (x 2..12, y 5..13) and B's
+    atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    want_a = np.zeros((16, 16, 4), np.uint8)
+    want_a[5:13, 2:12] = arr[5:13, 2:12]
+    assert (np.asarray(built.extract("A")) == want_a).all()
+    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B"])
+
+
+@pytest.mark.parametrize("offsets", ["30,0,32,16", "0,10,32,16"])
+def test_composite_piece_clamped_to_its_canvas_refuses(offsets):
+    # A's rect overflows its canvas (right / top): the split clamps the piece to the
+    # canvas, so the piece's offsets equal A's but it is smaller than 10x8.
+    text = f"p.png\nsize: 32,16\nA\n bounds: 0,0,10,8\n offsets: {offsets}\nB\n bounds: 16,0,12,12\n"
+    atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+    atlas.replace_composite(["A"], img(32, 16, 9))
+    refused(atlas)
