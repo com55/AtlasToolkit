@@ -5,6 +5,7 @@ Does not write the repo copy of index.html.
 
   uv run python scripts/serve_www.py
   uv run python scripts/serve_www.py --port 8000
+  uv run python scripts/serve_www.py --site dist/web
 """
 from __future__ import annotations
 
@@ -25,15 +26,16 @@ WWW = ROOT / "www"
 
 class StampingHandler(http.server.SimpleHTTPRequestHandler):
     version = "0.0.0"
+    site = WWW
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(WWW), **kwargs)
+        super().__init__(*args, directory=str(self.site), **kwargs)
 
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             html = stamp_index_html(
-                (WWW / "index.html").read_text(encoding="utf-8"),
+                (self.site / "index.html").read_text(encoding="utf-8"),
                 self.version,
             )
             data = html.encode("utf-8")
@@ -51,11 +53,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--bind", default="127.0.0.1")
+    parser.add_argument("--site", type=Path, default=Path("www"))
     args = parser.parse_args()
     version = load_version()
     StampingHandler.version = version
+    StampingHandler.site = (ROOT / args.site).resolve()
     server = http.server.ThreadingHTTPServer((args.bind, args.port), StampingHandler)
-    print(f"Serving {WWW} at http://{args.bind}:{args.port}/  (Atlas Toolkit v{version})", flush=True)
+    print(f"Serving {StampingHandler.site} at http://{args.bind}:{args.port}/  (Atlas Toolkit v{version})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
