@@ -554,7 +554,8 @@ class SpineAtlas:
         stored at its own size and cut into one piece per region.
         build(packer="rectangles_in_place" / "polygons_in_place") always splits,
         and draws each piece into its region's own slot when the image is
-        exactly that region's canvas size. When the
+        exactly that region's canvas size and the page's other edits fit
+        (otherwise that page is repacked). When the
         build is mesh-aware (packer "polygons", or PackerOptions mesh_aware
         on, which is the default whenever the atlas has usable mesh data), a
         region with mesh owns its mesh hull; otherwise each region owns its

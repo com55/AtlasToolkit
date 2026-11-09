@@ -1085,6 +1085,7 @@ class AtlasModifier:
 
         alpha = np.asarray(self.raster.read_alpha_mask(self.base_image), dtype=bool).reshape(height, width)
         stray = alpha & ~excluded
+        canvas_px = np.frombuffer(self.raster.get_pixels(self.base_image), dtype=np.uint8).reshape(height, width, 4).copy()
 
         # §4.2: fit test, before any output is allocated.
         blocks: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
@@ -1109,12 +1110,16 @@ class AtlasModifier:
                 return None                      # 2c: identical blocks
             window = window_of(key)[0]
             others = ((count[window] - masks[key].astype(np.uint16)) > 0) | stray[window]
-            if (self._non_empty(per[0]) & others).any():
+            # 2d: others' live is never written. Where g's own live overlaps it (a pixel both
+            # regions show), the block must keep the current pixel; elsewhere it must be empty.
+            current = canvas_px[window]
+            block = per[0]
+            changed = (block != current).any(axis=2) & (self._non_empty(block) | self._non_empty(current))
+            if (others & np.where(masks[key], changed, self._non_empty(block))).any():
                 return None                      # 2d
             blocks[key] = (per[0], others)
 
         # §4.1: vacate.
-        canvas_px = np.frombuffer(self.raster.get_pixels(self.base_image), dtype=np.uint8).reshape(height, width, 4).copy()
         nonlive = ~((count > 0) | stray)
         for key in vacated:
             window = window_of(key)[0]

@@ -329,12 +329,15 @@ def test_mod_onto_a_neighbours_hull_refuses(monkeypatch):
 
 
 def test_pma_additive_pixel_onto_a_neighbours_hull_refuses(monkeypatch):
-    # A has no mesh (unhulled), B's hull covers part of A's rect; the mod is empty except
-    # one alpha-0 additive pixel at (10, 10), inside B's hull.
+    # A has no mesh (unhulled), B's hull covers part of A's rect. The page pixel at (10, 10),
+    # inside B's hull, is empty; A's mod is its own extract plus an alpha-0 additive pixel
+    # there, which a pma page shows: it would change a pixel B shows, so the page refuses.
     mesh(monkeypatch, {"B": UPPER_LEFT})
     text = OVERLAP.replace("size: 24,24\n", "size: 24,24\npma: true\n")
-    atlas = SpineAtlas.load(text, {"p.png": page(24, 24, [(0, 0, 20, 20)])}, skeleton=b"x")
-    arr = np.zeros((16, 16, 4), np.uint8)
+    rgba = np.asarray(page(24, 24, [(0, 0, 20, 20)])).copy()
+    rgba[10, 10] = 0
+    atlas = SpineAtlas.load(text, {"p.png": Image.fromarray(rgba, "RGBA")}, skeleton=b"x")
+    arr = np.asarray(atlas.extract("A")).copy()
     arr[10, 10] = (40, 0, 0, 0)
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
     refused(atlas)
@@ -509,3 +512,75 @@ def test_composite_piece_clamped_to_its_canvas_refuses(offsets):
     atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
     atlas.replace_composite(["A"], img(32, 16, 9))
     refused(atlas)
+
+
+def test_mod_that_erases_pixels_shared_with_a_neighbours_hull_refuses(monkeypatch):
+    # A's and B's hulls overlap: B shows the shared pixels too, so clearing them from A
+    # cannot be done in place (they would stay on A).
+    atlas = overlap(monkeypatch, UPPER_LEFT)
+    arr = np.asarray(atlas.extract("A")).copy()
+    arr[:3, :10] = (200, 10, 10, 255)          # inside A's hull only
+    arr[4:, 4:] = 0                             # everything over B's rect
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    refused(atlas, packer="polygons_in_place")
+
+
+def test_mod_that_keeps_pixels_shared_with_a_neighbours_hull_goes_in_place(monkeypatch):
+    atlas = overlap(monkeypatch, UPPER_LEFT)
+    before_b = np.asarray(atlas.extract("B", mesh_crop=True)).copy()
+    arr = np.asarray(atlas.extract("A")).copy()
+    arr[:3, :10] = (200, 10, 10, 255)          # inside A's hull only; the shared pixels are kept
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    built = atlas.build(packer="polygons_in_place")
+    assert layout(built) == layout(atlas)
+    base = atlas.build(packer="polygons", split_composite=True)
+    got, want = np.asarray(built.extract("A", mesh_crop=True)), np.asarray(base.extract("A", mesh_crop=True))
+    assert (got[..., 3] == want[..., 3]).all()
+    assert (got[got[..., 3] > 0] == want[want[..., 3] > 0]).all()
+    after_b = np.asarray(built.extract("B", mesh_crop=True))
+    visible = before_b[..., 3] > 0
+    assert (after_b[..., 3] == before_b[..., 3]).all() and (after_b[visible] == before_b[visible]).all()
+
+
+def test_refused_meshed_attempt_releases_its_handles(monkeypatch):
+    # Spec M-5: what place_in_place allocated (mesh hull rasters) is released before the fallback repack.
+    from atlas_toolkit.engine.modifier import AtlasModifier
+    from atlas_toolkit.engine.session import AtlasSession
+    atlas = overlap(monkeypatch, UPPER_LEFT)      # B's hull reaches into A's: A's mod refuses
+    atlas.replace({"A": img(16, 16, 9)})
+    seen = {}
+    place, pack = AtlasModifier.place_in_place, AtlasSession._pack_page
+
+    def spy_place(self, **kw):
+        seen["before"] = self.raster.checkpoint()
+        result = place(self, **kw)
+        seen["refused"] = result is None
+        return result
+
+    def spy_pack(self, *args, **kw):
+        seen["fallback"] = self._raster.checkpoint()
+        return pack(self, *args, **kw)
+
+    monkeypatch.setattr(AtlasModifier, "place_in_place", spy_place)
+    monkeypatch.setattr(AtlasSession, "_pack_page", spy_pack)
+    atlas.build(packer="polygons_in_place")
+    assert seen["refused"]
+    assert seen["fallback"] == seen["before"]
+
+
+def test_semi_transparent_composite_goes_in_place_alpha_split():
+    # Spec §7: semi-transparent pixels where A's and B's windows overlap (x 8..12, y 6..12) are
+    # split between the two pieces; stacking the slots gives the edit back.
+    atlas = comp()
+    arr = np.asarray(atlas.extract_composite(["A", "B"])).copy()
+    semi = pattern(11, 6, 9)
+    semi[..., 3] = 120
+    arr[6:12, 3:14] = semi
+    atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
+    built = atlas.build(packer="rectangles_in_place")
+    assert layout(built) == layout(atlas)
+    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B", "C"])
+    a, b = np.asarray(built.extract("A")), np.asarray(built.extract("B"))
+    assert (a[6:12, 8:12, 3] < 120).all() and (b[6:12, 8:12, 3] < 120).all()     # split, not copied
+    back = np.asarray(built.extract_composite(["A", "B"]))
+    assert (np.abs(back[6:12, 3:14].astype(int) - semi.astype(int)) <= 1).all()

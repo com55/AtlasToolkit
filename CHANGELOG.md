@@ -18,14 +18,21 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   regions on pma pages too, clearing all four channels outside the hull.
 
 ### Added
-- `packer="rectangles_in_place"` / `"polygons_in_place"`: a page whose edits fit keeps its layout.
-  Removed regions leave empty space, a replaced region whose new pixels fit its old slot is drawn
-  there with its rect and offsets unchanged, composite images are always split and each piece is
-  drawn into its region's slot when the image is that region's canvas size, and additions go into
-  free space. Any other edited page is repacked with "rectangles" / "polygons".
-  `split_composite` is ignored and `PackerOptions(repack="always")` is refused for these modes.
-  Vacating a rect or pasting a mod can clear never-rendered pixels of an overlapping hulled region,
-  so its extract() without mesh_crop may change; what Spine renders does not.
+- `packer="rectangles_in_place"` / `"polygons_in_place"`: a page whose edits
+  fit keeps its layout. Removed regions leave empty space; a replaced region
+  whose new pixels fit its old slot (the canvas size `extract()` gives,
+  nothing visible outside the old trimmed rect, pixels shared with an
+  overlapping neighbour unchanged) is drawn there with its rect and offsets
+  unchanged; composite images are always split and each piece is drawn into
+  its region's slot when the image is that region's canvas size; additions
+  go into free space. Any other edited page is repacked with "rectangles" /
+  "polygons". `split_composite` is ignored and
+  `PackerOptions(repack="always")` is refused for these modes. In-place
+  pages are not deduplicated afresh: regions that become pixel-identical
+  keep their own rects. Vacating a rect or pasting a mod can clear
+  never-rendered pixels of an overlapping hulled region, so its extract()
+  without mesh_crop may change; what Spine renders does not. Python engine
+  only; the JavaScript apps have no in-place modes.
 - `PackerOptions(repack=...)`: `"auto"` (default) places additions into a
   page's free space instead of repacking it; `"always"` keeps the old
   behaviour.

@@ -100,15 +100,21 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
     rects) or `"polygons"` (Smart Packing on mesh silhouettes, needs mesh
     data; `PackerOptions(mesh_aware=False)` with it raises `ValueError`). A
     string or a `Packer` member. `"grid"` is reserved and raises
-    `NotImplementedError`. With
-    `"polygons"`, a region's rect can contain pixels of neighbours nested
-    into its empty corners; extract with `mesh_crop=True` to see only the
-    region.
+    `NotImplementedError`. With `"polygons"`, a region's rect can contain
+    pixels of neighbours nested into its empty corners; extract with
+    `mesh_crop=True` to see only the region.
     `"rectangles_in_place"` / `"polygons_in_place"` keep a page's layout when
-    its edits fit: removed regions leave empty space, replacements keep their
-    rects and offsets, and additions go into free space. Other edited pages
-    repack with `"rectangles"` / `"polygons"`. Composite images are always
-    split into region pieces; `split_composite` is ignored and
+    every edit on it fits: removed regions leave empty space; a replacement
+    fits when it is the size `extract()` returns for that region (its full
+    canvas), shows nothing outside the region's trimmed rect (outside its
+    mesh hull is ignored when mesh-aware), and leaves pixels it shares with
+    an overlapping neighbour unchanged; regions that share one rect must be
+    replaced alike; a `replace_composite` image fits the regions whose canvas
+    is exactly its size; additions go into free space and may grow the page.
+    A page with any other edit, or whose image is not the size its text
+    declares, is repacked with `"rectangles"` / `"polygons"`.
+    `"polygons_in_place"` needs mesh data. Composite images are always split
+    into region pieces; `split_composite` is ignored and
     `PackerOptions(repack="always")` is refused.
   - `packer_options`: a `PackerOptions`:
     - `padding` is the pixels between images, default 2, 1 to 256.
