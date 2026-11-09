@@ -12,7 +12,8 @@ from pathlib import Path
 from urllib.request import urlretrieve
 
 ROOT = Path(__file__).resolve().parents[1]
-PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/"
+PYODIDE_VERSION = "314.0.7"
+PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
 PARSER_URL = "https://github.com/com55/skel-mesh-parser.git"
 PARSER_TAG = "py-v0.3.0"
 EXCLUDED = {
@@ -58,6 +59,13 @@ def import_offenders(site: Path) -> list[str]:
     return sorted(missing)
 
 
+def download(url: str, path: Path) -> None:
+    """Publish a download only after the fetch completes."""
+    partial = path.with_name(path.name + ".part")
+    urlretrieve(url, partial)
+    os.replace(partial, path)
+
+
 def download_runtime(cache: Path) -> list[Path]:
     """Cache the pinned runtime and verify both package wheels on every build."""
     cache.mkdir(parents=True, exist_ok=True)
@@ -66,15 +74,18 @@ def download_runtime(cache: Path) -> list[Path]:
                  "python_stdlib.zip", "pyodide-lock.json"):
         path = cache / name
         if not path.is_file():
-            urlretrieve(PYODIDE_URL + name, path)
+            download(PYODIDE_URL + name, path)
         files.append(path)
     lock = json.loads((cache / "pyodide-lock.json").read_text(encoding="utf-8"))
     for package in ("numpy", "pillow"):
         entry = lock["packages"][package]
         path = cache / entry["file_name"]
+        if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+            path.unlink()
         if not path.is_file():
-            urlretrieve(PYODIDE_URL + entry["file_name"], path)
+            download(PYODIDE_URL + entry["file_name"], path)
         if hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+            path.unlink()
             raise ValueError(f"SHA256 mismatch: {path.name}")
         files.append(path)
     return files
@@ -95,7 +106,7 @@ def build_wheel(source: Path, output: Path) -> Path:
 
 def build_project_wheels(cache: Path) -> dict[str, Path]:
     """Build the local engine and the shallow-cloned, pinned parser."""
-    parser_source = cache / "skel-mesh-parser"
+    parser_source = cache / f"skel-mesh-parser-{PARSER_TAG}"
     if not parser_source.exists():
         subprocess.run(
             ["git", "clone", "--depth", "1", "--branch", PARSER_TAG,
@@ -107,10 +118,18 @@ def build_project_wheels(cache: Path) -> dict[str, Path]:
     }
 
 
+def prepare_output(out: Path) -> None:
+    """Remove only a directory marked as an earlier site build."""
+    if not out.exists() or (out.is_dir() and not any(out.iterdir())):
+        return
+    if (out / "wheels/manifest.json").is_file():
+        shutil.rmtree(out)
+        return
+    raise ValueError(f"{out} does not look like a build output")
+
+
 def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:
     """Copy the UI and built dependencies, omitting the old service worker."""
-    if out.exists():
-        shutil.rmtree(out)
     for source in (ROOT / "www").rglob("*"):
         relative = source.relative_to(ROOT / "www")
         if not source.is_file() or excluded(relative.as_posix()) or relative.as_posix() == "sw.js":
@@ -140,7 +159,11 @@ def main() -> int:
     if any(path.is_relative_to(out) or out.is_relative_to(path)
            for path in (ROOT / "www", cache)) or ROOT.is_relative_to(out):
         parser.error("--out must be separate from the source tree and download cache")
-    runtime = download_runtime(cache / "pyodide")
+    try:
+        prepare_output(out)
+    except ValueError as error:
+        parser.error(str(error))
+    runtime = download_runtime(cache / "pyodide" / PYODIDE_VERSION)
     wheels = build_project_wheels(cache)
     assemble_site(out, runtime, wheels)
     offenders = import_offenders(out)
