@@ -110,7 +110,8 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
     mesh hull is ignored when mesh-aware), and leaves pixels it shares with
     an overlapping neighbour unchanged; regions that share one rect must be
     replaced alike; a `replace_composite` image fits the regions whose canvas
-    is exactly its size; additions go into free space and may grow the page.
+    is exactly its size, and its pieces meet the same rules; additions go into
+    free space and may grow the page.
     A page with any other edit, or whose image is not the size its text
     declares, is repacked with `"rectangles"` / `"polygons"`.
     `"polygons_in_place"` needs mesh data. Composite images are always split

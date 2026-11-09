@@ -24,8 +24,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   nothing visible outside the old trimmed rect, pixels shared with an
   overlapping neighbour unchanged) is drawn there with its rect and offsets
   unchanged; composite images are always split and each piece is drawn into
-  its region's slot when the image is that region's canvas size; additions
-  go into free space. Any other edited page is repacked with "rectangles" /
+  its region's slot when the image is that region's canvas size and the
+  piece meets the same rules; additions go into free space. Any other
+  edited page is repacked with "rectangles" /
   "polygons". `split_composite` is ignored and
   `PackerOptions(repack="always")` is refused for these modes. In-place
   pages are not deduplicated afresh: regions that become pixel-identical

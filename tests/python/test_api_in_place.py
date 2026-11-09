@@ -584,3 +584,16 @@ def test_semi_transparent_composite_goes_in_place_alpha_split():
     assert (a[6:12, 8:12, 3] < 120).all() and (b[6:12, 8:12, 3] < 120).all()     # split, not copied
     back = np.asarray(built.extract_composite(["A", "B"]))
     assert (np.abs(back[6:12, 3:14].astype(int) - semi.astype(int)) <= 1).all()
+
+
+def test_clearing_rgb_under_a_shared_transparent_pixel_goes_in_place(monkeypatch):
+    # Spec 2d, straight page: (6, 6) is inside both hulls with alpha 0 and leftover RGB. Clearing
+    # it (image editors drop RGB under alpha 0) changes nothing Spine shows, so the page stays.
+    mesh(monkeypatch, {"A": UPPER_LEFT, "B": UPPER_LEFT})
+    rgba = np.asarray(page(24, 24, [(0, 0, 20, 20)])).copy()
+    rgba[6, 6] = (77, 88, 99, 0)
+    atlas = SpineAtlas.load(OVERLAP, {"p.png": Image.fromarray(rgba, "RGBA")}, skeleton=b"x")
+    arr = np.asarray(atlas.extract("A")).copy()
+    arr[6, 6] = 0
+    atlas.replace({"A": Image.fromarray(arr, "RGBA")})
+    assert layout(atlas.build(packer="polygons_in_place")) == layout(atlas)
