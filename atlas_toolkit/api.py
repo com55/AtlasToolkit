@@ -23,13 +23,14 @@ from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.packing import CanvasTooLargeError
 from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
+from atlas_toolkit.engine.extraction import hull_polyline
 from atlas_toolkit.packer import Packer, PackerOptions, ResolvedPack, resolve_packer
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 
 __all__ = [
-    "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
+    "SpineAtlas", "Region", "RegionView", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge", "MixedAlphaGroup", "DuplicatePage",
 ]
@@ -118,6 +119,22 @@ class MixedAlphaGroup(AtlasError, ValueError):
 
     def __reduce__(self):
         return type(self), (self.names,), self.__dict__
+
+
+@dataclass(frozen=True)
+class RegionView:
+    """A current region's stable identity and page-pixel bounds."""
+
+    key: str
+    label: str
+    page: str
+    x: int
+    y: int
+    w: int
+    h: int
+    rotate: int
+    modified: bool
+    added: bool
 
 
 @dataclass(frozen=True)
@@ -369,6 +386,67 @@ class SpineAtlas:
         return self.regions[index]
 
     # -- mesh --------------------------------------------------------------
+
+    def region_views(self, packed_text: str | None = None) -> tuple[RegionView, ...]:
+        """Current regions in label order, with scaled or supplied packed bounds."""
+        snapshot = self._session.snapshot()
+        packed = None
+        if packed_text is not None:
+            packed = {
+                region.atlas_name or region.name: region
+                for page in AtlasDocument.parse(packed_text).pages
+                for region in page.regions
+            }
+        views = []
+        for key, label in self._labels:
+            added = key not in self._pristine_keys
+            page = self._added_pages[key] if added else self._pristine[key].page_filename
+            bounds = (0, 0, 0, 0, 0)
+            if packed is None:
+                bounds = snapshot.modify_region_bounds.get(key, bounds)
+            elif label in packed:
+                region = packed[label]
+                page = region.page_filename
+                bounds = (region.x, region.y, region.w, region.h, region.rotate)
+            views.append(RegionView(
+                key, label, page, *bounds, key in snapshot.modified_keys, added,
+            ))
+        return tuple(views)
+
+    def page_is_pma(self, page: str) -> bool:
+        """Return a page's PMA flag; reject an unknown page name."""
+        if page not in self._document.page_filenames():
+            raise ValueError(f"unknown page {page!r}")
+        return self._page_pma(page)
+
+    @property
+    def mesh_unavailable_reason(self) -> str | None:
+        """None when mesh data is usable, otherwise its unavailability reason."""
+        return self._mesh_reason
+
+    def set_skeleton(self, skeleton: bytes | None) -> None:
+        """Replace mesh data without discarding pending edits."""
+        self._skeleton = skeleton
+        self._mesh_reason, self._mesh_lookup = _mesh_state(skeleton)
+        lookup = self._mesh_lookup
+        self._session.set_mesh_data(
+            None if lookup is None else {
+                name: mesh for name, mesh in lookup.items()
+                if self._allowed is None or name in self._allowed
+            }
+        )
+        self._build_cache = None
+
+    def mesh_hull_layout(self, names: list[str], force_resize: bool = False) -> list[dict]:
+        """Mesh outlines in composite-preview pixels, omitting missing hulls."""
+        keys = [self._built_key(name) for name in names]
+        layout = self._session.get_mesh_hull_layout(keys, force_resize)
+        result = []
+        for name, item in zip(names, layout["items"]):
+            points = hull_polyline(item)
+            if points is not None:
+                result.append({"name": name, "points": points})
+        return result
 
     def _require_mesh(self) -> None:
         if self._mesh_reason is not None:

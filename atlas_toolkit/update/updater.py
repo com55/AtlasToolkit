@@ -6,8 +6,6 @@ import re
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-import requests
-
 logger = logging.getLogger(__name__)
 
 GITHUB_REPO = "com55/AtlasToolkit"
@@ -88,6 +86,8 @@ def _version_tuple(v: str) -> tuple[int, ...]:
 
 def get_latest_release_info() -> ReleaseInfo:
     """Fetch latest release metadata from GitHub API."""
+    import requests
+
     response = requests.get(
         GITHUB_API_LATEST,
         headers={"Accept": "application/vnd.github.v3+json"},
@@ -152,6 +152,8 @@ def download_update_asset(
     progress_cb: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> Path:
     """Download an update asset (the installer exe) to a target path via streaming I/O."""
+    import requests
+
     target_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = target_path.with_suffix(target_path.suffix + ".part")
 
@@ -201,6 +203,8 @@ def check_for_updates() -> UpdateInfo | None:
     Returns UpdateInfo if a newer version exists, else None.
     Never raises — all errors are logged and swallowed.
     """
+    import requests
+
     try:
         latest = get_latest_release_info()
         latest_version = latest.latest_version
