@@ -83,7 +83,7 @@ class AppHost:
     def preview(
         self, names: list[str], mesh_crop: bool, force_resize: bool,
         want_hulls: bool, alpha: str,
-    ) -> dict:
+    ) -> dict | None:
         atlas = self._require_atlas()
         if not names:
             raise ValueError("preview needs at least one region name")
@@ -92,6 +92,8 @@ class AppHost:
             mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
+        if image.width == 0 or image.height == 0:
+            return None
         return {
             "width": image.width, "height": image.height, "rgba": image.tobytes(),
             "hulls": atlas.mesh_hull_layout(names, force_resize) if want_hulls else None,
@@ -107,13 +109,19 @@ class AppHost:
             names, mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
-        return [{"filename": _file_name(key), "png": _png(images[name])} for key, name in zip(wanted, names)]
+        return [
+            {"filename": _file_name(key), "png": _png(images[name])}
+            for key, name in zip(wanted, names)
+            if images[name].width > 0 and images[name].height > 0
+        ]
 
-    def save_image(self, names, mesh_crop, force_resize, alpha) -> bytes:
+    def save_image(self, names, mesh_crop, force_resize, alpha) -> bytes | None:
         atlas = self._require_atlas()
         image = atlas.extract_composite(
             names, force_resize=force_resize,
             mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
+        if image.width == 0 or image.height == 0:
+            return None
         return _png(image)

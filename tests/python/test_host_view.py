@@ -171,3 +171,85 @@ def test_preview_does_not_copy_the_pages(monkeypatch):
     assert state["pages"] == ["p.png", "q.png"]
     assert state["allPma"] is True
     assert state["mesh"]["skelName"] == "sample.skel"
+
+
+def zero_area_atlas():
+    text, pages = one_page()
+    text = text[:text.index("b\n bounds:")]
+    return text + "z\n bounds: 0,0,0,0\n", pages
+
+
+def test_extract_skips_a_zero_area_region():
+    host, _ = loaded(zero_area_atlas)
+    result = host.extract(None, False, "straight")
+    assert [item["filename"] for item in result] == ["a.png"]
+    image = decode(result[0]["png"])
+    assert image.size == (3, 2)
+    assert image.tobytes() == bytes(v for y in range(2) for x in range(3) for v in pixel(x + 1, y + 2))
+
+
+def test_extract_of_only_zero_area_regions_is_empty():
+    host, _ = loaded(zero_area_atlas)
+    assert host.extract(["z"], False, "straight") == []
+
+
+def test_preview_of_a_zero_area_region_is_none():
+    host, _ = loaded(zero_area_atlas)
+    assert host.preview(["z"], False, False, True, "straight") is None
+
+
+def test_save_image_of_a_zero_area_region_is_none():
+    host, _ = loaded(zero_area_atlas)
+    assert host.save_image(["z"], False, False, "straight") is None
+
+
+def test_extract_addresses_regions_by_key_after_a_rename():
+    host, _ = loaded()
+    host._atlas.rename_region("a", "new")
+    result = host.extract(["a"], False, "straight")
+    image = decode(result[0]["png"])
+    assert image.size == (3, 2)
+    assert image.tobytes() == bytes(v for y in range(2) for x in range(3) for v in pixel(x + 1, y + 2))
+
+
+def test_extract_names_files_by_key_after_a_rename():
+    host, _ = loaded()
+    host._atlas.rename_region("a", "new")
+    assert host.extract(["a"], False, "straight")[0]["filename"] == "a.png"
+
+
+def test_a_failed_load_keeps_the_previous_atlas():
+    host, state = loaded(all_pma)
+    before = host.preview(["a"], False, False, False, "straight")
+    text, _ = one_page(page="other.png", first="other")
+    with pytest.raises(Exception):
+        host.load("other.atlas", text, {"other.png": b"corrupt"}, "other.skel", b"corrupt")
+    assert host.preview(["a"], False, False, False, "straight") == before
+    assert host._state() == state
+
+
+def test_forced_resizing_reaches_the_hulls(monkeypatch):
+    mesh = {"type": "Mesh", "uvs": [0.25, 0, 0.75, 0, 0.75, 1, 0.25, 1], "triangles": [0, 1, 2, 0, 2, 3], "hull_length": 4}
+    monkeypatch.setattr(api, "_parse_skeleton", lambda data: {"attachments": {"a": mesh, "b": mesh}})
+    host, _ = loaded()
+    host.set_skeleton("sample.skel", b"synthetic")
+    natural = host.preview(["a", "b"], False, False, True, "straight")["hulls"]
+    resized = host.preview(["a", "b"], False, True, True, "straight")["hulls"]
+    assert natural == [
+        {"name": "a", "points": [(0.75, 0.0), (2.25, 0.0), (2.25, 2.0), (0.75, 2.0)]},
+        {"name": "b", "points": [(0.5, 0.0), (1.5, 0.0), (1.5, 3.0), (0.5, 3.0)]},
+    ]
+    assert resized == [
+        {"name": name, "points": [(0.75, 0.0), (2.25, 0.0), (2.25, 2.0), (0.75, 2.0)]}
+        for name in ["a", "b"]
+    ]
+    assert natural != resized
+
+
+def test_pages_come_from_the_atlas_text():
+    text, pages = two_pages()
+    host = AppHost()
+    state = host.load("sample.atlas", text, {
+        "extra.png": pages["p.png"], "q.png": pages["q.png"], "p.png": pages["p.png"],
+    }, None, None)
+    assert state["pages"] == ["p.png", "q.png"]
