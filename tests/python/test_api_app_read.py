@@ -141,3 +141,49 @@ def test_page_is_pma():
     assert atlas.page_is_pma("q.png") is True
     with pytest.raises(ValueError):
         atlas.page_is_pma("missing.png")
+
+
+def test_packed_views_scale_a_page_kept_at_its_real_size():
+    text = TEXT + "\nq.png\nsize: 100,50\nc\n bounds: 10,10,20,10\n"
+    atlas = SpineAtlas.load(text, {
+        "p.png": Image.new("RGBA", (64, 32)),
+        "q.png": Image.new("RGBA", (200, 150)),
+    })
+    atlas.replace({"a": IMG})
+    built = atlas.build()
+    sizes = {name: image.size for name, image in built.pages.items()}
+    views = {v.label: v for v in atlas.region_views(built.atlas_text, sizes)}
+    c = views["c"]
+    assert (c.x, c.y, c.w, c.h) == (20, 30, 40, 30)
+    unscaled = {v.label: v for v in atlas.region_views(built.atlas_text)}["c"]
+    assert (unscaled.x, unscaled.y, unscaled.w, unscaled.h) == (10, 10, 20, 10)
+
+
+def test_packed_views_leave_a_page_matching_its_declared_size_alone():
+    atlas = two_region_atlas()
+    packed = "p.png\nsize: 80,40\na\n bounds: 7,9,14,6\n rotate: 90\nb\n bounds: 30,4,8,12\n"
+    views = atlas.region_views(packed, {"p.png": (80, 40)})
+    assert [(v.x, v.y, v.w, v.h) for v in views] == [(7, 9, 14, 6), (30, 4, 8, 12)]
+    assert views[0].rotate == 90 and views[0].page == "p.png"
+
+
+def test_late_skeleton_is_used_by_a_later_build(monkeypatch):
+    monkeypatch.setattr(api, "_parse_skeleton", lambda data: {"attachments": {"n": MESH}})
+    atlas = two_region_atlas()
+    atlas.set_skeleton(b"mesh")
+    patterned = Image.frombytes("RGBA", (12, 8), bytes(
+        value for y in range(8) for x in range(12)
+        for value in (x * 17, y * 29, 91, 255)
+    ))
+    atlas.add_region("n", patterned)
+    built = atlas.build()
+    result = built.extract("n")
+    assert result.getpixel((0, 4))[3] == 0
+    assert result.getpixel((5, 4)) == patterned.getpixel((5, 4))
+
+
+def test_hull_layout_refuses_a_pending_add():
+    atlas = two_region_atlas()
+    atlas.add_region("n", IMG)
+    with pytest.raises(api.AtlasError):
+        atlas.mesh_hull_layout(["n"])

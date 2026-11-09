@@ -22,6 +22,7 @@ from atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.packing import CanvasTooLargeError
+from atlas_toolkit.domain.region_ops import scaled_region_geometry
 from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
 from atlas_toolkit.engine.extraction import hull_polyline
 from atlas_toolkit.packer import Packer, PackerOptions, ResolvedPack, resolve_packer
@@ -387,16 +388,31 @@ class SpineAtlas:
 
     # -- mesh --------------------------------------------------------------
 
-    def region_views(self, packed_text: str | None = None) -> tuple[RegionView, ...]:
-        """Current regions in label order, with scaled or supplied packed bounds."""
+    def region_views(
+        self, packed_text: str | None = None,
+        page_sizes: Mapping[str, tuple[int, int]] | None = None,
+    ) -> tuple[RegionView, ...]:
+        """Current regions in label order, scaled to supplied real page sizes.
+
+        Without packed_text, bounds come from the current session. Packed
+        bounds remain in declared pixels unless page_sizes supplies that page.
+        """
         snapshot = self._session.snapshot()
         packed = None
         if packed_text is not None:
-            packed = {
-                region.atlas_name or region.name: region
-                for page in AtlasDocument.parse(packed_text).pages
-                for region in page.regions
-            }
+            packed = {}
+            for page in AtlasDocument.parse(packed_text).pages:
+                scale_x = scale_y = 1.0
+                if (page_sizes is not None and page.filename in page_sizes
+                        and page.size[0] and page.size[1]):
+                    width, height = page_sizes[page.filename]
+                    scale_x = width / page.size[0]
+                    scale_y = height / page.size[1]
+                for region in page.regions:
+                    x, y, w, h, _ = scaled_region_geometry(region, scale_x, scale_y)
+                    packed[region.atlas_name or region.name] = (
+                        page.filename, (x, y, w, h, region.rotate),
+                    )
         views = []
         for key, label in self._labels:
             added = key not in self._pristine_keys
@@ -405,9 +421,7 @@ class SpineAtlas:
             if packed is None:
                 bounds = snapshot.modify_region_bounds.get(key, bounds)
             elif label in packed:
-                region = packed[label]
-                page = region.page_filename
-                bounds = (region.x, region.y, region.w, region.h, region.rotate)
+                page, bounds = packed[label]
             views.append(RegionView(
                 key, label, page, *bounds, key in snapshot.modified_keys, added,
             ))

@@ -66,5 +66,5 @@ def test_import_guard_recognizes_forbidden_packages(name):
 
 
 def test_package_and_version_import_without_requests():
-    code = "import sys; sys.modules['requests'] = None; import atlas_toolkit; assert atlas_toolkit.__version__; atlas_toolkit.SpineAtlas"
+    code = "import sys; sys.modules['requests'] = None; sys.modules['webview'] = None; import atlas_toolkit; assert atlas_toolkit.__version__; atlas_toolkit.SpineAtlas"
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
