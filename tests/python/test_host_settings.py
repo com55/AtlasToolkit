@@ -214,3 +214,69 @@ def test_failed_skeleton_restores_loaded_skeleton(initial, mesh, monkeypatch):
     assert host._state() == before and host._packed is packed
     assert host._atlas._skeleton == initial and host._skeleton == initial
     assert host._saved is True
+
+
+def test_settings_repack_updates_output_and_marks_unsaved():
+    host = loaded()
+    host.enter_edit()
+    before = host.modify(['a'], page_bytes(4, 3), 'straight')
+    host.save_output()
+    host.mark_saved()
+    assert host._state()['hasPending'] is False
+    result = host.set_settings({'padding': 10})
+    assert result['image'] != before['image']
+    assert host.page_preview(0)['image'] == result['image']
+    assert result['state']['hasPending'] is True
+    assert host._saved is False
+
+
+def test_alpha_only_settings_cache_hit_keeps_saved_output():
+    host = loaded(all_pma)
+    host.enter_edit()
+    before = host.modify(['a'], page_bytes(4, 3), 'straight')
+    host.save_output()
+    host.mark_saved()
+    packed = host._packed
+    result = host.set_settings({'alpha': 'premultiplied'})
+    assert host._packed[0] is packed[0]
+    assert host._packed[1] is packed[1]
+    assert result['image'] == before['image']
+    assert host.page_preview(0)['image'] == result['image']
+    assert result['state']['hasPending'] is False
+    assert host._saved is True
+
+
+def test_preferences_can_be_restored_before_load():
+    host = AppHost()
+    requested = {'packer': 'rectangles', 'padding': 9, 'meshAware': False,
+                 'splitComposite': True, 'keepLayout': False, 'alpha': 'premultiplied'}
+    assert host.set_settings(requested) is None
+    assert host._pack_settings == requested
+    for invalid in ({'padding': 0}, {'padding': 4, 'unknown': True}, {'packer': 'grid'}):
+        with pytest.raises(ValueError):
+            host.set_settings(invalid)
+        assert host._pack_settings == requested
+    text, pages = one_page()
+    state = host.load('sample.atlas', text, pages, None, None)
+    assert {key: state['settings'][key] for key in requested} == requested
+
+
+def test_real_overflow_setting_restores_everything():
+    side = 42
+    text = f'big.png\nsize: {side},{side}\npma: false\n' + ''.join(
+        f'r{i}\n bounds: {i % side},{i // side},1,1\n' for i in range(1700)
+    )
+    host = AppHost()
+    host.load('big.atlas', text, {'big.png': page_bytes(side, side)}, None, None)
+    host.enter_edit()
+    host.modify(['r0'], page_bytes(1, 1), 'straight')
+    host.save_output()
+    host.mark_saved()
+    before, packed, preview = host._state(), host._packed, host.page_preview(0)
+    cache = host._atlas._build_cache
+    with pytest.raises(api.CanvasTooLarge):
+        host.set_settings({'padding': 256})
+    assert host._state() == before and host._packed is packed
+    assert host.page_preview(0) == preview and host._saved is True
+    assert host._atlas._build_cache is cache
+    assert host.rename('r1', 'renamed')['state']['settings']['padding'] == 2

@@ -73,7 +73,7 @@ class AppHost:
             "split_composite": settings["splitComposite"],
         }
 
-    def set_settings(self, settings: dict) -> dict:
+    def set_settings(self, settings: dict) -> dict | None:
         if not isinstance(settings, dict):
             raise ValueError("settings must be a dict")
         for key, value in settings.items():
@@ -91,9 +91,11 @@ class AppHost:
                 valid = False
             if not valid:
                 raise ValueError(f"invalid setting: {key}")
-        atlas = self._require_atlas()
+        atlas = self._atlas
         previous = self._pack_settings
         self._pack_settings = {**previous, **settings}
+        if atlas is None:
+            return None
         try:
             if self._packed is None:
                 return self._state()
@@ -102,6 +104,8 @@ class AppHost:
         except BaseException:
             self._pack_settings = previous
             raise
+        if packed[0] is not self._packed[0]:
+            self._saved = False
         self._packed = packed
         return self._edit_result()
 
