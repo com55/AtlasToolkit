@@ -1,5 +1,5 @@
 import { startEngine } from './js/engine-client.js';
-import { AtlasAPI } from './js/atlas-api.js';
+import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
@@ -65,19 +65,15 @@ function _waitForPywebviewReady() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  const loading = document.getElementById('engine-loading');
-  try {
-    const circumference = 2 * Math.PI * 28;
-    await startEngine((_message, progress) => {
-      document.getElementById('engine-loading-progress').style.strokeDashoffset = circumference * (1 - progress);
-      document.getElementById('engine-loading-percent').textContent = Math.round(progress * 100) + '%';
-    });
-    loading.classList.add('hidden');
-  } catch (error) {
-    loading.classList.add('hidden');
-    await window.showAlert('The Python engine failed to start: ' + error.message, 'Engine error');
-    return;
-  }
+  const statusText = document.getElementById('status-text');
+  const preparingText = 'Preparing AtlasToolkit engine...';
+  statusText.textContent = preparingText;
+  startEngine().then(() => {
+    if (statusText.textContent === preparingText) statusText.textContent = 'Ready';
+  }).catch(error => {
+    setEngineStartupError(error);
+    if (statusText.textContent === preparingText) statusText.textContent = 'AtlasToolkit failed to start';
+  });
   await _waitForPywebviewReady();
   appVersion = await resolveAppVersion();
   applyAppTitle('');

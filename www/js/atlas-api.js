@@ -1,10 +1,16 @@
-import { callHost, HostError } from './engine-client.js';
+import { callHost as engineCallHost, HostError } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
 import { withBusy, BUSY_LABEL } from './busy-overlay.js';
 import { PreviewCache, viewPreviewKey } from './preview-cache.js';
+let engineStartupError = null;
+export function setEngineStartupError(error) { engineStartupError = error; }
+function callHost(...args) {
+  if (engineStartupError) return Promise.reject(engineStartupError);
+  return engineCallHost(...args);
+}
 export const LOAD_CANCELLED = 'cancelled';
 let _state = null, _sourceFiles = null, _currentSkel = null;
 let _currentAtlasFilename = '', _currentAtlasDirectory = '', _lastSaveHandle = null;

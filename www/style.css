@@ -1035,7 +1035,7 @@ img#preview-img {
 /* Busy overlay — same chrome as #modal-overlay/#modal-box so Processing
    matches confirm/alert. Confirm is dismissed before paint; silent
    withLock still uses #modal-overlay at 4500. */
-#busy-overlay, #engine-loading {
+#busy-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -1050,7 +1050,7 @@ img#preview-img {
   align-items: center;
   pointer-events: auto;
 }
-#busy-box, .engine-loading-box {
+#busy-box {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1065,21 +1065,23 @@ img#preview-img {
   text-align: center;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
-.engine-loading-ring {
+.progress-ring {
+  display: inline-block;
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: var(--progress-ring-size, 72px);
+  height: var(--progress-ring-size, 72px);
+  flex-shrink: 0;
 }
-.engine-loading-ring svg {
+.progress-ring svg {
   display: block;
   width: 100%;
   height: 100%;
   fill: none;
 }
-.engine-loading-track {
+.progress-ring-track {
   stroke: rgba(255, 255, 255, 0.18);
 }
-#engine-loading-progress {
+.progress-ring-bar {
   stroke: #26a69a;
   stroke-linecap: round;
   transform: rotate(-90deg);
@@ -1088,14 +1090,14 @@ img#preview-img {
   stroke-dashoffset: 175.92918860102841;
   transition: stroke-dashoffset 0.3s;
 }
-#engine-loading-percent {
+.progress-ring-label {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #e5e5e5;
-  font-size: 15px;
+  font-size: calc(var(--progress-ring-size, 72px) * 0.21);
 }
 #busy-spinner {
   width: 36px;
@@ -1109,7 +1111,7 @@ img#preview-img {
 @keyframes busy-spin {
   to { transform: rotate(360deg); }
 }
-#busy-label, #engine-loading-status {
+#busy-label {
   margin: 0;
   color: #e5e5e5;
   font-size: 15px;

@@ -106,7 +106,7 @@ try {
   await context.route('**/*', localOnly);
   await page.route('**/*', localOnly);
   await page.goto(`${origin}/__test.html`);
-  await page.waitForFunction(() => !!window.engine);
+  await page.waitForFunction(() => !!window.engine, null, {polling: 500});
   page.setDefaultTimeout(120000);
   await page.evaluate(async () => {
     await Promise.race([
@@ -166,13 +166,10 @@ try {
     await route.continue();
   });
   await app.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
-  if (!await app.locator('#engine-loading').isVisible()) throw new Error('Engine loading overlay missing before ready');
-  const loadingText = await app.locator('#engine-loading').textContent();
-  if (!loadingText.includes('Starting AtlasToolkit') || !loadingText.includes('0%')) throw new Error('Engine loading overlay missing startup text or initial percentage');
-  releaseWorker();
-  await app.locator('#engine-loading').waitFor({state: 'hidden', timeout: 120000});
-  // Startup restores prefs after the engine promise; wait for that too.
-  await app.waitForFunction(() => document.body.classList.contains('mode-extract'));
+  await app.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling: 500});
+  if (!await app.locator('.btn-open').isEnabled()) throw new Error('Open disabled before engine ready');
+  if (await app.locator('#region-list').count() !== 1) throw new Error('Region list missing before engine ready');
+  if (await app.locator('#status-text').textContent() !== 'Preparing AtlasToolkit engine...') throw new Error('Preparing status missing before ready');
   await app.evaluate(async () => {
     const {AtlasAPI} = await import('/js/atlas-api.js');
     await AtlasAPI.set_forced_resizing(false);
@@ -187,18 +184,27 @@ try {
       return new File([blob], name, {type:'image/png'});
     };
     window.testPages = [await makePage('p.png', '#d02030'), await makePage('q.png', '#2060d0')];
-    const ok = await AtlasAPI.load_from_files([new File([window.testAtlas], 'synthetic.atlas'), ...window.testPages]);
-    if (!ok || AtlasAPI.get_region_names().length !== 2 || !AtlasAPI.is_multi_page()) throw new Error('Two-page app load failed');
-    const {loadRegions} = await import('/js/region-list.js');
-    const {updateMeshCroppingUI} = await import('/js/modify-mode.js');
-    await loadRegions(); updateMeshCroppingUI();
+    window.pendingStartupLoad = (async () => {
+      const ok = await AtlasAPI.load_from_files([new File([window.testAtlas], 'synthetic.atlas'), ...window.testPages]);
+      if (!ok || AtlasAPI.get_region_names().length !== 2 || !AtlasAPI.is_multi_page()) throw new Error('Two-page app load failed');
+      const {loadRegions} = await import('/js/region-list.js');
+      const {updateMeshCroppingUI} = await import('/js/modify-mode.js');
+      await loadRegions(); updateMeshCroppingUI();
+    })();
+    window.startupLoadDone = false;
+    window.pendingStartupLoad.then(() => { window.startupLoadDone = true; });
   });
+  if (await app.evaluate(() => window.startupLoadDone)) throw new Error('Atlas loaded while Worker held');
+  releaseWorker();
+  await app.waitForFunction(() => document.getElementById('status-text').textContent !== 'Preparing AtlasToolkit engine...', null, {timeout: 120000, polling: 500});
+  await app.evaluate(() => window.pendingStartupLoad);
+  if (await app.locator('#status-text').textContent() === 'Preparing AtlasToolkit engine...') throw new Error('Preparing status remains after load');
   if (await app.locator('.region-item').count() !== 2) throw new Error('Region list count mismatch');
   await app.locator('.region-item').nth(0).click();
   await app.waitForFunction(() => {
     const img = document.getElementById('preview-img');
     return img.complete && img.naturalWidth === 10 && img.naturalHeight === 2;
-  });
+  }, null, {polling: 500});
   const nonBlank = await app.evaluate(() => {
     const img = document.getElementById('preview-img');
     const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
@@ -216,7 +222,7 @@ try {
   await app.waitForFunction(() => {
     const img = document.getElementById('preview-img');
     return img.complete && img.naturalWidth === 10 && img.naturalHeight === 6;
-  });
+  }, null, {polling: 500});
   await app.evaluate(async () => {
     await window.testAPI.set_forced_resizing(true);
     const {getSelectedRegions} = await import('/js/state.js');
@@ -226,11 +232,11 @@ try {
   await app.waitForFunction(() => {
     const img = document.getElementById('preview-img');
     return img.complete && img.naturalWidth === 4 && img.naturalHeight === 6;
-  });
+  }, null, {polling: 500});
   for (const id of ['chk-mesh-hull']) {
     if (!await app.locator('#' + id).isDisabled()) throw new Error(id + ' should be disabled without skeleton');
   }
-  console.log('PASS real app loading overlay, two-page region list, nonblank preview, composite, Forced Resizing, and mesh toggles');
+  console.log('PASS real app background startup, queued load, two-page region list, nonblank preview, composite, Forced Resizing, and mesh toggles');
 
   // A tab uses download routing. Disable optional native save pickers so the
   // automation never opens an OS dialog on browsers that expose these APIs.
@@ -283,6 +289,14 @@ try {
   if (pageErrors.length) throw new Error('App page errors: ' + pageErrors.join('; '));
   console.log('PASS real app DuplicateRegionName alert');
   await app.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
+
+  const idleApp = await context.newPage();
+  await idleApp.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await idleApp.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout: 120000, polling: 500});
+  if (await idleApp.locator('#status-text').textContent() !== 'Ready') throw new Error('Idle app status is not Ready');
+  await idleApp.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
+  await idleApp.close();
+  console.log('PASS fresh app startup status becomes Ready without loading');
 
   if (external.length) throw new Error(`Non-local requests recorded: ${external.length}`);
   console.log('PASS no request leaves the local server');
