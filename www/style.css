@@ -663,70 +663,6 @@ button {
   border-color: #2d6930;
 }
 
-.nest-gap-input {
-  width: 42px;
-  min-width: 0;
-  height: 22px;
-  padding: 0 4px;
-  font-size: 11px;
-  border-radius: 3px;
-  border: 1px solid #555;
-  background-color: #2f2f2f;
-  color: #ddd;
-  box-sizing: border-box;
-  /* Round-2 scrutinize finding: without this, .toggle-label's own
-     flex-shrink:0 (above) concentrates ALL of #options-row's shrink
-     pressure onto this, the one remaining shrinkable non-ellipsis
-     control -- collapses to 10px (padding+border only, zero content
-     width, the value renders invisibly) at exactly the narrow widths
-     this fix round exists to fix. Verified empirically at 7 widths
-     before landing: with this, width stays 42px everywhere and
-     #options-row's own overflow-x:auto genuinely absorbs the overflow
-     (scrollWidth grows instead), matching what the CSS comment above
-     already claimed was happening. */
-  flex-shrink: 0;
-}
-/* Task 7 scrutinize finding: every other interactive control in this file
-   has a :disabled rule; this one didn't -- Nest Regions defaults OFF, so
-   the first thing an Edit-mode user saw was a field that LOOKED editable
-   but silently swallowed input. Matches .toggle-label input:disabled +
-   .toggle-switch's own dimming (line ~526) in spirit. */
-.nest-gap-input:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-#btn-nest-settings {
-  height: 26px;
-  min-height: 22px;
-  width: 26px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  border-radius: 3px;
-  border: 1px solid #555;
-  background-color: #2f2f2f;
-  color: #e3e3e3;
-  cursor: pointer;
-}
-#btn-nest-settings:hover {
-  border-color: #6a6a6a;
-  background-color: #3a3a3a;
-}
-#btn-nest-settings:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-#btn-nest-settings:disabled:hover {
-  border-color: #555;
-  background-color: #2f2f2f;
-}
-#btn-nest-settings[aria-expanded="true"] {
-  border-color: #0e639c;
-}
-
 #btn-options-collapse {
   position: absolute;
   right: 6px;
@@ -774,104 +710,6 @@ button {
   border-radius: 3px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   pointer-events: none;
-}
-
-#nest-gap-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  pointer-events: none;
-}
-
-#nest-gap-panel {
-  position: fixed;
-  min-width: 240px;
-  padding: 10px 12px;
-  background: #2d2d2d;
-  border: 1px solid #555;
-  border-radius: 3px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  pointer-events: auto;
-}
-
-.nest-gap-heading {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: #bbb;
-}
-
-.nest-gap-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-#nest-gap-slider {
-  flex: 1;
-  min-width: 80px;
-}
-
-#nest-gap-slider:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.nest-gap-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-  justify-content: flex-end;
-}
-
-.nest-gap-actions button {
-  height: 22px;
-  min-height: 22px;
-  padding: 0 8px;
-  font-size: 11px;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-#nest-gap-close {
-  display: none;
-}
-
-#nest-gap-overlay.is-touch-modal {
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-}
-
-#nest-gap-overlay.is-touch-modal #nest-gap-panel {
-  position: relative;
-  inset: auto;
-}
-
-#nest-gap-overlay.is-touch-modal .nest-gap-actions {
-  margin-top: 10px;
-}
-
-#nest-gap-overlay.is-touch-modal #nest-gap-close {
-  display: flex;
-  flex: 1;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 12px;
-  font-size: 12px;
-}
-
-#nest-gap-overlay.is-touch-modal #nest-gap-reset,
-#nest-gap-overlay.is-touch-modal #nest-gap-confirm {
-  flex: 1;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 12px;
-  font-size: 12px;
 }
 
 /* Preview Area */
@@ -1885,4 +1723,47 @@ body.mode-extract #advance-toolbar {
   html:not(.pywebview) #panel-splitter {
     height: 16px;
   }
+}
+
+  #btn-pack-chip { height: 26px; min-height: 22px; padding: 0 10px; font-size: 12px; white-space: nowrap; border-radius: 3px; border: 1px solid #555; background-color: #2f2f2f; color: #e3e3e3; cursor: pointer; }
+  #pack-panel { position: fixed; z-index: 41; width: 300px; padding: 10px 12px; background: #2d2d2d; border: 1px solid #555; border-radius: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  #btn-pack-chip { display: inline-flex; align-items: center; gap: 6px; }
+  #btn-pack-chip .chip-sep { width: 1px; align-self: stretch; margin: 5px 2px; background: #555; }
+  #btn-pack-chip .chip-value { color: #aaa; }
+  #pack-panel .sec { padding: 10px 0; border-top: 1px solid #444; }
+  #pack-panel .sec:first-child { padding-top: 0; border-top: 0; }
+  #pack-panel .sec:last-child { padding-bottom: 0; }
+  #pack-panel .sec .toggle-label + .toggle-label { margin-top: 8px; }
+  .pk-menu { display: flex; flex-direction: column; margin: 0 -4px; }
+  #pack-panel .sec .toggle-label { display: flex; }
+  .pk-item { display: flex; justify-content: flex-start; align-items: center; gap: 6px; width: 100%; padding: 5px 8px 5px 6px; background: transparent; border: 0; border-radius: 3px; color: #ddd; font-size: 12px; text-align: left; cursor: pointer; min-height: 0; height: auto; }
+  .pk-item:hover:not(:disabled) { background: #3a3d41; }
+  .pk-item.selected { background: #094771; color: #fff; }
+  .pk-item.selected small { color: #b9d7ee; }
+  .pk-item:disabled { opacity: .4; cursor: not-allowed; }
+  .pk-item small { display: block; color: #888; font-size: 11px; }
+  .pk-check { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .sec-head .pack-heading { margin: 0; }
+  #pack-panel .hint { margin: 3px 0 0; font-size: 11px; color: #888; line-height: 1.35; }
+  .is-locked { opacity: .55; pointer-events: none; }
+#pack-panel { box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; }
+.pack-heading { margin: 0 0 6px; font-size: 12px; color: #ccc; }
+.padding-controls { display:flex; gap:8px; }
+#p-range { flex:1; min-width:0; }
+#p-num { width:52px; background:#3c3c3c; color:#ddd; border:1px solid #555; }
+#s-alpha { width:100%; background:#3c3c3c; color:#ddd; }
+#pack-backdrop { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.55); }
+#pack-panel.is-touch-modal { left:50% !important; top:50% !important; transform:translate(-50%,-50%); }
+#pack-close { display:none; }
+#pack-panel.is-touch-modal #pack-close { display:block; margin-top:10px; width:100%; }
+
+  #btn-pad-reset { width: 22px; height: 22px; min-height: 0; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 3px; color: #bbb; cursor: pointer; }
+  #btn-pad-reset:hover { background: #3a3d41; color: #fff; }
+
+/* Keep an open panel on screen during the viewport resize itself, before
+   the resize listener updates its modal state and anchored coordinates. */
+@media (max-width: 600px) {
+  #pack-panel { left: 50% !important; top: 50% !important; transform: translate(-50%, -50%); }
+  #pack-panel #pack-close { display: block; margin-top: 10px; width: 100%; }
 }

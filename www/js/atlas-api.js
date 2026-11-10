@@ -15,12 +15,11 @@ export const LOAD_CANCELLED = 'cancelled';
 let _edit = false, _activePageIndex = 0, _editPages = [];
 let _state = null, _sourceFiles = null, _currentSkel = null;
 let _currentAtlasFilename = '', _currentAtlasDirectory = '', _lastSaveHandle = null;
-let _meshMaskEnabled = true, _meshAwareRepackEnabled = true, _nestRegionsEnabled = false;
-let _nestGapDistance = 4, _forcedResizing = false, _meshHullEnabled = false;
+let _meshMaskEnabled = true;
+let _forcedResizing = false, _meshHullEnabled = false;
 let _loadEpoch = 0, _skelEpoch = 0;
 const _previewCache = new PreviewCache(24), _hulls = new Map();
 const _viewKey = names => viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
-function normalizeGap(value) { const n = Math.floor(Number(value)); return !Number.isFinite(n) || n < 1 ? 4 : Math.min(n, 256); }
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -327,6 +326,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
     const skelBytes = skel ? new Uint8Array(await skel.blob.arrayBuffer()) : null;
     const loaded = await callHost('load', [atlasFile.name, rawText, pages, skel?.name || null, skelBytes]);
     _state = loaded;
+    await publishSettings();
     _edit = false;
     _currentSkel = skel;
     _sourceFiles = { atlas: atlasFile, pages: finalMap, skel: _currentSkel };
@@ -457,13 +457,7 @@ export const AtlasAPI = {
     return hulls ? { items: hulls.map(h => ({ points: h.points.map(([x,y]) => ({x,y})) })) } : null;
   },
 
-  /** Reads the persisted 'meshAwareRepack' pref into _meshAwareRepackEnabled.
-   *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. */
-  async init_mesh_aware_repack_from_pref() {
-    _meshAwareRepackEnabled = await AtlasAPI.get_pref('meshAwareRepack', true);
-  },
-
-  get_mesh_mask_state() { return { available: !!_state?.mesh.available, enabled: _meshMaskEnabled, repackEnabled: _meshAwareRepackEnabled, skelFileName: _state?.mesh.skelName || null, unavailableReason: _state?.mesh.reason || null }; },
+  get_mesh_mask_state() { return { available: !!_state?.mesh.available, enabled: _meshMaskEnabled, skelFileName: _state?.mesh.skelName || null, unavailableReason: _state?.mesh.reason || null }; },
 
   async set_mesh_mask_enabled(enabled) {
     _meshMaskEnabled = !!enabled;
@@ -471,41 +465,32 @@ export const AtlasAPI = {
     return null; // Mesh Cropping no longer affects repack output at all now that the two toggles are decoupled -- no rerun needed.
   },
 
-  async set_mesh_aware_repack_enabled(enabled) {
-    _meshAwareRepackEnabled = !!enabled;
-    AtlasAPI.set_pref('meshAwareRepack', _meshAwareRepackEnabled);
-    return null;
+  get_settings() { return _state?.settings || null; },
+  async init_settings_from_prefs() {
+    const partial = {};
+    for (const [key, pref, value] of SETTING_PREFS) partial[key] = await AtlasAPI.get_pref(pref, value);
+    try { await AtlasAPI.set_settings(partial); }
+    catch (e) {
+      if (!(e instanceof HostError) || e.type !== 'ValueError') throw e;
+      for (const [key, pref, value] of SETTING_PREFS) { partial[key] = value; await AtlasAPI.set_pref(pref, value); }
+      await AtlasAPI.set_settings(partial);
+    }
   },
-
-  /** Restore the packer preferences for the settings panel. */
-  async init_nest_regions_from_pref() {
-    _nestRegionsEnabled = await AtlasAPI.get_pref('nestRegionsEnabled', false);
-    // normalizeGap here too, not just in the setter -- a pref written by an
-    // older build (before set_nest_gap_distance normalized on write), or
-    // hand-edited storage, must not reach the packer/UI unnormalized either.
-    _nestGapDistance = normalizeGap(await AtlasAPI.get_pref('nestGapDistance', 4));
-  },
-
-  get_nest_options() {
-    return { enabled: _nestRegionsEnabled, gapDistance: _nestGapDistance };
-  },
-
-  async set_nest_regions_enabled(enabled) {
-    _nestRegionsEnabled = !!enabled;
-    AtlasAPI.set_pref('nestRegionsEnabled', _nestRegionsEnabled);
-    return null;
-  },
-
-  async set_nest_gap_distance(px) {
-    // Normalize to a finite integer >=1 (clamped to 256) at the boundary so a
-    // raw string from a UI <input> (e.g. '5') can't be persisted unnormalized
-    // and then silently diverge: getNestOptions()'s Number.isFinite guard would
-    // substitute 4 for the actual packer while get_nest_options() kept reporting
-    // the raw value. Enforces the Global Constraint (gapDistance normalized
-    // everywhere it is read).
-    _nestGapDistance = normalizeGap(px);
-    AtlasAPI.set_pref('nestGapDistance', _nestGapDistance);
-    return null;
+  async set_settings(partial) {
+    return withBusy(BUSY_LABEL, async () => {
+      const result = await callHost('set_settings', [partial]);
+      // Persist the requested values before publishing state: the chip can
+      // become visible before Edit preview conversion finishes. Never save
+      // effective fallback/locked values in place of the user's choice.
+      for (const [key, pref] of SETTING_PREFS) {
+        if (Object.hasOwn(partial, key)) await AtlasAPI.set_pref(pref, partial[key]);
+      }
+      const applied = result?.state ? await acceptEditResult(result) : result;
+      if (result && !result.state) _state = result;
+      _previewCache.invalidateAll(); _hulls.clear();
+      await publishSettings();
+      return applied;
+    });
   },
 
   /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
@@ -513,7 +498,12 @@ export const AtlasAPI = {
   async apply_skel_file(file) {
     if (!file || !isSkelFilename(file.name)) return false;
     try {
-    _state = await callHost('set_skeleton', [file.name, new Uint8Array(await file.arrayBuffer())]);
+    const result = await callHost('set_skeleton', [file.name, new Uint8Array(await file.arrayBuffer())]);
+    if (result.state) {
+      const preview = await acceptEditResult(result);
+      await (await import('./modify-mode.js')).onModPreviewReceived(preview);
+    } else _state = result;
+    await publishSettings();
     _currentSkel = {name: file.name, blob: file};
     if (_sourceFiles) _sourceFiles.skel = _currentSkel;
     _skelEpoch++;
@@ -649,7 +639,7 @@ export const AtlasAPI = {
     const hit = _previewCache.get(key);
     if (hit) return hit;
     try {
-      const raster = await callHost('preview', [names, _meshMaskEnabled && _state.mesh.available, _forcedResizing, true, await AtlasAPI.get_pref('imageAlpha', 'straight')], {coalesce: 'preview'});
+      const raster = await callHost('preview', [names, _meshMaskEnabled && _state.mesh.available, _forcedResizing, true, _state.settings.alpha], {coalesce: 'preview'});
       if (!raster) return null;
       const url = await rasterToUrl(raster);
       _previewCache.set(key, url);
@@ -685,7 +675,7 @@ export const AtlasAPI = {
     if (targets.length === 0) return 'No regions to extract.';
 
     const run = async () => {
-    const results = await callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+    const results = await callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
     const extracted = results.map(({filename, png}) => ({filename, blob: new Blob([png], {type: 'image/png'})}));
     const count = extracted.length;
 
@@ -747,7 +737,7 @@ export const AtlasAPI = {
   },
   async save_image() {
     if (!_state) return null;
-    const png = await callHost('save_image', [getSelectedKeys(), _meshMaskEnabled && _state.mesh.available, _forcedResizing, await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+    const png = await callHost('save_image', [getSelectedKeys(), _meshMaskEnabled && _state.mesh.available, _forcedResizing, _state.settings.alpha]);
     return png ? new Blob([png], {type: 'image/png'}) : null;
   },
   async enter_modify_mode() {
@@ -776,7 +766,7 @@ export const AtlasAPI = {
     if (!keys?.length) return null;
     return withBusy(BUSY_LABEL, async () => {
       try {
-        return await editCall('modify', [keys, await imageBytes(source), await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+        return await editCall('modify', [keys, await imageBytes(source), _state.settings.alpha]);
       } catch (e) { await window.showAlert(e.message, 'Cannot modify atlas'); return null; }
     });
   },
@@ -790,7 +780,7 @@ export const AtlasAPI = {
     return file ? AtlasAPI.process_mod_image(file, keys) : null;
   },
   async save_page_image() {
-    const png = await callHost('page_png', [_activePageIndex, await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+    const png = await callHost('page_png', [_activePageIndex, _state.settings.alpha]);
     return new Blob([png], {type: 'image/png'});
   },
   async save_modified() {
@@ -812,7 +802,7 @@ export const AtlasAPI = {
       return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
     } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
   },
-  async add_region(file, name) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), null, await AtlasAPI.get_pref('imageAlpha', 'straight')])); },
+  async add_region(file, name) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), null, _state.settings.alpha])); },
   rename_region(key, name) { return withBusy(BUSY_LABEL, () => editCall('rename', [key, name])); },
   remove_regions(keys) { return withBusy(BUSY_LABEL, () => editCall('remove', [keys])); },
 };
@@ -824,7 +814,11 @@ async function imageBytes(source) {
 }
 async function editCall(method, args) {
   const result = await callHost(method, args);
+  return acceptEditResult(result);
+}
+async function acceptEditResult(result) {
   _state = result.state;
+  await publishSettings();
   _editPages = result.pages;
   if (_activePageIndex >= _editPages.length) _activePageIndex = 0;
   return {...result, image: await rasterToUrl(result.image)};
@@ -836,6 +830,8 @@ onEngineDied(async (message) => {
   stopEngine(); engineStartupError = null;
   try {
     await startEngine();
+    _edit = false;
+    await AtlasAPI.init_settings_from_prefs();
     if (!sources) return;
     if (!await _loadAtlasFiles(sources.atlas, sources.pages, _currentAtlasDirectory)) return;
     if (sources.skel) await AtlasAPI.apply_skel_file(sources.skel.blob);
@@ -855,3 +851,12 @@ onEngineDied(async (message) => {
     console.error(String(e.message).split('\n')[0]);
   }
 });
+
+const SETTING_PREFS = [
+  ['packer', 'packer', 'shelf'], ['padding', 'packPadding', 2],
+  ['meshAware', 'packMeshAware', true], ['splitComposite', 'packSplitComposite', false],
+  ['keepLayout', 'packKeepLayout', true], ['alpha', 'imageAlpha', 'straight'],
+];
+async function publishSettings() {
+  if (_state?.settings) (await import('./settings-panel.js')).renderSettings(_state.settings);
+}

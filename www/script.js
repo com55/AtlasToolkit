@@ -3,8 +3,9 @@ import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
-import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateNestRegionsUI, updateForcedResizingUI, updateMeshHullUI, applyNestGapDistance } from './js/modify-mode.js';
+import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateForcedResizingUI, updateMeshHullUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
+import { initSettingsPanel } from './js/settings-panel.js';
 import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
@@ -68,7 +69,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   const statusText = document.getElementById('status-text');
   const preparingText = 'Preparing AtlasToolkit engine...';
   statusText.textContent = preparingText;
-  startEngine().then(() => {
+  startEngine().then(async () => {
+    await _waitForPywebviewReady();
+    await AtlasAPI.init_settings_from_prefs();
     if (statusText.textContent === preparingText) statusText.textContent = 'Ready';
   }).catch(error => {
     setEngineStartupError(error);
@@ -79,7 +82,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   applyAppTitle('');
   initPanelResizer();
   initAppBar();
-  initOptionsPopover({ applyGap: applyNestGapDistance, revertGap: updateNestRegionsUI });
+  initOptionsPopover();
+  initSettingsPanel();
   initOptionsRowCollapse();
   // Stamp the initial body.mode-extract class setMode()'s CSS-gated
   // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called
@@ -97,12 +101,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
   await AtlasAPI.init_mesh_mask_from_pref();
-  await AtlasAPI.init_mesh_aware_repack_from_pref();
-  await AtlasAPI.init_nest_regions_from_pref();
   await AtlasAPI.init_forced_resizing_from_pref();
   await AtlasAPI.init_mesh_hull_from_pref();
   updateMeshCroppingUI();
-  updateNestRegionsUI();
   updateForcedResizingUI();
   updateMeshHullUI();
 
@@ -243,7 +244,6 @@ async function _resetUiAfterFreshLoad() {
   updateRenameButtonState();
   await loadRegions();
   updateMeshCroppingUI();
-  updateNestRegionsUI();
 
   applyAppTitle(AtlasAPI.get_current_atlas_filename());
   // Native window title (old Python engine's load_atlas() used to do this;

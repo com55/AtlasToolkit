@@ -287,6 +287,7 @@ try {
   await app.locator('#btn-modal-confirm').click();
   if (await app.evaluate(() => window.pendingDuplicate) !== false) throw new Error('Duplicate load should return false');
   await app.locator('#mode-modify').click();
+  await app.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
   await app.waitForFunction(() => document.body.classList.contains('mode-modify'), null, {polling:500});
   if (!await app.locator('#advance-toolbar').isVisible()) throw new Error('Edit toolbar hidden');
   if (await app.locator('#options-group-advance').count()) throw new Error('Advance toggle remains');
@@ -426,6 +427,147 @@ try {
   await idleApp.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
   await idleApp.close();
   console.log('PASS fresh app startup status becomes Ready without loading');
+
+  // Settings regression checks use a fresh real app page and real host errors.
+  const settingsPage = await context.newPage();
+  await settingsPage.goto(origin + '/index.html', {waitUntil:'domcontentloaded'});
+  await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
+  const loadSettingsFixture = async (count = 2, pma = false) => {
+    if (await settingsPage.evaluate(() => document.body.classList.contains('mode-modify'))) {
+      const pending = await settingsPage.evaluate(() => window.settingsAPI.has_pending_modifications());
+      await settingsPage.locator('#mode-extract').click();
+      if (pending) {
+        await settingsPage.locator('#modal-overlay').waitFor({state:'visible'});
+        await settingsPage.locator('#btn-modal-confirm').click();
+      }
+      await settingsPage.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});
+    }
+    return settingsPage.evaluate(async ({count,pma}) => {
+    const {AtlasAPI: api} = await import('/js/atlas-api.js');
+    window.settingsAPI = api;
+    const c = new OffscreenCanvas(64,64); const ctx = c.getContext('2d');
+    // Unique opaque pixels prevent one-pixel regions being deduplicated.
+    const pixels = ctx.createImageData(64,64);
+    for (let y = 0; y < 64; y++) {
+      for (let x = 0; x < 64; x++) {
+        const offset = (y * 64 + x) * 4;
+        pixels.data[offset] = x * 4;
+        pixels.data[offset + 1] = y * 4;
+        pixels.data[offset + 2] = (x + y) % 256;
+        pixels.data[offset + 3] = 255;
+      }
+    }
+    ctx.putImageData(pixels,0,0);
+    const png = new File([await c.convertToBlob({type:'image/png'})], 'settings.png');
+    const text = 'settings.png\nsize: 64,64\npma: ' + pma + '\n' + Array.from({length:count}, (_,i) => 'r'+i+'\n bounds: '+(i%64)+','+Math.floor(i/64)+',1,1\n').join('');
+    if (!await api.load_from_files([new File([text],'settings.atlas'),png])) throw new Error('Settings fixture failed');
+    await (await import('/js/region-list.js')).loadRegions();
+    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    }, {count,pma});
+  };
+  await loadSettingsFixture();
+  if (!await settingsPage.locator('#options-row > li:first-child #btn-pick-skel').isVisible()) throw new Error('View picker placement');
+  if (!await settingsPage.locator('#chk-mesh-mask').isDisabled() || !await settingsPage.locator('#chk-mesh-hull').isDisabled()) throw new Error('Mesh controls enabled without mesh');
+  if (!await settingsPage.locator('#chk-forced-resizing').isEnabled()) throw new Error('Forced resizing disabled');
+  await settingsPage.locator('#mode-modify').click();
+  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await settingsPage.locator('#btn-pack-chip').click();
+  if (!await settingsPage.locator('body > #pack-panel').isVisible()) throw new Error('Settings panel placement');
+  const labels = await settingsPage.locator('.pk-item > span:last-child').evaluateAll(nodes => nodes.map(n => n.firstChild.textContent));
+  if (labels.join('|') !== 'Shelf|Rectangles|Polygons|Rectangles In-Place|Polygons In-Place') throw new Error('Packer names');
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Shelf · 2px')) throw new Error('Default chip');
+  for (const key of ['polygons','polygons_in_place']) {
+    const row = settingsPage.locator('[data-packer="'+key+'"]');
+    if (!await row.isDisabled() || !(await row.innerText()).includes('Needs a .skel file')) throw new Error('Polygon availability');
+  }
+  if (await settingsPage.locator('#s-alpha').count()) throw new Error('Alpha shown for straight atlas');
+  const beforePacking = await settingsPage.locator('#preview-img').getAttribute('src');
+  await settingsPage.locator('[data-packer="rectangles"]').click();
+  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
+  await settingsPage.waitForFunction(before => document.getElementById('preview-img').getAttribute('src') !== before, beforePacking, {polling:500});
+  await settingsPage.locator('#p-num').fill('5');
+  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('5px'), null, {polling:500});
+  await settingsPage.locator('[data-packer="rectangles_in_place"]').click();
+  await settingsPage.waitForFunction(() => document.querySelector('[data-setting="splitComposite"]').disabled, null, {polling:500});
+  for (const key of ['splitComposite','keepLayout']) if (!await settingsPage.locator('[data-setting="'+key+'"]').isChecked()) throw new Error('In-place lock value');
+  const hint = await settingsPage.locator('#pack-panel .hint').innerText();
+  if (hint !== 'New regions go into free space.\nOff: every edited page is repacked.') throw new Error('Keep layout hint');
+  await settingsPage.locator('[data-packer="rectangles"]').click();
+  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
+  await settingsPage.reload({waitUntil:'domcontentloaded'});
+  await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
+  await loadSettingsFixture();
+  await settingsPage.locator('#mode-modify').click();
+  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles · 5px'), null, {polling:500});
+  await settingsPage.locator('#btn-pack-chip').click();
+  await settingsPage.locator('#btn-pad-reset').click();
+  await settingsPage.waitForFunction(() => document.getElementById('p-num').value === '2', null, {polling:500});
+  await settingsPage.setViewportSize({width:360,height:640});
+  const bounds = await settingsPage.locator('#pack-panel').boundingBox();
+  if (bounds.x < 0 || bounds.x + bounds.width > 360) throw new Error('Settings overflows narrow screen');
+  await settingsPage.locator('#pack-close').click();
+  await settingsPage.locator('#btn-pack-chip').click();
+  const openedNarrow = await settingsPage.locator('#pack-panel').boundingBox();
+  if (openedNarrow.x < 0 || openedNarrow.x + openedNarrow.width > 360) throw new Error('Settings opened narrow overflows');
+  await settingsPage.setViewportSize({width:1280,height:800});
+  await settingsPage.waitForFunction(() => !document.getElementById('pack-panel').classList.contains('is-touch-modal'), null, {polling:500});
+  const reopenedWide = await settingsPage.locator('#pack-panel').boundingBox();
+  if (reopenedWide.x < 0 || reopenedWide.x + reopenedWide.width > 1280) throw new Error('Settings overflows after returning wide');
+  await settingsPage.evaluate(async () => {
+    await window.settingsAPI.set_pref('packer','polygons');
+  });
+  await settingsPage.reload({waitUntil:'domcontentloaded'});
+  await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
+  await settingsPage.evaluate(() => { window.settingsToasts=[]; const original=window.showToast; window.showToast=(...args) => { window.settingsToasts.push(args); return original(...args); }; });
+  await loadSettingsFixture();
+  await settingsPage.evaluate(async () => {
+    const {renderSettings} = await import('/js/settings-panel.js');
+    renderSettings(window.settingsAPI.get_settings()); renderSettings(window.settingsAPI.get_settings());
+    if (window.settingsToasts.filter(([text]) => text === 'Polygons need a .skel file; using Rectangles.').length !== 1) throw new Error('Fallback toast count');
+    await window.settingsAPI.set_settings({packer:'shelf',padding:2,keepLayout:false});
+  });
+  await loadSettingsFixture(1600, true);
+  await settingsPage.locator('#mode-modify').click();
+  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await settingsPage.evaluate(async () => {
+    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const recordPackedSize = async result => {
+      if (result?.state && result.image) {
+        const bitmap = await createImageBitmap(await (await fetch(result.image)).blob());
+        window.lastSettingsPackedPageSize = bitmap.width + 'x' + bitmap.height;
+        bitmap.close();
+      }
+      return result;
+    };
+    await onModPreviewReceived(await recordPackedSize(await window.settingsAPI.remove_regions(['r0'])));
+    const originalSetSettings = window.settingsAPI.set_settings;
+    window.restoreSettingsSizeProbe = () => { window.settingsAPI.set_settings = originalSetSettings; };
+    window.settingsAPI.set_settings = async partial => recordPackedSize(await originalSetSettings.call(window.settingsAPI, partial));
+    // With 1599 remaining 1px regions and 256px gaps, at most 39 fit
+    // per axis under 10000px (39 * 1 + 38 * 256 = 9767).
+    // 1599 > 39 * 39, so even the limit-width Shelf retry cannot fit.
+    if (!window.settingsAPI.has_pending_modifications()) throw new Error('Failure fixture needs a real edit');
+  });
+  await settingsPage.locator('#btn-pack-chip').click();
+  if (!await settingsPage.locator('#s-alpha').isVisible()) throw new Error('PMA alpha hidden');
+  await settingsPage.locator('#p-num').fill('256');
+  try {
+    await settingsPage.locator('#modal-overlay').waitFor({state:'visible',timeout:30000});
+  } catch (error) {
+    const size = await settingsPage.evaluate(() => window.lastSettingsPackedPageSize || 'no EditResult returned');
+    throw new Error('Setting failure dialog did not appear within 30s; last EditResult packed page size: ' + size + '; ' + error.message);
+  } finally {
+    await settingsPage.evaluate(() => window.restoreSettingsSizeProbe());
+  }
+  if (await settingsPage.locator('#modal-title').innerText() !== 'Cannot apply setting') throw new Error('Setting failure title');
+  if (await settingsPage.locator('#p-num').inputValue() !== '2') throw new Error('Failed padding did not revert');
+  if (await settingsPage.evaluate(() => window.settingsAPI.get_pref('packPadding',2)) !== 2) throw new Error('Failed setting persisted');
+  await settingsPage.locator('#btn-modal-confirm').click();
+  await settingsPage.close();
+  console.log('PASS settings controls, locks, picker placement, preview, reload prefs, reset, narrow modal, fallback toast, alpha visibility, real failure rollback');
+  console.log('SKIP polygon mesh lock: requires a usable binary .skel fixture');
+
 
   if (external.length) throw new Error(`Non-local requests recorded: ${external.length}`);
   console.log('PASS no request leaves the local server');

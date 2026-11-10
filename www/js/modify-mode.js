@@ -12,7 +12,8 @@ import { withLock, withBusy, isBusy, noteBusyConflict } from './busy-overlay.js'
 import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
-import { syncHelpPopover, hideHelpPopover, closeGapPanel, isGapPanelOpen } from './options-popover.js';
+import { syncHelpPopover, hideHelpPopover } from './options-popover.js';
+import { closeSettingsPanel } from './settings-panel.js';
 import { syncOptionsRowOverflow } from './options-row.js';
 
 function setStatus(text) {
@@ -52,11 +53,10 @@ export function setMode(mode) {
   updateModeToggleUI();
   updatePageSwitcher();
   hideHelpPopover();
-  closeGapPanel();
+  closeSettingsPanel();
   // Picker visibility follows the mode-relevant mesh toggle; refresh so a
   // View↔Edit switch doesn't leave the button stuck on the previous mode.
   updateMeshCroppingUI();
-  updateNestRegionsUI();
   // Wrapping extra <li> groups can change #options-row height when expanded,
   // so re-measure overflow after the mode-gated children settle, then
   // re-clamp the stacked-layout split (minRightHeight includes #options-row-wrap).
@@ -292,27 +292,12 @@ const MESH_UNAVAILABLE_MESSAGES = {
   'no-mesh-attachments': 'This .skel file parsed successfully but contains no Mesh attachments to crop with.',
 };
 
-/** Syncs the Mesh Cropping / Mesh-Aware Repack toggles + .skel picker button
- *  from AtlasAPI.get_mesh_mask_state(). Call after anything that can change
- *  that state: an atlas load (either load path), the toggle itself, a
- *  successful pick_skel_file(), or a mode switch that changes which toggle
- *  is the relevant one. The toggles' checked states always reflect the
- *  user's persisted preferences, independent of the current atlas's .skel
- *  availability -- the picker button communicates availability instead, and
- *  is hidden while the mode-relevant toggle is off or no atlas is loaded. */
+/** Sync mesh controls and the independent skeleton picker from host state. */
 export function updateMeshCroppingUI() {
-  const { available, enabled, repackEnabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
+  const { available, enabled, skelFileName, unavailableReason } = AtlasAPI.get_mesh_mask_state();
   document.getElementById('chk-mesh-mask').checked = enabled;
 
-  const repackChk = document.getElementById('chk-mesh-aware-repack');
-  repackChk.checked = repackEnabled;
-  repackChk.disabled = !available;
-  const meshAwareRow = document.getElementById('mesh-aware-repack-toggle-row');
-  meshAwareRow.dataset.help = repackChk.disabled
-    ? 'Requires a usable .skel file.'
-    : "Mask each region's pixels to its mesh silhouette before packing, so the repacked atlas matches what extraction already shows.";
-  meshAwareRow.removeAttribute('title');
-  syncHelpPopover();
+  document.getElementById('chk-mesh-mask').disabled = !available;
   updateMeshHullUI();
 
   // Shared .skel picker button -- relevant toggle depends on which mode is
@@ -322,16 +307,13 @@ export function updateMeshCroppingUI() {
   // "either toggle is on" -- the two toggles are otherwise fully
   // independent of each other.
   const btn = document.getElementById('btn-pick-skel');
-  // View mode follows Mesh Cropping; Edit mode follows Mesh-Aware Repack.
-  // Also require an atlas so the picker stays hidden on the empty startup screen.
-  const relevantToggleOn = state.currentMode === 'modify' ? repackEnabled : enabled;
   const atlasLoaded = !!AtlasAPI.get_current_atlas_filename();
-  if (!relevantToggleOn || !atlasLoaded) {
-    btn.classList.add('hidden');
+  if (!atlasLoaded) {
+    btn.parentElement.classList.add('hidden');
     refreshPanelSplit();
     return;
   }
-  btn.classList.remove('hidden');
+  btn.parentElement.classList.remove('hidden');
   refreshPanelSplit();
   btn.classList.remove('skel-missing', 'skel-invalid', 'skel-ok');
   if (!skelFileName) {
@@ -363,34 +345,6 @@ export function updateMeshHullUI() {
     : 'Requires a usable .skel file with mesh attachments.';
   row.removeAttribute('title');
   syncHelpPopover();
-}
-
-/** Syncs the Nest Regions checkbox + gap-distance input from
- *  AtlasAPI.get_nest_options(). Call after anything that can change that
- *  state: the toggle itself, the gap-distance input, or app startup.
- *  Unlike updateMeshCroppingUI(), this is never gated by mesh availability
- *  -- Nest Regions works with no mesh data at all (Gap A space alone). */
-export function updateNestRegionsUI({ force = false } = {}) {
-  const { enabled, gapDistance } = AtlasAPI.get_nest_options();
-  document.getElementById('chk-nest-regions').checked = enabled;
-  const gapInput = document.getElementById('nest-gap-distance');
-  const slider = document.getElementById('nest-gap-slider');
-  const gear = document.getElementById('btn-nest-settings');
-  gapInput.disabled = !enabled;
-  if (slider) slider.disabled = !enabled;
-  if (gear) gear.disabled = !enabled;
-  const labelText = document.getElementById('nest-regions-label-text');
-  if (labelText) labelText.textContent = `Smart Packing (${gapDistance}px)`;
-  syncOptionsRowOverflow();
-  if (!enabled && isGapPanelOpen()) closeGapPanel();
-  // Don't clobber a draft while the gap panel is open (Confirm is the
-  // apply point) unless the caller just wrote the applied value.
-  if (isGapPanelOpen() && !force) return;
-  gapInput.value = gapDistance;
-  if (slider) {
-    const n = Number(gapDistance);
-    if (Number.isFinite(n) && n >= 1) slider.value = String(Math.min(100, n));
-  }
 }
 
 export function updateForcedResizingUI() {
@@ -449,80 +403,7 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
   }
 });
 
-document.getElementById('chk-mesh-aware-repack').addEventListener('change', async (e) => {
-  if (isBusy()) {
-    e.target.checked = !e.target.checked;
-    noteBusyConflict();
-    return;
-  }
-  hideHelpPopover();
-  try {
-    const result = await AtlasAPI.set_mesh_aware_repack_enabled(e.target.checked);
-    updateMeshCroppingUI();
-    if (result) await onModPreviewReceived(result);
-    // else: nothing modified yet, no packed-atlas preview to refresh -- leave the
-    // extraction-composite preview (which this toggle never affects) as-is
-  } catch (err) {
-    console.error(err);
-    showToast('Failed to update Mesh-Aware Repack.', 'error');
-  }
-});
-
-document.getElementById('chk-nest-regions').addEventListener('change', async (e) => {
-  if (isBusy()) {
-    e.target.checked = !e.target.checked;
-    noteBusyConflict();
-    return;
-  }
-  hideHelpPopover();
-  try {
-    const result = await AtlasAPI.set_nest_regions_enabled(e.target.checked);
-    updateNestRegionsUI();
-    if (result) {
-      await onModPreviewReceived(result);
-    } else {
-      setStatus('Ready');
-    }
-  } catch (err) {
-    console.error(err);
-    showToast('Failed to update Nest Regions.', 'error');
-    setStatus('Ready');
-  }
-});
-
-/** Apply the gap-distance field. Called from the gap panel Confirm
- *  button -- slider/number edits are drafts until then. Returns false if
- *  the value was invalid or another structural op is in flight. */
-export async function applyNestGapDistance(raw) {
-  const gapInput = document.getElementById('nest-gap-distance');
-  if (raw === '' || raw == null || (gapInput && !gapInput.checkValidity())) {
-    return false;
-  }
-  const px = Number(raw);
-  if (!Number.isFinite(px) || px < 1) return false;
-  if (isBusy()) {
-    noteBusyConflict();
-    return false;
-  }
-  try {
-    const result = await AtlasAPI.set_nest_gap_distance(px);
-    closeGapPanel({ revert: false });
-    updateNestRegionsUI({ force: true });
-    if (result) {
-      await onModPreviewReceived(result);
-    } else {
-      setStatus('Ready');
-    }
-    return true;
-  } catch (err) {
-    console.error(err);
-    showToast('Failed to update gap distance.', 'error');
-    setStatus('Ready');
-    return false;
-  }
-}
-
-document.getElementById('btn-pick-skel').addEventListener('click', async () => {
+ document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();
   if (picked) {
     updateMeshCroppingUI();
