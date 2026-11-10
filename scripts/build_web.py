@@ -21,7 +21,7 @@ EXCLUDED = {
         "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
         "atlas-converter", "atlas-api-legacy", "core-region-ops",
         "effective-region-model", "lanczos-resize", "region-mesh-lookup",
-        "region-mesh-mask", "repack-nest",
+        "region-mesh-mask", "repack-nest", "region-name-validation",
         "job-runner", "preview-jobs", "canvas-surface",
     )
 } | {"workers/engine-job-worker.js", "workers/preview-job-worker.js"}

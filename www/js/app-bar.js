@@ -23,26 +23,13 @@ export function updateModeToggleUI() {
   modifyBtn.disabled = count === 0 && state.currentMode !== 'modify';
 }
 
-/** Single choke point for every place that flips Advance Mode on/off, so the
- *  checkbox, the toolbar's visibility, and the body class that lets #sidebar-head
- *  track which row it lines up with (#options-row when the toolbar is hidden,
- *  #status-bar when it's showing) never drift out of sync with each other. */
-export function setAdvanceMode(active) {
-  document.getElementById('chk-advance-mode').checked = active;
-  document.getElementById('advance-toolbar').classList.toggle('hidden', !active);
-  document.body.classList.toggle('advance-mode-on', active);
-  // #advance-toolbar showing/hiding shifts panel-resizer.js's stacked/portrait
-  // splitter floor the same way setMode() showing/hiding #options-row
-  // rows does -- without this the splitter can get stranded behind it.
-  refreshPanelSplit();
-}
-
 /** Show/refresh the page switcher; visible only in edit mode on a multi-page atlas. */
 export function updatePageSwitcher() {
   const switcher = document.getElementById('modify-page-switcher');
   if (!switcher) return;
   const multi = state.currentMode === 'modify' && state.modifyPages.length > 1;
   switcher.classList.toggle('hidden', !multi);
+  refreshPanelSplit();
   if (!multi) return;
 
   let idx = Number.isInteger(state.modifyActivePageIndex)
@@ -101,14 +88,6 @@ export function initAppBar() {
     goToPage(state.modifyActivePageIndex + 1);
   });
 
-  document.getElementById('chk-advance-mode').addEventListener('change', (e) => {
-    setAdvanceMode(e.target.checked);
-    // Persisted separately from the change listener -- restored on every
-    // Edit Mode entry in enterEditMode(), not here, since setAdvanceMode()
-    // is also called by the multi-page force-off reset (region-list.js),
-    // which must NOT overwrite the user's real preference.
-    AtlasAPI.set_pref('advanceMode', e.target.checked);
-  });
 
   updateModeToggleUI();
 }

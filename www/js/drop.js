@@ -190,29 +190,7 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') contextMenu.
  * that somehow fails.
  */
 async function getPreviewPngBlob() {
-  if (state.currentMode !== 'modify') return AtlasAPI.save_image();
-  const img = previewImg;
-  if (!img.naturalWidth || !img.naturalHeight) return null;
-
-  if (img.src) {
-    try {
-      const response = await fetch(img.src);
-      if (response.ok) {
-        const blob = await response.blob();
-        if (blob && blob.size > 0) return blob;
-      }
-    } catch (e) {
-      console.warn('fetch preview PNG failed, using canvas fallback', e);
-    }
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width  = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0);
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  return state.currentMode === 'modify' ? AtlasAPI.save_page_image() : AtlasAPI.save_image();
 }
 
 /** Port of old Python engine's ui/js/extract.js previewSaveDefaultName(). */

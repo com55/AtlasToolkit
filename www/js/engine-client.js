@@ -31,7 +31,7 @@ function close(state, type, message) {
   for (const call of state.queue) call.reject(error);
   if (type === 'EngineDied') {
     for (const callback of deathCallbacks) {
-      try { callback(); } catch (error) { console.error(error); }
+      try { callback(message); } catch (error) { console.error(error); }
     }
   }
 }
@@ -135,4 +135,10 @@ export function onEngineDied(callback) {
 
 export function stopEngine() {
   if (engine) close(engine, 'EngineStopped', 'Engine stopped');
+}
+
+if (typeof window !== 'undefined' && new URLSearchParams(location.search).has('test-hooks')) {
+  window.__atlasToolkitTestHooks = {
+    killEngine() { if (engine) close(engine, 'EngineDied', 'Test engine termination'); },
+  };
 }

@@ -1,6 +1,5 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';
-import { validateRegionName } from './region-name-validation.js';
 import {
   previewImg,
   resetPreview,
@@ -10,7 +9,7 @@ import {
 } from './preview.js';
 import { showToast, showConfirm, openAddRegionModal } from './dialogs.js';
 import { withLock, withBusy, isBusy, noteBusyConflict } from './busy-overlay.js';
-import { updateModeToggleUI, updatePageSwitcher, setAdvanceMode } from './app-bar.js';
+import { updateModeToggleUI, updatePageSwitcher } from './app-bar.js';
 import { refreshPanelSplit } from './panel-resizer.js';
 import { refreshModifiedHighlight, loadRegions, renderSelection, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
 import { syncHelpPopover, hideHelpPopover, closeGapPanel, isGapPanelOpen } from './options-popover.js';
@@ -28,6 +27,8 @@ function updateModifyActionButtons() {
 
 export function setMode(mode) {
   state.currentMode = mode;
+  document.getElementById('advance-toolbar').classList.remove('hidden');
+  document.body.classList.toggle('advance-mode-on', mode === 'modify');
   document.body.classList.toggle('mode-modify', mode === 'modify');
   document.body.classList.toggle('mode-extract', mode !== 'modify');
   const extractControls = document.getElementById('extract-controls');
@@ -109,15 +110,6 @@ export async function enterEditMode() {
       // ui/js/mode.js exactly (parity fix, 2026-08-23).
       applyModifyView(data, 'Select regions and click Modify Selected');
       refreshModifiedHighlight();
-      // Restore Advance Mode -- persisted across sessions, re-applied on
-      // every Edit Mode entry rather than left as transient DOM state.
-      // Multi-page atlases never allow it regardless of the saved
-      // preference (loadRegions() already hides #options-group-advance for
-      // them; skip restoring here too so the toolbar can't end up shown
-      // for one).
-      if (!AtlasAPI.is_multi_page()) {
-        setAdvanceMode(await AtlasAPI.get_pref('advanceMode', false));
-      }
     } else {
       showToast('Load an atlas first.', 'error');
     }
@@ -168,8 +160,7 @@ export async function resetModify() {
   );
   if (!ok) return;
   try {
-    // enter_modify_mode clears the batch list and returns a pristine view.
-    const data = await AtlasAPI.enter_modify_mode();
+    const data = await AtlasAPI.reset_modifications();
     if (data) {
       applyModifyView(data, 'Select regions and click Modify Selected');
       await refreshStructuralUi([]); // rebuilds sidebar back to pristine, clears anchors
@@ -334,9 +325,11 @@ export function updateMeshCroppingUI() {
   const atlasLoaded = !!AtlasAPI.get_current_atlas_filename();
   if (!relevantToggleOn || !atlasLoaded) {
     btn.classList.add('hidden');
+    refreshPanelSplit();
     return;
   }
   btn.classList.remove('hidden');
+  refreshPanelSplit();
   btn.classList.remove('skel-missing', 'skel-invalid', 'skel-ok');
   if (!skelFileName) {
     btn.textContent = '⚠️ Choose .skel file';
@@ -551,11 +544,16 @@ function openRenameModal() {
   document.getElementById('rename-confirm-btn').disabled = false;
   document.getElementById('rename-modal').classList.remove('hidden');
 
-  const revalidate = () => {
-    const effectiveOthers = state.regionsData
-      .filter((r) => r.key !== key)
-      .map((r) => r.label);
-    const result = validateRegionName(input.value, effectiveOthers);
+  let validationId = 0;
+  const revalidate = async () => {
+    const id = ++validationId, value = input.value;
+    document.getElementById('rename-confirm-btn').disabled = true;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (id !== validationId) return {ok: false};
+    let result;
+    try { result = await AtlasAPI.validate_region_name(value, key); }
+    catch (e) { result = {ok: false, reason: e.message}; }
+    if (id !== validationId || input.value !== value) return {ok: false};
     const errorEl = document.getElementById('rename-name-error');
     const confirmBtn = document.getElementById('rename-confirm-btn');
     if (result.ok) {
@@ -573,11 +571,12 @@ function openRenameModal() {
 
   document.getElementById('rename-confirm-btn').onclick = async () => {
     if (isBusy()) return;
-    const result = revalidate();
+    const result = await revalidate();
     if (!result.ok) return;
     const confirmBtn = document.getElementById('rename-confirm-btn');
     confirmBtn.disabled = true;
     const prevSelectedKeys = getSelectedKeys();
+    validationId++;
     document.getElementById('rename-modal').classList.add('hidden');
     await withBusy(async () => {
       try {
@@ -593,6 +592,7 @@ function openRenameModal() {
   };
   document.getElementById('rename-cancel-btn').onclick = () => {
     if (isBusy()) return; // can't cancel out of a submission that's still in flight
+    validationId++;
     document.getElementById('rename-modal').classList.add('hidden');
   };
 }

@@ -1,4 +1,4 @@
-import { callHost as engineCallHost, HostError } from './engine-client.js';
+import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
@@ -12,6 +12,7 @@ function callHost(...args) {
   return engineCallHost(...args);
 }
 export const LOAD_CANCELLED = 'cancelled';
+let _edit = false, _activePageIndex = 0, _editPages = [];
 let _state = null, _sourceFiles = null, _currentSkel = null;
 let _currentAtlasFilename = '', _currentAtlasDirectory = '', _lastSaveHandle = null;
 let _meshMaskEnabled = true, _meshAwareRepackEnabled = true, _nestRegionsEnabled = false;
@@ -20,7 +21,6 @@ let _loadEpoch = 0, _skelEpoch = 0;
 const _previewCache = new PreviewCache(24), _hulls = new Map();
 const _viewKey = names => viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
 function normalizeGap(value) { const n = Math.floor(Number(value)); return !Number.isFinite(n) || n < 1 ? 4 : Math.min(n, 256); }
-async function _editUnavailable() { window.showToast('Edit Mode is not available yet.', 'info'); return null; }
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -323,10 +323,12 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
       finalMap[name] = file;
       pages[name] = new Uint8Array(await file.arrayBuffer());
     }
-    await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
-    const skelBytes = _currentSkel ? new Uint8Array(await _currentSkel.blob.arrayBuffer()) : null;
-    const loaded = await callHost('load', [atlasFile.name, rawText, pages, _currentSkel?.name || null, skelBytes]);
+    const skel = await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
+    const skelBytes = skel ? new Uint8Array(await skel.blob.arrayBuffer()) : null;
+    const loaded = await callHost('load', [atlasFile.name, rawText, pages, skel?.name || null, skelBytes]);
     _state = loaded;
+    _edit = false;
+    _currentSkel = skel;
     _sourceFiles = { atlas: atlasFile, pages: finalMap, skel: _currentSkel };
     _currentAtlasFilename = atlasFile.name;
     _currentAtlasDirectory = sourceDir;
@@ -345,31 +347,32 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
  *  Desktop: load from the atlas folder (Python `Path.with_suffix(".skel")`).
  *  Browser: only if the user included the .skel in the picked/dropped files. */
 async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
-  _currentSkel = null;
+
   const skelName = siblingSkelFilename(atlasFile?.name);
-  if (!skelName) { return; }
+  if (!skelName) { return null; }
 
   const fromList = pickSiblingSkelFile(atlasFile.name, extraFiles);
   if (fromList) {
-    _currentSkel = { name: skelName, blob: fromList };
-    return;
+    return { name: skelName, blob: fromList };
   }
 
-  if (!sourceDir) { return; }
+  if (!sourceDir) { return null; }
   try {
     let skelPath = joinNativePath(sourceDir, skelName);
     if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
       const atlasPath = joinNativePath(sourceDir, atlasFile.name);
       const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
       if (resolved) skelPath = resolved;
-      else { return; }
+      else { return null; }
     }
     const file = await loadFileAsFile(skelPath, 'application/octet-stream');
-    if (file && file.size > 0) _currentSkel = { name: skelName, blob: file };
+    if (file && file.size > 0) return { name: skelName, blob: file };
   } catch (_) {
     // No sibling on disk — Copy .skel is a no-op; mask state stays unavailable.
   }
+  return null;
 }
+
 
 /** Prefer the skel captured at load; otherwise retry from the atlas folder
  *  at save time (historical Python copied at save, not at open). */
@@ -412,7 +415,7 @@ export const AtlasAPI = {
 
   /** Reads the persisted 'meshCropping' pref into _meshMaskEnabled. Call
    *  once at app startup, NOT per atlas load -- this toggle persists across
-   *  sessions the same way other startup-restored prefs do (advanceMode,
+   *  sessions the same way other startup-restored prefs do (
    *  copySkel). */
   async init_mesh_mask_from_pref() {
     _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
@@ -471,7 +474,7 @@ export const AtlasAPI = {
   async set_mesh_aware_repack_enabled(enabled) {
     _meshAwareRepackEnabled = !!enabled;
     AtlasAPI.set_pref('meshAwareRepack', _meshAwareRepackEnabled);
-    return _editUnavailable();
+    return null;
   },
 
   /** Restore the packer preferences for the settings panel. */
@@ -490,7 +493,7 @@ export const AtlasAPI = {
   async set_nest_regions_enabled(enabled) {
     _nestRegionsEnabled = !!enabled;
     AtlasAPI.set_pref('nestRegionsEnabled', _nestRegionsEnabled);
-    return _editUnavailable();
+    return null;
   },
 
   async set_nest_gap_distance(px) {
@@ -502,19 +505,24 @@ export const AtlasAPI = {
     // everywhere it is read).
     _nestGapDistance = normalizeGap(px);
     AtlasAPI.set_pref('nestGapDistance', _nestGapDistance);
-    return _editUnavailable();
+    return null;
   },
 
   /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
    *  captured sibling. Returns false if `file` is missing or not a .skel. */
   async apply_skel_file(file) {
     if (!file || !isSkelFilename(file.name)) return false;
+    try {
     _state = await callHost('set_skeleton', [file.name, new Uint8Array(await file.arrayBuffer())]);
     _currentSkel = {name: file.name, blob: file};
     if (_sourceFiles) _sourceFiles.skel = _currentSkel;
     _skelEpoch++;
     _previewCache.invalidateAll(); _hulls.clear();
     return true;
+    } catch (e) {
+      if (e instanceof HostError) { window.showToast(e.message, 'error'); return false; }
+      throw e;
+    }
   },
 
   /** Manual .skel picker — covers sibling auto-resolve misses and the
@@ -629,7 +637,7 @@ export const AtlasAPI = {
     return _currentAtlasFilename;
   },
 
-  get_region_names() { return _state?.pristineRegions || []; },
+  get_region_names() { return (_edit ? _state?.regions : _state?.pristineRegions) || []; },
 
   get_region_page_name(key) { return _state?.regionPages[key] || ''; },
 
@@ -728,21 +736,107 @@ export const AtlasAPI = {
 
 
   preview_url_is_cached(url) { return _previewCache.owns(url); },
-  has_pending_modifications() { return false; },
-  get_modified_region_names() { return []; },
-  exit_modify_mode() {},
+  has_pending_modifications() { return !!(_edit && _state?.hasPending); },
+  get_modified_region_names() { return _edit ? _state?.modifiedKeys || [] : []; },
+  exit_modify_mode() {
+    _edit = false;
+    if (_state) _state = {..._state, regions: _state.pristineRegions};
+    callHost('exit_edit', []).catch(e => {
+      if (!(e instanceof HostError && e.message === 'not in edit mode')) console.error(String(e.message).split('\n')[0]);
+    });
+  },
   async save_image() {
     if (!_state) return null;
     const png = await callHost('save_image', [getSelectedKeys(), _meshMaskEnabled && _state.mesh.available, _forcedResizing, await AtlasAPI.get_pref('imageAlpha', 'straight')]);
     return png ? new Blob([png], {type: 'image/png'}) : null;
   },
-  enter_modify_mode: _editUnavailable,
-  get_modify_page_preview: _editUnavailable,
-  process_mod_image: _editUnavailable,
-  select_mod_image: _editUnavailable,
-  save_modified: _editUnavailable,
-  add_region: _editUnavailable,
-  rename_region: _editUnavailable,
-  remove_regions: _editUnavailable,
+  async enter_modify_mode() {
+    if (!_state) return null;
+    const result = await editCall('enter_edit', []);
+    _edit = true; _activePageIndex = 0;
+    return result;
+  },
+  async reset_modifications() {
+    const result = await editCall('reset_edits', []);
+    _activePageIndex = 0;
+    return result;
+  },
+  validate_region_name(name, excludeKey = null) { return callHost('validate_name', [name, excludeKey]); },
+  async get_modify_page_preview(index) {
+    if (typeof index === 'string') index = _editPages.indexOf(index);
+    const result = await callHost('page_preview', [index]);
+    _activePageIndex = result.activeIndex;
+    return {...result, image: await rasterToUrl(result.image)};
+  },
+  async process_mod_image(source, keys) {
+    if (!keys?.length) return null;
+    try {
+      return await editCall('modify', [keys, await imageBytes(source), await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+    } catch (e) { await window.showAlert(e.message, 'Cannot modify atlas'); return null; }
+  },
+  async select_mod_image(keys) {
+    let file;
+    if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
+      const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
+      if (!path) return null;
+      file = pathToFileUrl(path);
+    } else { [file] = await _pickFiles({accept: IMAGE_PICKER_ACCEPT}); }
+    return file ? AtlasAPI.process_mod_image(file, keys) : null;
+  },
+  async save_page_image() {
+    const png = await callHost('page_png', [_activePageIndex, await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+    return new Blob([png], {type: 'image/png'});
+  },
+  async save_modified() {
+    try {
+      const output = await callHost('save_output', []);
+      _state = {..._state, hasPending: false};
+      const outputs = output.pages.map(p => ({name: p.name, data: new Blob([p.png], {type: 'image/png'})}));
+      outputs.push({name: _currentAtlasFilename, data: output.text});
+      const skel = await _skelForSave();
+      if (skel) outputs.push({name: skel.name, data: skel.blob});
+      if (_useFolderPicker()) {
+        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
+        if (!folder) return 'Cancelled';
+        await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
+        return 'Saved to selected folder.';
+      }
+      await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, await createZip(outputs));
+      return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
+    } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
+  },
+  async add_region(file, name) { return editCall('add', [name, await imageBytes(file), null, await AtlasAPI.get_pref('imageAlpha', 'straight')]); },
+  rename_region(key, name) { return editCall('rename', [key, name]); },
+  remove_regions(keys) { return editCall('remove', [keys]); },
 };
 export { _loadAtlasFiles };
+
+async function imageBytes(source) {
+  if (typeof source === 'string') source = await loadFileAsFile(source, 'image/png');
+  return new Uint8Array(await source.arrayBuffer());
+}
+async function editCall(method, args) {
+  const result = await callHost(method, args);
+  _state = result.state;
+  _editPages = result.pages;
+  if (_activePageIndex >= _editPages.length) _activePageIndex = 0;
+  return {...result, image: await rasterToUrl(result.image)};
+}
+onEngineDied(async (message) => {
+  console.error(String(message).split('\n')[0]);
+  window.showAlert('The AtlasToolkit engine stopped and your edits were lost. The atlas will be reloaded.', 'Engine stopped');
+  const sources = _sourceFiles;
+  stopEngine(); engineStartupError = null;
+  try {
+    await startEngine();
+    if (!sources) return;
+    if (!await _loadAtlasFiles(sources.atlas, sources.pages, _currentAtlasDirectory, sources.skel ? [sources.skel.blob] : [])) return;
+    const {state} = await import('./state.js');
+    const {setMode, updateMeshCroppingUI} = await import('./modify-mode.js');
+    const {loadRegions, updateButtons} = await import('./region-list.js');
+    const {resetPreview, clearOverlay, updatePreview} = await import('./preview.js');
+    state.selectedIndices.clear(); state.hasModImage = false; state.modifyRegionBounds = {};
+    setMode('extract'); resetPreview(); clearOverlay();
+    await loadRegions(); updateButtons(); updateMeshCroppingUI(); await updatePreview([]);
+  } catch (e) { console.error(String(e.message).split('\n')[0]); }
+});

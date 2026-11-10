@@ -1,5 +1,5 @@
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
-import { validateRegionName } from './region-name-validation.js';
+import { AtlasAPI } from './atlas-api.js';
 import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
 
 export function showConfirm(message, title = 'Confirm') {
@@ -247,9 +247,16 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   preview.classList.add('hidden');
   hint.classList.remove('hidden');
 
-  const revalidate = () => {
-    if (!selectedFile) { confirmBtn.disabled = true; return { ok: false }; }
-    const result = validateRegionName(nameInput.value, getEffectiveNames());
+  let validationId = 0;
+  const revalidate = async () => {
+    const id = ++validationId, value = nameInput.value;
+    confirmBtn.disabled = true;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (id !== validationId || !selectedFile) return {ok: false};
+    let result;
+    try { result = await AtlasAPI.validate_region_name(value, null); }
+    catch (e) { result = {ok: false, reason: e.message}; }
+    if (id !== validationId || value !== nameInput.value || !selectedFile) return {ok: false};
     if (result.ok) {
       errorEl.classList.add('hidden');
       confirmBtn.disabled = submitting;
@@ -307,6 +314,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   confirmBtn.disabled = true;
 
   const close = () => {
+    validationId++;
     document.body.dataset.addRegionDialogOpen = 'false';
     _addRegionDialogState = null;
     modal.classList.add('hidden');
@@ -320,7 +328,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   };
   confirmBtn.onclick = async () => {
     if (submitting) return;
-    const result = revalidate();
+    const result = await revalidate();
     if (!result.ok || !selectedFile) return;
     submitting = true;
     confirmBtn.disabled = true;
