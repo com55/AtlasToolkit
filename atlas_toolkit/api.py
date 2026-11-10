@@ -834,8 +834,8 @@ class SpineAtlas:
     ) -> tuple[str, dict[str, Image.Image]]:
         """Pack edits without creating a child atlas.
 
-        Returned images must not be mutated: untouched pages may be pristine
-        images and edited pages may be shared with the build cache.
+        Returned images must not be mutated: untouched pages are the pristine
+        images; edited pages are shared with the build cache.
         """
         resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
         if needs_mesh:
@@ -850,19 +850,7 @@ class SpineAtlas:
             text, pages = self._pack(*options, share_untouched=True)
             self._build_cache = (options, text, pages, self._child_allowed())
         _, text, pages, _ = self._build_cache
-        # A build-populated cache owns copies; pack still borrows pristine pages.
-        session = self._session
-        shortcut = (not (resolved.patch_adds or resolved.in_place)
-                    or not session._declared_size_matches(session._document.pages[0]))
-        touched = session._touched_pages(
-            session._mod_batches, session._region_pages(session._mod_batches),
-            single_page_shortcut=shortcut,
-        )
-        return text, {
-            name: (self._session._raster.view(self._session._page_images[name])
-                   if name not in touched else image)
-            for name, image in pages.items()
-        }
+        return text, pages
 
     def build(
         self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
@@ -907,7 +895,7 @@ class SpineAtlas:
         # split_composite values share one cache entry.
         options = (resolved, bool(split_composite) or resolved.in_place)
         if self._build_cache is None or self._build_cache[0] != options:
-            text, pages = self._pack(*options)
+            text, pages = self._pack(*options, share_untouched=True)
             self._build_cache = (options, text, pages, self._child_allowed())
         _, text, pages, allowed = self._build_cache
         return SpineAtlas._create(text, pages, self._skeleton, allowed, (self._mesh_reason, self._mesh_lookup))

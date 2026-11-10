@@ -76,7 +76,6 @@ class RepackResult:
 class _EditCheckpoint:
     batches: list[dict]
     sprites: dict[str, ImageHandle]
-    generation: int
     saved: bool
 
 
@@ -613,7 +612,7 @@ class AtlasSession:
         self._require_open()
         token = _EditCheckpoint(
             list(self._mod_batches), dict(self._modded_sprites),
-            self._generation, self._modifications_saved,
+            self._modifications_saved,
         )
         self._edit_pins[token] = self._keep_set(self._mod_batches, self._modded_sprites)
         return token
@@ -624,7 +623,7 @@ class AtlasSession:
             return
         self._mod_batches = list(token.batches)
         self._modded_sprites = dict(token.sprites)
-        self._generation = token.generation
+        # A generation observed inside the block must never be reused.
         self._modifications_saved = token.saved
         self.edit_release(token)
 

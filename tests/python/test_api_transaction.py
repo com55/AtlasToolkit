@@ -223,3 +223,50 @@ def test_pack_validates_settings_like_build(edited):
         with pytest.raises(type(expected.value)) as actual:
             atlas.pack(packer=packer)
         assert str(actual.value) == str(expected.value)
+
+
+@pytest.mark.parametrize('packer', [p for p in Packer if p != Packer.GRID])
+def test_build_shares_cache_without_changing_output(packer, monkeypatch):
+    from atlas_toolkit.packer import resolve_packer
+
+    mesh = {'type': 'Mesh', 'uvs': [0, 0, 1, 0, 1, 1, 0, 1],
+            'triangles': [0, 1, 2, 0, 2, 3], 'hull_length': 4}
+    monkeypatch.setattr(api, '_parse_skeleton', lambda data: {'attachments': {'a': mesh, 'b': mesh}})
+    text = TEXT + '\np2.png\nsize: 4,4\nc\n bounds: 0,0,4,4\n'
+    atlas = SpineAtlas.load(text, {'p1.png': two_region_atlas().pages['p1.png'],
+                                 'p2.png': pattern(3)}, skeleton=b'x')
+    pristine = atlas.pack()[1]['p2.png']
+    atlas.replace({'a': PATTERN})
+    resolved, _ = resolve_packer(packer, None, mesh_ready=True)
+    expected = packed_bytes(atlas._pack(resolved, resolved.in_place))
+    built = atlas.build(packer=packer)
+    assert packed_bytes((built.atlas_text, built.pages)) == expected
+    assert built._session._raster.view(built._session._page_images['p2.png']) is not pristine
+    assert atlas._build_cache[2]['p2.png'] is pristine
+    assert atlas.pack(packer=packer)[1] is atlas._build_cache[2]
+
+
+def test_rollback_after_a_successful_pack_inside_the_block():
+    atlas = two_region_atlas()
+    atlas.replace({'a': PATTERN})
+    first = packed_bytes(atlas.pack())
+    with pytest.raises(RuntimeError, match='late'):
+        with atlas.transaction():
+            atlas.replace({'b': pattern(2)})
+            assert packed_bytes(atlas.pack()) != first
+            raise RuntimeError('late failure after pack')
+    assert packed_bytes(atlas.pack()) == first
+
+
+def test_generation_after_rollback_of_a_recorded_edit():
+    atlas = two_region_atlas()
+    atlas.replace({'a': PATTERN})
+    gen = atlas._session.snapshot().generation
+    with pytest.raises(RuntimeError):
+        with atlas.transaction():
+            atlas.replace({'b': pattern(2)})
+            assert atlas._session.snapshot().generation == gen + 1
+            raise RuntimeError('x')
+    assert atlas._session.snapshot().generation == gen + 1
+    atlas.replace({'b': pattern(3)})
+    assert atlas._session.snapshot().generation == gen + 2
