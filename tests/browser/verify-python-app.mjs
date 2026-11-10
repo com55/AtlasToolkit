@@ -70,6 +70,20 @@ const server = http.createServer((req, res) => {
 
 let browser;
 const external = [];
+async function checkWithin(label, check) {
+  let timer;
+  try {
+    return await Promise.race([
+      check(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after 30 s`)), 30000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 try {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -100,14 +114,14 @@ try {
   });
   console.log('PASS startEngine resolves');
 
-  await page.evaluate(async () => {
+  await checkWithin('required_pages', () => page.evaluate(async () => {
     window.atlasText = 'p.png\nsize: 9,7\npma: false\na\n bounds: 1,2,3,2\n';
     const pages = await window.engine.callHost('required_pages', [window.atlasText]);
     if (JSON.stringify(pages) !== '["p.png"]') throw new Error('Unexpected required_pages result');
-  });
+  }));
   console.log('PASS required_pages returns the page list');
 
-  await page.evaluate(async () => {
+  await checkWithin('load and preview raster', () => page.evaluate(async () => {
     const canvas = new OffscreenCanvas(9, 7);
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'rgb(10,20,30)';
@@ -124,10 +138,10 @@ try {
     // Page (3,3) is preview (2,1), with a 3-pixel row stride.
     const pixel = [...preview.rgba.slice(20, 24)];
     if (JSON.stringify(pixel) !== '[61,123,207,255]') throw new Error('Known pixel mismatch: ' + pixel);
-  });
+  }));
   console.log('PASS preview decodes RGBA bytes with the known pixel at its expected offset');
 
-  await page.evaluate(async () => {
+  await checkWithin('HostError', () => page.evaluate(async () => {
     try {
       await window.engine.callHost('preview', [['missing'], false, false, false, 'straight']);
     } catch (error) {
@@ -135,9 +149,9 @@ try {
       throw error;
     }
     throw new Error('Unknown region preview should reject');
-  });
+  }));
   console.log('PASS Python RegionNotFound becomes a HostError');
-  await page.evaluate(() => window.engine.stopEngine());
+  await checkWithin('stopEngine', () => page.evaluate(() => window.engine.stopEngine()));
   if (external.length) throw new Error(`Non-local requests recorded: ${external.length}`);
   console.log('PASS no request leaves the local server');
 } catch (error) {

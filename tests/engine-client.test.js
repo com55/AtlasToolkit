@@ -4,8 +4,10 @@ import { startEngine, callHost, stopEngine, onEngineDied, HostError } from '../w
 
 class FakeWorker {
   posts = [];
+  transfers = [];
   terminated = false;
   postMessage(message, transfer) {
+    this.transfers.push(transfer);
     this.posts.push(structuredClone(message, { transfer }));
   }
   terminate() { this.terminated = true; }
@@ -57,6 +59,80 @@ test('coalesces queued previews while preserving running and unkeyed calls', asy
   worker.result(3);
   await last;
   assert.deepEqual(worker.posts.map((p) => p.method), ['first', 'plain', 'last']);
+});
+
+test('an unkeyed call queued before a superseded preview is never dropped', async () => {
+  const { worker } = boot();
+  const first = callHost('first', [], { coalesce: 'preview' });
+  const edit = callHost('edit', []);
+  const middle = callHost('middle', [], { coalesce: 'preview' });
+  const superseded = assert.rejects(middle, errorType('Superseded'));
+  const last = callHost('last', [], { coalesce: 'preview' });
+  await superseded;
+  worker.result(1);
+  await first;
+  assert.equal(worker.posts[1].method, 'edit');
+  worker.result(2);
+  await edit;
+  assert.equal(worker.posts[2].method, 'last');
+  worker.result(3);
+  await last;
+  assert.deepEqual(worker.posts.map((p) => p.method), ['first', 'edit', 'last']);
+});
+
+test('coalescing replaces only the queued call with the same key', async () => {
+  const { worker } = boot();
+  const first = callHost('first', []);
+  const a = callHost('a', [], { coalesce: 'preview' });
+  const superseded = assert.rejects(a, errorType('Superseded'));
+  const b = callHost('b', [], { coalesce: 'modify-preview' });
+  const last = callHost('last', [], { coalesce: 'preview' });
+  await superseded;
+  worker.result(1);
+  await first;
+  assert.equal(worker.posts[1].method, 'b');
+  worker.result(2);
+  assert.equal(await b, 2);
+  assert.equal(worker.posts[2].method, 'last');
+  worker.result(3);
+  await last;
+  assert.deepEqual(worker.posts.map((p) => p.method), ['first', 'b', 'last']);
+});
+
+test('the same Uint8Array is transferred once and both markers index the buffer list', async () => {
+  const { worker } = boot();
+  const bytes = new Uint8Array([1, 2, 3]);
+  const pending = callHost('two', [{ p: bytes, q: bytes }]);
+  const message = worker.posts[0];
+  assert.equal(worker.transfers[0].length, 1);
+  assert.equal(bytes.byteLength, 0);
+  const args = JSON.parse(message.argsJson);
+  assert.deepEqual(args, [{ p: { $buf: 0 }, q: { $buf: 1 } }]);
+  assert.equal(message.buffers.length, 2);
+  assert.deepEqual([...new Uint8Array(message.buffers[args[0].p.$buf])], [1, 2, 3]);
+  assert.deepEqual([...new Uint8Array(message.buffers[args[0].q.$buf])], [1, 2, 3]);
+  worker.result(null);
+  await pending;
+});
+
+test('a result with a stale id leaves the running call pending', async () => {
+  const { worker } = boot();
+  let settled = false;
+  const call = callHost('running', []).finally(() => { settled = true; });
+  const next = callHost('next', []);
+  worker.emit({ id: -1, json: '{"ok":true,"value":"stale"}', buffers: [] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(worker.posts.length, 1);
+  worker.result('real');
+  assert.equal(await call, 'real');
+  assert.equal(worker.posts[1].method, 'next');
+  worker.result('next');
+  assert.equal(await next, 'next');
+});
+
+test('callHost before startEngine rejects with EngineStopped', async () => {
+  await assert.rejects(callHost('before-start', []), errorType('EngineStopped'));
 });
 
 test('encodes nested bytes, transfers exact views, and decodes result markers', async () => {
@@ -123,6 +199,8 @@ for (const mode of ['init-failed', 'onerror']) {
 test('status is forwarded and stop rejects startup and all pending calls', async () => {
   const worker = new FakeWorker();
   const statuses = [];
+  let deaths = 0;
+  onEngineDied(() => deaths++);
   const start = startEngine((message) => statuses.push(message), { createWorker: () => worker });
   const stopped = assert.rejects(start, errorType('EngineStopped'));
   const queued = assert.rejects(callHost('queued', []), errorType('EngineStopped'));
@@ -135,6 +213,7 @@ test('status is forwarded and stop rejects startup and all pending calls', async
   const running = assert.rejects(callHost('running', []), errorType('EngineStopped'));
   stopEngine();
   await running;
+  assert.equal(deaths, 0);
 });
 
 test('a Worker factory failure rejects startup and permits a fresh start', async () => {
