@@ -3,7 +3,12 @@ from io import BytesIO
 
 from PIL import Image
 
-from atlas_toolkit.api import AtlasError, SpineAtlas, _file_name, _page_filenames
+from atlas_toolkit.api import (
+    AtlasError, InvalidRegionName, PackerOptions, RegionNotFound, SpineAtlas,
+    _file_name, _from_page, _page_filenames,
+)
+from atlas_toolkit.alpha_mode import parse_alpha_mode
+from atlas_toolkit.document import png_names_for_save
 
 
 def _png(image: Image.Image) -> bytes:
@@ -22,6 +27,13 @@ class AppHost:
         self._pristine_regions = []
         self._page_names = []
         self._all_pma = False
+        self._packed = None
+        self._saved = False
+        self._pack_settings = {
+            "packer": "shelf",
+            "packer_options": PackerOptions(padding=2, mesh_aware=None, repack=None),
+            "split_composite": False,
+        }
 
     @staticmethod
     def required_pages(atlas_text: str) -> list[str]:
@@ -50,7 +62,7 @@ class AppHost:
             "pristineRegions": [dict(region) for region in self._pristine_regions],
             "regionPages": {view.key: view.page for view in views},
             "modifiedKeys": [view.key for view in views if view.modified],
-            "hasPending": atlas.has_changes,
+            "hasPending": atlas.has_changes and not self._saved,
             "allPma": self._all_pma,
             "mesh": {
                 "available": reason is None,
@@ -68,6 +80,8 @@ class AppHost:
         page_names = self.required_pages(atlas_text)
         all_pma = all(atlas.page_is_pma(page) for page in page_names)
         self._atlas = atlas
+        self._packed = None
+        self._saved = False
         self._page_names = page_names
         self._all_pma = all_pma
         self._atlas_name = atlas_name
@@ -88,7 +102,7 @@ class AppHost:
         if not names:
             raise ValueError("preview needs at least one region name")
         image = atlas.extract_composite(
-            names, force_resize=force_resize,
+            self._labels(names), force_resize=force_resize,
             mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
@@ -96,15 +110,14 @@ class AppHost:
             return None
         return {
             "width": image.width, "height": image.height, "rgba": image.tobytes(),
-            "hulls": atlas.mesh_hull_layout(names, force_resize) if want_hulls else None,
+            "hulls": atlas.mesh_hull_layout(self._labels(names), force_resize) if want_hulls else None,
         }
 
     def extract(self, keys: list[str] | None, mesh_crop: bool, alpha: str) -> list[dict]:
         atlas = self._require_atlas()
         views = atlas.region_views()
-        labels = {view.key: view.label for view in views}
         wanted = [view.key for view in views] if keys is None else keys
-        names = [labels[key] for key in wanted]
+        names = self._labels(wanted)
         images = atlas.extract(
             names, mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
@@ -118,10 +131,131 @@ class AppHost:
     def save_image(self, names, mesh_crop, force_resize, alpha) -> bytes | None:
         atlas = self._require_atlas()
         image = atlas.extract_composite(
-            names, force_resize=force_resize,
+            self._labels(names), force_resize=force_resize,
             mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
         if image.width == 0 or image.height == 0:
             return None
         return _png(image)
+
+
+    def _labels(self, keys: list[str]) -> list[str]:
+        labels = {view.key: view.label for view in self._require_atlas().region_views()}
+        for key in keys:
+            if key not in labels:
+                raise RegionNotFound(key)
+        return [labels[key] for key in keys]
+
+    def _require_edit(self) -> SpineAtlas:
+        if self._packed is None:
+            raise AtlasError("not in edit mode")
+        return self._require_atlas()
+
+    @staticmethod
+    def _raster(image: Image.Image) -> dict:
+        return {"width": image.width, "height": image.height, "rgba": image.tobytes()}
+
+    def _edit_result(self) -> dict:
+        atlas = self._require_edit()
+        text, pages = self._packed
+        views = atlas.region_views(text, {name: image.size for name, image in pages.items()})
+        names = self.required_pages(text)
+        return {
+            "image": self._raster(pages[names[0]]),
+            "regions": {v.key: [v.x, v.y, v.w, v.h, v.rotate] for v in views},
+            "pages": names,
+            "regionPages": {v.key: v.page for v in views},
+            "activePage": names[0],
+            "state": self._state(),
+        }
+
+    def _edit(self, operation) -> dict:
+        atlas = self._require_edit()
+        with atlas.transaction():
+            operation(atlas)
+            packed = atlas.pack(**self._pack_settings)
+        self._packed = packed
+        self._saved = False
+        return self._edit_result()
+
+    def enter_edit(self) -> dict:
+        atlas = self._require_atlas()
+        with atlas.transaction():
+            atlas.reset()
+            packed = atlas.pack(**self._pack_settings)
+        self._packed = packed
+        self._saved = False
+        return self._edit_result()
+
+    def exit_edit(self) -> dict:
+        self._require_edit().reset()
+        self._packed = None
+        self._saved = False
+        return self._state()
+
+    def _page(self, index: int) -> tuple[str, Image.Image]:
+        self._require_edit()
+        text, pages = self._packed
+        names = self.required_pages(text)
+        if index < 0 or index >= len(names):
+            raise IndexError(index)
+        name = names[index]
+        return name, pages[name]
+
+    def page_preview(self, index: int) -> dict:
+        name, image = self._page(index)
+        return {"image": self._raster(image), "activePage": name, "activeIndex": index}
+
+    def page_png(self, index: int, alpha: str) -> bytes:
+        _, image = self._page(index)
+        mode = parse_alpha_mode(self._alpha_mode(alpha))
+        return _png(_from_page(image, mode, self._all_pma))
+
+    def modify(self, keys: list[str], image: bytes, alpha: str) -> dict:
+        def operation(atlas):
+            labels = self._labels(keys)
+            picture = Image.open(BytesIO(image)).convert("RGBA")
+            mode = self._alpha_mode(alpha)
+            if len(labels) == 1:
+                atlas.replace({labels[0]: picture}, alpha_mode=mode)
+            else:
+                atlas.replace_composite(labels, picture, alpha_mode=mode)
+        return self._edit(operation)
+
+    def add(self, name: str, image: bytes, page: str | None, alpha: str) -> dict:
+        def operation(atlas):
+            picture = Image.open(BytesIO(image)).convert("RGBA")
+            atlas.add_region(name, picture, page=page, alpha_mode=self._alpha_mode(alpha))
+        return self._edit(operation)
+
+    def rename(self, key: str, new_name: str) -> dict:
+        return self._edit(lambda atlas: atlas.rename_region(self._labels([key])[0], new_name))
+
+    def remove(self, keys: list[str]) -> dict:
+        return self._edit(lambda atlas: atlas.remove_region(self._labels(keys)))
+
+    def reset_edits(self) -> dict:
+        return self._edit(lambda atlas: atlas.reset())
+
+    def validate_name(self, name: str, exclude_key: str | None) -> dict:
+        atlas = self._require_edit()
+        exclude = self._labels([exclude_key])[0] if exclude_key is not None else None
+        try:
+            value = atlas.validate_region_name(name, exclude=exclude)
+        except InvalidRegionName as error:
+            return {"ok": False, "reason": error.reason}
+        return {"ok": True, "value": value}
+
+    def save_output(self) -> dict:
+        self._require_edit()
+        text, pages = self._packed
+        names = png_names_for_save(text, len(pages), self._atlas_name)
+        page_order = self.required_pages(text)
+        result = {
+            "text": text,
+            "pages": [{"name": name, "png": _png(pages[page])}
+                      for name, page in zip(names, page_order)],
+        }
+        self._saved = True
+        return result

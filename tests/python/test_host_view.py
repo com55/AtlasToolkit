@@ -253,3 +253,16 @@ def test_pages_come_from_the_atlas_text():
         "extra.png": pages["p.png"], "q.png": pages["q.png"], "p.png": pages["p.png"],
     }, None, None)
     assert state["pages"] == ["p.png", "q.png"]
+
+
+@pytest.mark.parametrize('method,args', [
+    ('preview', [False, False, False, 'straight']),
+    ('save_image', [False, False, 'straight']),
+])
+def test_view_keys_after_rename(method, args):
+    host, _ = loaded()
+    before = getattr(host, method)(['a'], *args)
+    host._atlas.rename_region('a', 'renamed')
+    assert getattr(host, method)(['a'], *args) == before
+    with pytest.raises(api.RegionNotFound):
+        getattr(host, method)(['missing'], *args)
