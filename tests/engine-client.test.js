@@ -201,11 +201,11 @@ test('status is forwarded and stop rejects startup and all pending calls', async
   const statuses = [];
   let deaths = 0;
   onEngineDied(() => deaths++);
-  const start = startEngine((message) => statuses.push(message), { createWorker: () => worker });
+  const start = startEngine((message, progress) => statuses.push([message, progress]), { createWorker: () => worker });
   const stopped = assert.rejects(start, errorType('EngineStopped'));
   const queued = assert.rejects(callHost('queued', []), errorType('EngineStopped'));
-  worker.emit({ type: 'status', message: 'Loading' });
-  assert.deepEqual(statuses, ['Loading']);
+  worker.emit({ type: 'status', message: 'Loading', progress: 0.5 });
+  assert.deepEqual(statuses, [['Loading', 0.5]]);
   stopEngine();
   await Promise.all([stopped, queued]);
   const fresh = boot();

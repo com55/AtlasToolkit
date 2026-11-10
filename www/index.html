@@ -199,7 +199,16 @@
     </div>
 
     <div id="engine-loading" aria-live="polite" aria-busy="true">
-      <div class="engine-loading-box"><p id="engine-loading-status">Starting Python engine...</p></div>
+      <div class="engine-loading-box">
+        <div class="engine-loading-ring">
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <circle class="engine-loading-track" cx="32" cy="32" r="28" stroke-width="5" />
+            <circle id="engine-loading-progress" cx="32" cy="32" r="28" stroke-width="5" />
+          </svg>
+          <span id="engine-loading-percent">0%</span>
+        </div>
+        <p id="engine-loading-status">Starting AtlasToolkit</p>
+      </div>
     </div>
 
     <!-- Busy overlay (above leftover dialogs; confirm stays at 4500 for silent lock) -->

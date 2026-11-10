@@ -67,7 +67,11 @@ function _waitForPywebviewReady() {
 window.addEventListener('DOMContentLoaded', async () => {
   const loading = document.getElementById('engine-loading');
   try {
-    await startEngine(status => { document.getElementById('engine-loading-status').textContent = status; });
+    const circumference = 2 * Math.PI * 28;
+    await startEngine((_message, progress) => {
+      document.getElementById('engine-loading-progress').style.strokeDashoffset = circumference * (1 - progress);
+      document.getElementById('engine-loading-percent').textContent = Math.round(progress * 100) + '%';
+    });
     loading.classList.add('hidden');
   } catch (error) {
     loading.classList.add('hidden');

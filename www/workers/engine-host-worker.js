@@ -10,17 +10,17 @@ async function fetchLocal(url) {
 
 async function start() {
   try {
-    self.postMessage({ type: 'status', message: 'Loading Python runtime' });
+    self.postMessage({ type: 'status', message: 'Loading Python runtime', progress: 0 });
     const pyodide = await loadPyodide({ indexURL: new URL('../pyodide/', import.meta.url).href });
-    self.postMessage({ type: 'status', message: 'Loading numpy and pillow' });
+    self.postMessage({ type: 'status', message: 'Loading numpy and pillow', progress: 0.5 });
     await pyodide.loadPackage(['numpy', 'pillow']);
-    self.postMessage({ type: 'status', message: 'Loading engine wheels' });
+    self.postMessage({ type: 'status', message: 'Loading engine wheels', progress: 0.65 });
     const manifest = await (await fetchLocal('../wheels/manifest.json')).json();
     for (const name of ['skel_mesh_parser', 'atlas_toolkit']) {
       const buffer = await (await fetchLocal(`../wheels/${manifest[name]}`)).arrayBuffer();
       pyodide.unpackArchive(buffer, 'wheel');
     }
-    self.postMessage({ type: 'status', message: 'Starting application host' });
+    self.postMessage({ type: 'status', message: 'Starting application host', progress: 0.9 });
     pyodide.runPython(`
 from atlas_toolkit.host import AppHost, wire
 _host = AppHost()
@@ -28,6 +28,7 @@ def _call_host(method, args_json, buffers):
     return wire.call(_host, method, args_json, [b.to_bytes() for b in buffers])
 `);
     callHost = pyodide.globals.get('_call_host');
+    self.postMessage({ type: 'status', message: 'Starting application host', progress: 1 });
     self.postMessage({ type: 'ready' });
   } catch (error) {
     self.postMessage({ type: 'init-failed', error: String(error) });

@@ -76,7 +76,7 @@ export function startEngine(onStatus, options = {}) {
     state.worker.onmessage = ({ data }) => {
       if (engine !== state) return;
       if (data.type === 'status') {
-        onStatus?.(data.message);
+        onStatus?.(data.message, data.progress);
       } else if (data.type === 'ready') {
         state.ready = true;
         state.resolveStart();

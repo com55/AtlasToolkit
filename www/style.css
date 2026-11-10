@@ -1065,6 +1065,38 @@ img#preview-img {
   text-align: center;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
+.engine-loading-ring {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+.engine-loading-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+}
+.engine-loading-track {
+  stroke: rgba(255, 255, 255, 0.18);
+}
+#engine-loading-progress {
+  stroke: #26a69a;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 32px 32px;
+  stroke-dasharray: 175.92918860102841;
+  stroke-dashoffset: 175.92918860102841;
+  transition: stroke-dashoffset 0.3s;
+}
+#engine-loading-percent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e5e5e5;
+  font-size: 15px;
+}
 #busy-spinner {
   width: 36px;
   height: 36px;

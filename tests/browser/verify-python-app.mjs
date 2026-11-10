@@ -167,6 +167,8 @@ try {
   });
   await app.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
   if (!await app.locator('#engine-loading').isVisible()) throw new Error('Engine loading overlay missing before ready');
+  const loadingText = await app.locator('#engine-loading').textContent();
+  if (!loadingText.includes('Starting AtlasToolkit') || !loadingText.includes('0%')) throw new Error('Engine loading overlay missing startup text or initial percentage');
   releaseWorker();
   await app.locator('#engine-loading').waitFor({state: 'hidden', timeout: 120000});
   // Startup restores prefs after the engine promise; wait for that too.
