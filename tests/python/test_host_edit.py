@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from PIL import UnidentifiedImageError
 
 from atlas_toolkit.api import AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas
 from atlas_toolkit.document import png_names_for_save
@@ -61,7 +62,7 @@ def test_failure_keeps_state_and_preview(failure, monkeypatch):
         with pytest.raises(MemoryError):
             host.rename('a', 'lost')
     elif failure == 'modify':
-        with pytest.raises(Exception):
+        with pytest.raises(UnidentifiedImageError):
             host.modify(['a'], b'invalid PNG', 'straight')
     else:
         with pytest.raises(InvalidRegionName):
@@ -126,15 +127,16 @@ def test_add_modify_composite_order_and_overlay(monkeypatch):
     added = host.add('fresh', page_bytes(2, 3), 'q.png', 'straight')
     key = next(r['key'] for r in added['state']['regions'] if r['label'] == 'fresh')
     assert added['regionPages'][key] == 'q.png'
-    modified = host.modify(['a'], page_bytes(3, 2), 'straight')
-    assert key in modified['regions']
-    assert modified['regionPages'][key] == 'q.png'
     calls = []
     original = SpineAtlas.replace_composite
     def record(self, names, image, *, alpha_mode=None):
         calls.append(names)
         return original(self, names, image, alpha_mode=alpha_mode)
     monkeypatch.setattr(SpineAtlas, 'replace_composite', record)
+    modified = host.modify(['a'], page_bytes(3, 2), 'straight')
+    assert key in modified['regions']
+    assert modified['regionPages'][key] == 'q.png'
+    assert calls == []
     result = host.modify(['b', 'a'], page_bytes(4, 6), 'straight')
     assert calls == [['b', 'a']]
     assert key in result['regions']
@@ -174,3 +176,32 @@ def test_unknown_edit_key(method, args):
     host.enter_edit()
     with pytest.raises(RegionNotFound):
         getattr(host, method)(*args)
+
+
+def test_single_modify_with_split_composite_replaces_full_image():
+    host, _ = loaded(lambda: (
+        one_page()[0].replace(' bounds: 1,2,3,2', ' bounds: 1,2,3,2\n offsets: 1,1,5,4'),
+        one_page()[1],
+    ))
+    host._pack_settings['split_composite'] = True
+    host.enter_edit()
+    result = host.modify(['a'], page_bytes(5, 4), 'straight')
+    assert result['regions']['a'][:4] == [0, 0, 5, 4]
+
+
+@pytest.mark.parametrize('method', ['modify', 'remove'])
+def test_empty_selection_leaves_saved_state_unchanged(method):
+    host, _ = loaded()
+    host.enter_edit()
+    host.rename('a', 'renamed')
+    host.save_output()
+    before = host._state()
+    packed = host._packed
+    preview = host.page_preview(0)
+    args = [[], page_bytes(), 'straight'] if method == 'modify' else [[]]
+    with pytest.raises(ValueError):
+        getattr(host, method)(*args)
+    assert host._state() == before
+    assert host._state()['hasPending'] is False
+    assert host._packed is packed
+    assert host.page_preview(0) == preview

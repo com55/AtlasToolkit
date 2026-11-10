@@ -101,8 +101,9 @@ class AppHost:
         atlas = self._require_atlas()
         if not names:
             raise ValueError("preview needs at least one region name")
+        labels = self._labels(names)
         image = atlas.extract_composite(
-            self._labels(names), force_resize=force_resize,
+            labels, force_resize=force_resize,
             mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
@@ -110,7 +111,7 @@ class AppHost:
             return None
         return {
             "width": image.width, "height": image.height, "rgba": image.tobytes(),
-            "hulls": atlas.mesh_hull_layout(self._labels(names), force_resize) if want_hulls else None,
+            "hulls": atlas.mesh_hull_layout(labels, force_resize) if want_hulls else None,
         }
 
     def extract(self, keys: list[str] | None, mesh_crop: bool, alpha: str) -> list[dict]:
@@ -138,7 +139,6 @@ class AppHost:
         if image.width == 0 or image.height == 0:
             return None
         return _png(image)
-
 
     def _labels(self, keys: list[str]) -> list[str]:
         labels = {view.key: view.label for view in self._require_atlas().region_views()}
@@ -213,6 +213,9 @@ class AppHost:
         return _png(_from_page(image, mode, self._all_pma))
 
     def modify(self, keys: list[str], image: bytes, alpha: str) -> dict:
+        self._require_edit()
+        if not keys:
+            raise ValueError("modify needs at least one region key")
         def operation(atlas):
             labels = self._labels(keys)
             picture = Image.open(BytesIO(image)).convert("RGBA")
@@ -233,6 +236,9 @@ class AppHost:
         return self._edit(lambda atlas: atlas.rename_region(self._labels([key])[0], new_name))
 
     def remove(self, keys: list[str]) -> dict:
+        self._require_edit()
+        if not keys:
+            raise ValueError("remove needs at least one region key")
         return self._edit(lambda atlas: atlas.remove_region(self._labels(keys)))
 
     def reset_edits(self) -> dict:
