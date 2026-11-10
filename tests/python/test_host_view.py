@@ -76,6 +76,13 @@ def test_load_reports_state():
         "regionPages": {"a": "p.png", "b": "p.png", "c": "q.png"},
         "modifiedKeys": [], "hasPending": False, "allPma": False,
         "mesh": {"available": False, "reason": None, "skelName": None},
+        "settings": {
+            "packer": "shelf", "padding": 2, "meshAware": False,
+            "meshAwareLocked": True, "splitComposite": False,
+            "splitCompositeLocked": False, "keepLayout": True,
+            "keepLayoutLocked": False, "polygonsAllowed": False,
+            "alpha": "straight", "alphaVisible": False, "fallbackFrom": None,
+        },
     }
 
 

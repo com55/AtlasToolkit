@@ -24,6 +24,7 @@ class AppHost:
         self._atlas = None
         self._atlas_name = None
         self._skeleton_name = None
+        self._skeleton = None
         self._pristine_regions = []
         self._page_names = []
         self._all_pma = False
@@ -31,9 +32,78 @@ class AppHost:
         self._saved = False
         self._pack_settings = {
             "packer": "shelf",
-            "packer_options": PackerOptions(padding=2, mesh_aware=None, repack=None),
-            "split_composite": False,
+            "padding": 2,
+            "meshAware": True,
+            "splitComposite": False,
+            "keepLayout": True,
+            "alpha": "straight",
         }
+
+    def _settings(self) -> dict:
+        settings = dict(self._pack_settings)
+        usable_mesh = self._require_atlas().mesh_unavailable_reason is None
+        requested = settings["packer"]
+        fallback = requested.startswith("polygons") and not usable_mesh
+        if fallback:
+            settings["packer"] = requested.replace("polygons", "rectangles")
+        polygon = settings["packer"].startswith("polygons")
+        in_place = settings["packer"].endswith("_in_place")
+        settings.update(
+            meshAware=True if polygon else usable_mesh and settings["meshAware"],
+            meshAwareLocked=polygon or not usable_mesh,
+            splitComposite=True if in_place else settings["splitComposite"],
+            splitCompositeLocked=in_place,
+            keepLayout=True if in_place else settings["keepLayout"],
+            keepLayoutLocked=in_place,
+            polygonsAllowed=usable_mesh,
+            alphaVisible=self._all_pma,
+            fallbackFrom=requested if fallback else None,
+        )
+        return settings
+
+    def _pack_arguments(self) -> dict:
+        settings = self._settings()
+        return {
+            "packer": settings["packer"],
+            "packer_options": PackerOptions(
+                padding=settings["padding"],
+                mesh_aware=None if settings["packer"].startswith("polygons") else settings["meshAware"],
+                repack=None if settings["keepLayout"] else "always",
+            ),
+            "split_composite": settings["splitComposite"],
+        }
+
+    def set_settings(self, settings: dict) -> dict:
+        if not isinstance(settings, dict):
+            raise ValueError("settings must be a dict")
+        for key, value in settings.items():
+            if key == "packer":
+                valid = isinstance(value, str) and value in (
+                    "shelf", "rectangles", "polygons", "rectangles_in_place", "polygons_in_place",
+                )
+            elif key == "padding":
+                valid = type(value) is int and 1 <= value <= 256
+            elif key in ("meshAware", "splitComposite", "keepLayout"):
+                valid = type(value) is bool
+            elif key == "alpha":
+                valid = isinstance(value, str) and value in ("straight", "premultiplied")
+            else:
+                valid = False
+            if not valid:
+                raise ValueError(f"invalid setting: {key}")
+        atlas = self._require_atlas()
+        previous = self._pack_settings
+        self._pack_settings = {**previous, **settings}
+        try:
+            if self._packed is None:
+                return self._state()
+            with atlas.transaction():
+                packed = atlas.pack(**self._pack_arguments())
+        except BaseException:
+            self._pack_settings = previous
+            raise
+        self._packed = packed
+        return self._edit_result()
 
     @staticmethod
     def required_pages(atlas_text: str) -> list[str]:
@@ -64,6 +134,7 @@ class AppHost:
             "modifiedKeys": [view.key for view in views if view.modified],
             "hasPending": atlas.has_changes and not self._saved,
             "allPma": self._all_pma,
+            "settings": self._settings(),
             "mesh": {
                 "available": reason is None,
                 "reason": None if reason == "none" else reason,
@@ -86,13 +157,27 @@ class AppHost:
         self._all_pma = all_pma
         self._atlas_name = atlas_name
         self._skeleton_name = skeleton_name
+        self._skeleton = skeleton
         self._pristine_regions = [{"key": view.key, "label": view.label} for view in atlas.region_views()]
         return self._state()
 
     def set_skeleton(self, name: str, data: bytes) -> dict:
-        self._require_atlas().set_skeleton(data)
+        atlas = self._require_atlas()
+        previous = self._skeleton
+        if self._packed is not None:
+            try:
+                with atlas.transaction():
+                    atlas.set_skeleton(data)
+                    packed = atlas.pack(**self._pack_arguments())
+            except BaseException:
+                atlas.set_skeleton(previous)
+                raise
+            self._packed = packed
+        else:
+            atlas.set_skeleton(data)
+        self._skeleton = data
         self._skeleton_name = name
-        return self._state()
+        return self._state() if self._packed is None else self._edit_result()
 
     def preview(
         self, names: list[str], mesh_crop: bool, force_resize: bool,
@@ -174,7 +259,7 @@ class AppHost:
         atlas = self._require_edit()
         with atlas.transaction():
             operation(atlas)
-            packed = atlas.pack(**self._pack_settings)
+            packed = atlas.pack(**self._pack_arguments())
         self._packed = packed
         self._saved = False
         return self._edit_result()
@@ -183,7 +268,7 @@ class AppHost:
         atlas = self._require_atlas()
         with atlas.transaction():
             atlas.reset()
-            packed = atlas.pack(**self._pack_settings)
+            packed = atlas.pack(**self._pack_arguments())
         self._packed = packed
         self._saved = False
         return self._edit_result()
