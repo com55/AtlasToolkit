@@ -62,6 +62,10 @@ class _SessionRaster:
     def adopt(self, native: object) -> ImageHandle:
         return self._track(self._backend.adopt(native))
 
+    def view(self, handle: ImageHandle) -> object:
+        """Borrow the stored image; callers must not mutate it."""
+        return self._backend.view(handle)
+
     def export(self, handle: ImageHandle) -> object:
         return self._backend.export(handle)
 

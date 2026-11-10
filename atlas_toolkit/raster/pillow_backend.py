@@ -120,6 +120,10 @@ class PillowRasterBackend:
         # stored object is never the caller's (_store's no-aliasing invariant).
         return self._store(_without_metadata(native.convert("RGBA")))
 
+    def view(self, handle: ImageHandle) -> Image.Image:
+        """Borrow the stored image; callers must not mutate it."""
+        return self._images[handle]
+
     def export(self, handle: ImageHandle) -> Image.Image:
         return self._images[handle].copy()
 

@@ -72,6 +72,14 @@ class RepackResult:
         object.__setattr__(self, "pages", tuple(self.pages))
 
 
+@dataclass(eq=False)
+class _EditCheckpoint:
+    batches: list[dict]
+    sprites: dict[str, ImageHandle]
+    generation: int
+    saved: bool
+
+
 class AtlasSession:
     """In-memory atlas session; it does not write files or integrate a UI/bridge.
 
@@ -88,6 +96,7 @@ class AtlasSession:
         self._document = document
         self._page_images = dict(page_images)
         self._roots = frozenset(page_images.values())
+        self._edit_pins: dict[_EditCheckpoint, set[ImageHandle]] = {}
         self._raster = raster
         self._processor = AtlasProcessor(document, self._page_images, raster)
         self._modifications_saved = False
@@ -590,12 +599,41 @@ class AtlasSession:
 
     def _keep_set(self, batches: list[dict], sprites: dict[str, ImageHandle]) -> set[ImageHandle]:
         keep = set(self._roots)
+        for pins in self._edit_pins.values():
+            keep.update(pins)
         for batch in batches:
             batch_type = batch.get("type")
             if batch_type in ("mod", "add"):
                 keep.add(batch["source"])
         keep.update(sprites.values())
         return keep
+
+    def edit_checkpoint(self) -> object:
+        """Save deferred edit state and pin its images until release or restore."""
+        self._require_open()
+        token = _EditCheckpoint(
+            list(self._mod_batches), dict(self._modded_sprites),
+            self._generation, self._modifications_saved,
+        )
+        self._edit_pins[token] = self._keep_set(self._mod_batches, self._modded_sprites)
+        return token
+
+    def edit_restore(self, token: object) -> None:
+        """Restore a checkpoint once; subsequent restore/release calls do nothing."""
+        if token not in self._edit_pins:
+            return
+        self._mod_batches = list(token.batches)
+        self._modded_sprites = dict(token.sprites)
+        self._generation = token.generation
+        self._modifications_saved = token.saved
+        self.edit_release(token)
+
+    def edit_release(self, token: object) -> None:
+        """Unpin a checkpoint and collect images no longer used by edits."""
+        if token not in self._edit_pins:
+            return
+        del self._edit_pins[token]
+        self._raster.release_except(frozenset(self._keep_set(self._mod_batches, self._modded_sprites)))
 
     def _publish(
         self,
@@ -972,9 +1010,12 @@ class AtlasSession:
         patch_padding: int = 0,
         added_mesh_lookup=None,
         in_place: bool = False,
+        share_untouched: bool = False,
     ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return
         (text, {page: native image}).
+        With `share_untouched`, pristine page images are borrowed without
+        copying and must not be mutated by the caller.
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released.
         `patch_adds` (SpineAtlas only, spec 2026-10-31): pages whose only edits
@@ -988,7 +1029,10 @@ class AtlasSession:
         image is its declared size is tried in place; a page that does not fit repacks."""
         self._require_open()
         if not self._mod_batches:
-            return self._document.serialize(), self.export_pages()
+            return self._document.serialize(), {
+                name: (self._raster.view(handle) if share_untouched else self._raster.export(handle))
+                for name, handle in self._page_images.items()
+            }
         before = self._raster.checkpoint()
         try:
             document, images = self._build_pages(
@@ -999,7 +1043,9 @@ class AtlasSession:
                 in_place=in_place,
             )
             return document.serialize(), {
-                filename: self._raster.export(images[filename])
+                filename: (self._raster.view(images[filename])
+                           if share_untouched and images[filename] in self._roots
+                           else self._raster.export(images[filename]))
                 for filename in dict.fromkeys(document.page_filenames())
             }
         finally:
@@ -1023,7 +1069,7 @@ class AtlasSession:
         self._modifications_saved = False
         # generation is not reset (v0.4.0 JS clearModifyState): a later
         # mod must never reuse a generation already seen before the clear.
-        self._raster.release_except(self._roots)
+        self._raster.release_except(frozenset(self._keep_set([], {})))
 
     def close(self) -> None:
         if not self._closed:

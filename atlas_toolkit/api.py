@@ -328,6 +328,7 @@ class SpineAtlas:
                 {name: mesh for name, mesh in lookup.items() if allowed is None or name in allowed}
             )
         self._build_cache = None
+        self._transaction_active = False
         self._refresh_names()
         return self
 
@@ -611,6 +612,45 @@ class SpineAtlas:
         self._build_cache = None
         self._refresh_names()
 
+    @contextmanager
+    def transaction(self):
+        """Roll back recorded edits, names and cached output if the block fails."""
+        if self._transaction_active:
+            raise RuntimeError("nested edit transactions are not supported")
+        token = self._session.edit_checkpoint()
+        cache = self._build_cache
+        self._transaction_active = True
+        try:
+            yield
+        except BaseException:
+            self._session.edit_restore(token)
+            self._build_cache = cache
+            self._refresh_names()
+            raise
+        else:
+            self._session.edit_release(token)
+        finally:
+            self._transaction_active = False
+
+    def reset(self) -> None:
+        """Discard all recorded edits."""
+        self._session.clear_modify_state()
+        self._edited()
+
+    def page_image(self, name: str) -> Image.Image:
+        """Return a copy of one pristine page."""
+        if name not in self._session._page_images:
+            raise ValueError(f"unknown page {name!r}")
+        return self._session._raster.export(self._session._page_images[name])
+
+    def validate_region_name(self, name: str, exclude: str | None = None) -> str:
+        """Validate and trim a name, optionally excluding an existing region."""
+        key = self._key(exclude) if exclude is not None else None
+        try:
+            return self._session._validated_name(name, exclude_key=key)
+        except RegionNameError as error:
+            raise InvalidRegionName(error.reason) from None
+
     def replace(self, images: Mapping[str, ImageLike], *, alpha_mode: AlphaMode | str | None = None) -> None:
         """Replace each named region's pixels. Every name and image is checked
         before anything is recorded, so a failing call records nothing.
@@ -764,7 +804,7 @@ class SpineAtlas:
             )
         return frozenset(allowed)
 
-    def _pack(self, resolved: ResolvedPack, split_composite: bool) -> tuple[str, dict]:
+    def _pack(self, resolved: ResolvedPack, split_composite: bool, *, share_untouched: bool = False) -> tuple[str, dict]:
         session = self._session
         try:
             session.set_nest_regions_enabled(resolved.nest)
@@ -779,6 +819,7 @@ class SpineAtlas:
                 patch_adds=resolved.patch_adds, patch_padding=resolved.padding,
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
                 in_place=resolved.in_place,
+                share_untouched=share_untouched,
             )
         except CanvasTooLargeError as error:
             raise CanvasTooLarge(error.width, error.height, error.limit, getattr(error, "page", None)) from None
@@ -786,6 +827,42 @@ class SpineAtlas:
             session.set_nest_regions_enabled(False)
             session.set_nest_gap_distance(4)
             session.set_mesh_aware_repack_enabled(False)
+
+    def pack(
+        self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
+        split_composite: bool = False,
+    ) -> tuple[str, dict[str, Image.Image]]:
+        """Pack edits without creating a child atlas.
+
+        Returned images must not be mutated: untouched pages may be pristine
+        images and edited pages may be shared with the build cache.
+        """
+        resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
+        if needs_mesh:
+            self._require_mesh()
+        if not self.has_changes:
+            return self._text, {
+                name: self._session._raster.view(handle)
+                for name, handle in self._session._page_images.items()
+            }
+        options = (resolved, bool(split_composite) or resolved.in_place)
+        if self._build_cache is None or self._build_cache[0] != options:
+            text, pages = self._pack(*options, share_untouched=True)
+            self._build_cache = (options, text, pages, self._child_allowed())
+        _, text, pages, _ = self._build_cache
+        # A build-populated cache owns copies; pack still borrows pristine pages.
+        session = self._session
+        shortcut = (not (resolved.patch_adds or resolved.in_place)
+                    or not session._declared_size_matches(session._document.pages[0]))
+        touched = session._touched_pages(
+            session._mod_batches, session._region_pages(session._mod_batches),
+            single_page_shortcut=shortcut,
+        )
+        return text, {
+            name: (self._session._raster.view(self._session._page_images[name])
+                   if name not in touched else image)
+            for name, image in pages.items()
+        }
 
     def build(
         self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,

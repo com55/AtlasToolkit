@@ -176,6 +176,9 @@ class RasterBackend(Protocol):
         PillowRasterBackend), converted to RGBA. The caller keeps its object;
         later changes to it never reach the handle."""
 
+    def view(self, handle: ImageHandle) -> object:
+        """Borrow the stored image without copying; callers must not mutate it."""
+
     def export(self, handle: ImageHandle) -> object:
         """Return a COPY of the handle's image as a backend-native object
         the caller owns (a PIL.Image for PillowRasterBackend)."""
