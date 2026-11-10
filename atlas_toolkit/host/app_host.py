@@ -263,5 +263,9 @@ class AppHost:
             "pages": [{"name": name, "png": _png(pages[page])}
                       for name, page in zip(names, page_order)],
         }
-        self._saved = True
         return result
+
+    def mark_saved(self) -> dict:
+        self._require_edit()
+        self._saved = True
+        return self._state()

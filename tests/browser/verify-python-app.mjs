@@ -302,7 +302,12 @@ try {
       return new File([await c.convertToBlob({type:'image/png'})], 'mod.png', {type:'image/png'});
     };
     window.makeMod = png;
-    await onModPreviewReceived(await api.process_mod_image(await png(4,6), ['b']));
+    const {isBusy} = await import('/js/busy-overlay.js');
+    const modifying = api.process_mod_image(await png(4,6), ['b']);
+    if (!isBusy()) throw new Error('Modify is running without a busy lock');
+    const modified = await modifying;
+    if (isBusy()) throw new Error('Modify did not release its busy lock');
+    await onModPreviewReceived(modified);
     await onModPreviewReceived(await api.process_mod_image(await png(10,6), ['a','b']));
     if (!api.has_pending_modifications()) throw new Error('Modify did not mark pending');
     await onModPreviewReceived(await api.rename_region('a','renamed'));
@@ -357,10 +362,23 @@ try {
   await app.locator('#modal-overlay').waitFor({state:'visible'});
   await app.locator('#btn-modal-confirm').click();
   await app.waitForFunction(() => !window.testAPI.has_pending_modifications(), null, {polling:500});
-  if (await app.locator('.region-item').count() !== 2) throw new Error('Reset did not restore list');
+  await app.waitForFunction(() => document.querySelectorAll('.region-item').length === 2, null, {polling:500});
   await app.evaluate(async () => {
     const {onModPreviewReceived} = await import('/js/modify-mode.js');
     await onModPreviewReceived(await window.testAPI.rename_region('a','saved'));
+  });
+  await app.evaluate(async () => {
+    const original = window.showSaveFilePicker;
+    const originalDirectoryPicker = window.showDirectoryPicker;
+    window.showDirectoryPicker = async () => { throw new Error('Unexpected directory picker call'); };
+    window.showSaveFilePicker = async () => { throw new DOMException('Cancelled', 'AbortError'); };
+    try {
+      if (await window.testAPI.save_modified() !== 'Cancelled') throw new Error('Save cancellation did not propagate');
+      if (!window.testAPI.has_pending_modifications()) throw new Error('Cancelled Save cleared pending edits');
+    } finally {
+      window.showSaveFilePicker = original;
+      window.showDirectoryPicker = originalDirectoryPicker;
+    }
   });
   const savedDownload = app.waitForEvent('download');
   await app.evaluate(() => window.testAPI.save_modified());

@@ -752,14 +752,18 @@ export const AtlasAPI = {
   },
   async enter_modify_mode() {
     if (!_state) return null;
-    const result = await editCall('enter_edit', []);
-    _edit = true; _activePageIndex = 0;
-    return result;
+    return withBusy(BUSY_LABEL, async () => {
+      const result = await editCall('enter_edit', []);
+      _edit = true; _activePageIndex = 0;
+      return result;
+    });
   },
   async reset_modifications() {
-    const result = await editCall('reset_edits', []);
-    _activePageIndex = 0;
-    return result;
+    return withBusy(BUSY_LABEL, async () => {
+      const result = await editCall('reset_edits', []);
+      _activePageIndex = 0;
+      return result;
+    });
   },
   validate_region_name(name, excludeKey = null) { return callHost('validate_name', [name, excludeKey]); },
   async get_modify_page_preview(index) {
@@ -770,9 +774,11 @@ export const AtlasAPI = {
   },
   async process_mod_image(source, keys) {
     if (!keys?.length) return null;
-    try {
-      return await editCall('modify', [keys, await imageBytes(source), await AtlasAPI.get_pref('imageAlpha', 'straight')]);
-    } catch (e) { await window.showAlert(e.message, 'Cannot modify atlas'); return null; }
+    return withBusy(BUSY_LABEL, async () => {
+      try {
+        return await editCall('modify', [keys, await imageBytes(source), await AtlasAPI.get_pref('imageAlpha', 'straight')]);
+      } catch (e) { await window.showAlert(e.message, 'Cannot modify atlas'); return null; }
+    });
   },
   async select_mod_image(keys) {
     let file;
@@ -790,7 +796,6 @@ export const AtlasAPI = {
   async save_modified() {
     try {
       const output = await callHost('save_output', []);
-      _state = {..._state, hasPending: false};
       const outputs = output.pages.map(p => ({name: p.name, data: new Blob([p.png], {type: 'image/png'})}));
       outputs.push({name: _currentAtlasFilename, data: output.text});
       const skel = await _skelForSave();
@@ -799,15 +804,17 @@ export const AtlasAPI = {
         const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
-        return 'Saved to selected folder.';
+        _state = await callHost('mark_saved', []);
+        return typeof folder === 'string' ? `Saved to: ${folder}` : 'Saved to selected folder.';
       }
       await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, await createZip(outputs));
+      _state = await callHost('mark_saved', []);
       return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
     } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
   },
-  async add_region(file, name) { return editCall('add', [name, await imageBytes(file), null, await AtlasAPI.get_pref('imageAlpha', 'straight')]); },
-  rename_region(key, name) { return editCall('rename', [key, name]); },
-  remove_regions(keys) { return editCall('remove', [keys]); },
+  async add_region(file, name) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), null, await AtlasAPI.get_pref('imageAlpha', 'straight')])); },
+  rename_region(key, name) { return withBusy(BUSY_LABEL, () => editCall('rename', [key, name])); },
+  remove_regions(keys) { return withBusy(BUSY_LABEL, () => editCall('remove', [keys])); },
 };
 export { _loadAtlasFiles };
 
@@ -830,13 +837,21 @@ onEngineDied(async (message) => {
   try {
     await startEngine();
     if (!sources) return;
-    if (!await _loadAtlasFiles(sources.atlas, sources.pages, _currentAtlasDirectory, sources.skel ? [sources.skel.blob] : [])) return;
+    if (!await _loadAtlasFiles(sources.atlas, sources.pages, _currentAtlasDirectory)) return;
+    if (sources.skel) await AtlasAPI.apply_skel_file(sources.skel.blob);
     const {state} = await import('./state.js');
     const {setMode, updateMeshCroppingUI} = await import('./modify-mode.js');
-    const {loadRegions, updateButtons} = await import('./region-list.js');
-    const {resetPreview, clearOverlay, updatePreview} = await import('./preview.js');
+    const {loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState} = await import('./region-list.js');
+    const {resetPreview, clearOverlay, updatePreview, updateSaveMergedButton} = await import('./preview.js');
     state.selectedIndices.clear(); state.hasModImage = false; state.modifyRegionBounds = {};
+    state.modifyPages = []; state.modifyRegionPages = {};
+    state.modifyActivePage = null; state.modifyActivePageIndex = 0;
+    _activePageIndex = 0; _editPages = [];
     setMode('extract'); resetPreview(); clearOverlay();
-    await loadRegions(); updateButtons(); updateMeshCroppingUI(); await updatePreview([]);
-  } catch (e) { console.error(String(e.message).split('\n')[0]); }
+    await loadRegions(); updateButtons(); updateRemoveButtonState(); updateRenameButtonState();
+    updateMeshCroppingUI(); await updatePreview([]); updateSaveMergedButton();
+  } catch (e) {
+    setEngineStartupError(e);
+    console.error(String(e.message).split('\n')[0]);
+  }
 });

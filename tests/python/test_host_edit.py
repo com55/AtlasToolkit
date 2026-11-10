@@ -41,7 +41,7 @@ def test_rename_keys_and_saved_state():
     assert result['state']['modifiedKeys'] == ['a']
     assert result['state']['hasPending']
     output = host.save_output()
-    assert not host._state()['hasPending']
+    assert host._state()['hasPending']
     assert [p['name'] for p in output['pages']] == png_names_for_save(output['text'], len(output['pages']), 'sample.atlas')
     assert decode(output['pages'][0]['png']).tobytes() == host.page_preview(0)['image']['rgba']
     assert host.rename('a', 'again')['state']['hasPending']
@@ -53,6 +53,7 @@ def test_failure_keeps_state_and_preview(failure, monkeypatch):
     host.enter_edit()
     host.rename('a', 'renamed')
     host.save_output()
+    host.mark_saved()
     before = host._state()
     previews = [host.page_preview(i) for i in range(2)]
     if failure == 'pack':
@@ -195,6 +196,7 @@ def test_empty_selection_leaves_saved_state_unchanged(method):
     host.enter_edit()
     host.rename('a', 'renamed')
     host.save_output()
+    host.mark_saved()
     before = host._state()
     packed = host._packed
     preview = host.page_preview(0)
@@ -205,3 +207,18 @@ def test_empty_selection_leaves_saved_state_unchanged(method):
     assert host._state()['hasPending'] is False
     assert host._packed is packed
     assert host.page_preview(0) == preview
+
+
+def test_mark_saved_acknowledges_output_only_after_write():
+    host, _ = loaded()
+    host.enter_edit()
+    host.rename('a', 'renamed')
+    before = host._state()
+    host.save_output()
+    assert host._state() == before
+    saved = host.mark_saved()
+    assert saved == {**before, 'hasPending': False}
+    assert host.rename('a', 'again')['state']['hasPending']
+    host.exit_edit()
+    with pytest.raises(AtlasError, match='not in edit mode'):
+        host.mark_saved()

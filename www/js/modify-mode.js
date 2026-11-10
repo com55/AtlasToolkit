@@ -212,7 +212,10 @@ export async function onModPreviewReceived(data) {
   let image = data.image;
   if (state.modifyPages.length > 1) {
     const pageData = await AtlasAPI.get_modify_page_preview(state.modifyActivePageIndex);
-    if (pageData && pageData.image) image = pageData.image;
+    if (pageData && pageData.image) {
+      image = pageData.image;
+      if (image !== data.image) URL.revokeObjectURL(data.image);
+    }
   }
 
   setPreviewSrc(image);
