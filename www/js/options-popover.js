@@ -6,7 +6,7 @@
  */
 
 import { isTouchDevice, isPywebviewDesktop } from './platform.js';
-import { DEFAULT_NEST_GAP } from './repack-nest.js';
+const DEFAULT_NEST_GAP = 4;
 
 const HOVER_DELAY_MS = 500;
 const LONG_PRESS_MS = 450;

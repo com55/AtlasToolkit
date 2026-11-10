@@ -1035,7 +1035,7 @@ img#preview-img {
 /* Busy overlay — same chrome as #modal-overlay/#modal-box so Processing
    matches confirm/alert. Confirm is dismissed before paint; silent
    withLock still uses #modal-overlay at 4500. */
-#busy-overlay {
+#busy-overlay, #engine-loading {
   position: fixed;
   top: 0;
   left: 0;
@@ -1050,7 +1050,7 @@ img#preview-img {
   align-items: center;
   pointer-events: auto;
 }
-#busy-box {
+#busy-box, .engine-loading-box {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1077,7 +1077,7 @@ img#preview-img {
 @keyframes busy-spin {
   to { transform: rotate(360deg); }
 }
-#busy-label {
+#busy-label, #engine-loading-status {
   margin: 0;
   color: #e5e5e5;
   font-size: 15px;

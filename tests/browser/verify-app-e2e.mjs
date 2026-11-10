@@ -46,7 +46,7 @@ if (!chromium) {
 }
 
 const HARNESS = `<!doctype html><meta charset=utf8><body><script type="module">
-import { AtlasAPI } from '/www/js/atlas-api.js';
+import { AtlasAPI } from '/www/js/atlas-api-legacy.js';
 
 function solidCanvas(w, h, rgba) {
   const c = document.createElement('canvas');

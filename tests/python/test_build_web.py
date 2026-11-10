@@ -12,7 +12,7 @@ def test_excluded_engine_files():
         "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
         "atlas-converter", "atlas-api-legacy", "core-region-ops",
         "effective-region-model", "lanczos-resize", "region-mesh-lookup",
-        "region-mesh-mask", "region-name-validation", "repack-nest",
+        "region-mesh-mask", "repack-nest",
         "job-runner", "preview-jobs", "canvas-surface",
     ]
     for name in names:

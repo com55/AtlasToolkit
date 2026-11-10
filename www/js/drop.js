@@ -190,6 +190,7 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') contextMenu.
  * that somehow fails.
  */
 async function getPreviewPngBlob() {
+  if (state.currentMode !== 'modify') return AtlasAPI.save_image();
   const img = previewImg;
   if (!img.naturalWidth || !img.naturalHeight) return null;
 

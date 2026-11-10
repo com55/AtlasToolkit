@@ -1,7 +1,6 @@
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
 import { isPortrait, previewImageTopLeft, previewTopAnchoredY, previewZoomOriginY } from './platform.js';
-import { hullPolyline } from './atlas-extracter.js';
 
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
@@ -90,8 +89,8 @@ function setMeshHullLayout(layout) {
   _meshHullPaths = [];
   if (!layout) return;
   for (const item of layout.items) {
-    const pts = hullPolyline(item);
-    if (!pts) continue;
+    const pts = item.points;
+    if (!pts?.length) continue;
     const path = new Path2D();
     path.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) path.lineTo(pts[i].x, pts[i].y);

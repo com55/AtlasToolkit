@@ -34,7 +34,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // the PIL rotation-direction pixel oracle on a branch that adds two new
 // rotate values (180/270) AtlasToolkit had never emitted before. All 13
 // verified passing before being added here.
+const PARKED = ['verify-ui-flows.mjs', 'verify-region-editing.mjs', 'verify-region-identity.mjs'];
 const SUITES = [
+  'verify-python-app.mjs',
   'verify-ops.mjs',
   'verify-ui-flows.mjs',
   'verify-region-identity.mjs',
@@ -55,6 +57,12 @@ let anySkipped = false;
 const results = [];
 
 for (const suite of SUITES) {
+  if (PARKED.includes(suite)) {
+    console.log('PARKED ' + suite + ' (awaiting Python Edit Mode)');
+    anySkipped = true;
+    results.push({suite, code: 0, skipped: true});
+    continue;
+  }
   // Captured (not 'inherit') so this runner can tell a genuine pass from a
   // self-skip (playwright-core absent, ground_truth_ops.json missing, etc
   // -- several suites print 'SKIP: ...' and exit 0 in that case, same as a

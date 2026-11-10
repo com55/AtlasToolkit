@@ -1,0 +1,1254 @@
+/**
+ * atlas-api.js
+ * Replaces pywebview.api with a pure-JS implementation.
+ * Exposes the same async interface that script.js expects.
+ */
+
+import { autoConvertAtlas } from './atlas-converter.js';
+import { AtlasProcessor, canvasToPreviewUrl, _loadImage } from './atlas-extracter.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
+import { createZip } from './zip.js';
+import { AtlasSession, AddBatch, RemoveBatch, RenameBatch } from './atlas-session.js';
+import { deriveEffectiveModel } from './effective-region-model.js';
+import { validateRegionName } from './region-name-validation.js';
+import { AtlasDocument, pngNamesForSave } from './atlas-document.js';
+import { parseSkeleton, UnsupportedVersionError } from './vendor/spine-skeleton-binary/index.js';
+import { buildMeshLookup } from './region-mesh-lookup.js';
+import { normalizeGap } from './repack-nest.js';
+import { withBusy, BUSY_LABEL, BUSY_LOADING_LABEL, isOverlayPainted } from './busy-overlay.js';
+import { PreviewCache, PackResultCache, viewPreviewKey, editPreviewKey, packSignature } from './preview-cache.js';
+import { runPreviewJob } from './preview-jobs.js';
+
+/** Returned by load helpers when the user cancels a missing-images dialog. */
+export const LOAD_CANCELLED = 'cancelled';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+let _processor = null;
+let _currentAtlasFilename = '';
+// Test-only label overrides, keyed by region key. In production this map is
+// always empty, so get_region_names() reports label === key for every region.
+const _testLabelOverrides = new Map();
+// Native-open source folder (pywebview only — a browser <input type=file>
+// never exposes a real filesystem path). Used as the starting directory for
+// native extract/save dialogs, matching the old Python engine's behavior of
+// always opening those at the loaded atlas's folder (found missing via
+// parity audit, 2026-08-23). Empty string just means "let the OS pick".
+let _currentAtlasDirectory = '';
+let _currentAtlasText = '';
+let _session = null;               // AtlasSession — owns modify-mode state / mod batches
+let _lastSaveHandle = null;
+let _currentSkel = null; // { name, blob } | null
+let _parsedSkeleton = null;   // {version, attachments} | null
+let _meshLookup = null;       // Map<name, {uvs,triangles,hullLength}> | null
+// User preference, persisted across sessions the same way other startup-restored prefs are -- does NOT reset per
+// atlas load. Initialized once from the 'meshCropping' pref at startup via
+// init_mesh_mask_from_pref(); changed only by an explicit user toggle
+// (set_mesh_mask_enabled). Independent of whether the CURRENT atlas's
+// .skel is actually usable -- see _meshUnavailableReason for that.
+let _meshMaskEnabled = true;
+// Separate from _meshMaskEnabled -- gates ONLY whether repack masks its
+// sprites (the "Mesh-Aware Repack" toggle), independent of whether View
+// mode extraction is masked. Same persisted-pref pattern as
+// _meshMaskEnabled. Initialized via init_mesh_aware_repack_from_pref().
+let _meshAwareRepackEnabled = true;
+// Separate from either mesh toggle -- gates the "Nest Regions" packer swap
+// (mesh-silhouette-nesting spec). Same persisted-pref pattern as
+// _meshMaskEnabled/_meshAwareRepackEnabled. Default false (unlike the mesh
+// toggles' default true): Nest Regions changes packing layout even with no
+// nesting opportunity present, a more visible change to default output
+// than a pure masking correctness fix, so existing users see no behavior
+// change until they opt in.
+let _nestRegionsEnabled = false;
+let _nestGapDistance = 4;
+// View Mode only. Stretches the selected-region composite to the largest
+// extracted canvas. Default off: it changes preview geometry, so existing
+// sessions stay unscaled until the user opts in. Persisted as 'forcedResizing'.
+let _forcedResizing = false;
+// View Mode only. Draws Spine hull outlines on the preview overlay.
+// Default off. Persisted as 'meshHullView'. Does not change the preview bitmap.
+let _meshHullEnabled = false;
+// null | 'unsupported-version' | 'parse-error' | 'no-mesh-attachments' --
+// why the current .skel (if any) can't be used, for the picker button's
+// tooltip. null when there's no .skel captured yet, or when it parsed with
+// usable Mesh geometry.
+let _meshUnavailableReason = null;
+const _previewCache = new PreviewCache(24);
+const _packResultCache = new PackResultCache(12);
+let _loadEpoch = 0;
+let _skelEpoch = 0;
+
+function _bumpLoadEpoch() {
+  _loadEpoch++;
+  _previewCache.invalidateAll();
+  _packResultCache.invalidateAll();
+}
+
+function _currentPackSig() {
+  return packSignature(_nestRegionsEnabled, _nestGapDistance, _meshAwareRepackEnabled);
+}
+
+function _ingestEditPage(pageIndex, url) {
+  if (!url || !_session) return;
+  _previewCache.set(
+    editPreviewKey(pageIndex, _session.modGeneration, _loadEpoch, _currentPackSig()),
+    url,
+  );
+}
+
+function _packResultKey() {
+  return `${_session.modGeneration}:${_currentPackSig()}`;
+}
+
+function _rememberPackResult(result) {
+  if (!_session || !result) return;
+  if (result.image) _ingestEditPage(0, result.image);
+  _packResultCache.set(_packResultKey(), {
+    active: _session.active,
+    repacked: _session.repacked,
+    result,
+  });
+}
+
+/** Only worth re-running repack if at least one batch has actually been
+ *  registered this session -- pixel ModBatch OR a structural Add/Remove/
+ *  Rename (both kinds already route their own apply through
+ *  onModPreviewReceived, modify-mode.js, so a toggle-triggered rerun
+ *  needs the same condition -- do NOT narrow this to
+ *  ModBatch/type==='mod' only, that would silently stop toggling from
+ *  refreshing a structural-only session). With zero batches, the
+ *  modify-mode preview pane is still showing the extraction-composite
+ *  view (unaffected by either mesh toggle), not a packed-atlas view --
+ *  nothing to refresh yet. */
+async function _rerunAndRemember() {
+  const result = await _session.rerunRepack();
+  _rememberPackResult(result);
+  return result;
+}
+
+async function _maybeRerunRepack() {
+  if (!_session || _session.modBatches.length === 0) return null;
+  const hit = _packResultCache.get(_packResultKey());
+  if (hit && hit.active) {
+    _session.active = hit.active;
+    _session.repacked = hit.repacked;
+    if (hit.result && hit.result.image) _ingestEditPage(0, hit.result.image);
+    return hit.result;
+  }
+  // Cache hit restores the previous packed preview in-place — do not
+  // paint #busy-overlay for that path or A→B→A flashes a Processing card.
+  if (isOverlayPainted()) return _rerunAndRemember();
+  return withBusy(BUSY_LABEL, _rerunAndRemember);
+}
+
+const IMAGE_PICKER_ACCEPT = 'image/png,.png';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function _readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+/** Extract page image filenames required by an atlas text. */
+function _extractRequiredPages(atlasText) {
+  const proc = new AtlasProcessor(atlasText);
+  return proc.pages.map(p => p.filename);
+}
+
+function _isDesktopFsApiAvailable() {
+  if (isPywebviewDesktop()) return true;
+  return typeof window !== 'undefined'
+    && window.isSecureContext
+    && typeof window.showSaveFilePicker === 'function'
+    && typeof window.showDirectoryPicker === 'function';
+}
+
+/** True when running as an installed PWA (standalone window), not a browser tab. */
+function _isInstalledPWA() {
+  if (typeof window === 'undefined') return false;
+  return !!(window.matchMedia?.('(display-mode: standalone)').matches
+    || window.matchMedia?.('(display-mode: window-controls-overlay)').matches
+    || window.navigator.standalone === true); // iOS Safari
+}
+
+/**
+ * Whether saving should open a folder picker (installed-PWA File System
+ * Access API, or the pywebview desktop app's native folder dialog) rather
+ * than downloading a zip. A plain browser tab — even a Chromium one with
+ * the FS API — gets a zip download.
+ */
+function _useFolderPicker() {
+  return isPywebviewDesktop()
+    || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
+}
+
+/** Directory portion of a native (Windows or POSIX) filesystem path. */
+function _dirnameOf(path) {
+  if (!path) return '';
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return idx >= 0 ? path.slice(0, idx) : '';
+}
+
+/** Base name (no extension) of the loaded atlas, for naming zip downloads. */
+function _extractZipBaseName() {
+  const base = (_currentAtlasFilename || 'atlas').replace(/\.[^.]+$/, '');
+  return base || 'atlas';
+}
+
+function _isImageFile(file) {
+  if (!file) return false;
+  if (typeof file.type === 'string' && file.type === 'image/png') return true;
+  return /\.png$/i.test(file.name || '');
+}
+
+function _getRegionPageMap() {
+  if (!_processor) return {};
+  const map = {};
+  for (const [name, region] of Object.entries(_processor.regions || {})) {
+    map[name] = region.pageFilename || '';
+  }
+  return map;
+}
+
+function _normalizeName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function _getUniqueFilesByName(fileMap) {
+  const unique = [];
+  const seen = new Set();
+  for (const file of Object.values(fileMap || {})) {
+    if (!file || !file.name || seen.has(file.name)) continue;
+    seen.add(file.name);
+    unique.push(file);
+  }
+  return unique;
+}
+
+function _mapInitialImagesToPages(requiredPages, imageFileMap) {
+  const mapped = {};
+  const initialImages = _getUniqueFilesByName(imageFileMap);
+
+  // Rule A.1: one page + one image => map immediately.
+  if (requiredPages.length === 1 && initialImages.length === 1) {
+    mapped[requiredPages[0]] = initialImages[0];
+    return mapped;
+  }
+
+  const lowerToImages = new Map();
+  for (const file of initialImages) {
+    const key = _normalizeName(file.name);
+    if (!lowerToImages.has(key)) lowerToImages.set(key, []);
+    lowerToImages.get(key).push(file);
+  }
+
+  // Rule A.2: case-insensitive pageName <-> filename matching.
+  for (const pageName of requiredPages) {
+    const exact = imageFileMap[pageName];
+    if (exact) {
+      mapped[pageName] = exact;
+      continue;
+    }
+
+    const matches = lowerToImages.get(_normalizeName(pageName));
+    if (matches && matches.length > 0) {
+      mapped[pageName] = matches[0];
+    }
+  }
+
+  return mapped;
+}
+
+async function _confirmDialog(message, title = 'Confirm') {
+  if (typeof window !== 'undefined' && typeof window.showConfirm === 'function') {
+    return !!(await window.showConfirm(message, title));
+  }
+  return window.confirm(message);
+}
+
+async function _findAtlasTextFile(files) {
+  const nonImageFiles = files.filter(file => !_isImageFile(file) && !isSkelFilename(file.name));
+  const prioritized = nonImageFiles.sort((a, b) => {
+    const aAtlas = /\.atlas$/i.test(a.name || '');
+    const bAtlas = /\.atlas$/i.test(b.name || '');
+    return Number(bAtlas) - Number(aAtlas);
+  });
+
+  for (const file of prioritized) {
+    try {
+      const rawText = await _readFileAsText(file);
+      const convertedText = autoConvertAtlas(rawText);
+      const requiredPages = _extractRequiredPages(convertedText);
+      if (requiredPages.length > 0) return file;
+    } catch (_) {
+      // Try next text file candidate.
+    }
+  }
+
+  return null;
+}
+
+async function _loadAtlasFromFileList(files, options = {}) {
+  const list = Array.isArray(files) ? files : Array.from(files || []);
+  if (list.length === 0) return false;
+
+  const atlasFile = await _findAtlasTextFile(list);
+  if (!atlasFile) {
+    if (options.showNoAtlasToast !== false && typeof window.showToast === 'function') {
+      window.showToast('No valid atlas-format text file found in the selected files.', 'error');
+    }
+    return false;
+  }
+
+  const imageFileMap = {};
+  for (const file of list) {
+    if (_isImageFile(file)) imageFileMap[file.name] = file;
+  }
+
+  return _loadAtlasFiles(atlasFile, imageFileMap, '', list);
+}
+
+async function _saveBlobWithDialog(filename, blob, { defaultDir = '' } = {}) {
+  // platform.js branches browser (File System Access API) vs pywebview
+  // (native save dialog + write_file_bytes); _lastSaveHandle only means
+  // anything for the former.
+  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle, defaultDir });
+  if (!result) {
+    const e = new Error('Save cancelled');
+    e.name = 'AbortError';
+    throw e;
+  }
+  if (typeof result === 'object') _lastSaveHandle = result;
+}
+
+/**
+ * Download data as a file.
+ * @param {string} filename
+ * @param {Blob} blob
+ */
+async function _downloadBlob(filename, blob) {
+  // Desktop browser: prefer Save As dialog (File System Access API).
+  if (_isDesktopFsApiAvailable()) {
+    await _saveBlobWithDialog(filename, blob);
+    return;
+  }
+
+  // Fallback: browser download
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function _canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('toBlob failed')), 'image/png');
+  });
+}
+
+/**
+ * Pick one or more files using a hidden file input triggered by a user gesture.
+ * On touch devices, `accept` is dropped in favor of the OS's full file browser
+ * (a MIME-restricted picker there often shows a photo-only view that hides
+ * files the user wants), and the selection is validated against `accept`
+ * afterward instead.
+ */
+function _pickFiles({ accept = '', multiple = false } = {}) {
+  const touchMode = isTouchDevice();
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = touchMode ? '*' : accept;
+    input.multiple = multiple;
+    // listen for change; also handle cancel gracefully
+    const cleanup = () => {
+      input.removeEventListener('change', onchange);
+      input.removeEventListener('cancel', oncancel);
+      clearTimeout(timer);
+    };
+    const onchange = async (e) => {
+      cleanup();
+      let files = Array.from(e.target.files);
+      if (touchMode && accept) {
+        const valid = files.filter(f => fileMatchesAccept(f, accept));
+        if (valid.length < files.length) {
+          if (typeof window.showAlert === 'function') {
+            await window.showAlert('Unsupported file type ignored.', 'Unsupported file');
+          } else if (typeof window.showToast === 'function') {
+            window.showToast('Unsupported file type ignored.', 'error');
+          }
+        }
+        files = valid;
+      }
+      resolve(files);
+    };
+    const oncancel = () => { cleanup(); resolve([]); };
+    input.addEventListener('change', onchange);
+    input.addEventListener('cancel', oncancel);
+    input.click();
+    // Safari/some Android may not fire 'cancel'; resolve with [] after long delay
+    const timer = setTimeout(() => { cleanup(); resolve([]); }, 60000);
+  });
+}
+
+// ─── Core: load an atlas File + associated image Files ───────────────────────
+
+/**
+ * Load an atlas from File objects.
+ * @param {File} atlasFile
+ * @param {Object.<string, File>} imageFileMap  { pageName: File }  (may be partial)
+ * @param {string} sourceDir  native folder the atlas was opened from, or ''
+ * @param {Array<File>} extraFiles  dropped/picked siblings (may include a .skel)
+ * @returns {Promise<boolean>}
+ */
+async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFiles = []) {
+  try {
+    const rawText = await _readFileAsText(atlasFile);
+    const convertedText = autoConvertAtlas(rawText);
+    const requiredPages = _extractRequiredPages(convertedText);
+
+    const finalMap = _mapInitialImagesToPages(requiredPages, imageFileMap);
+
+    // For missing pages, ask user to attach image per pageName (manual mapping).
+    let missingPages = requiredPages.filter(pageName => !finalMap[pageName]);
+    while (missingPages.length > 0) {
+      let selectedByPage = null;
+
+      if (typeof window !== 'undefined' && typeof window.showMissingAtlasImages === 'function') {
+        selectedByPage = await window.showMissingAtlasImages(missingPages, sourceDir);
+      } else {
+        const proceed = await _confirmDialog(
+          `Missing image files for atlas pages:\n${missingPages.map(pageName => `- ${pageName}`).join('\n')}`,
+          'Missing Atlas Page Images'
+        );
+        if (!proceed) return LOAD_CANCELLED;
+
+        selectedByPage = {};
+        for (const pageName of missingPages) {
+          const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
+          if (files.length === 0) return LOAD_CANCELLED;
+          selectedByPage[pageName] = files[0];
+        }
+      }
+
+      if (!selectedByPage) return LOAD_CANCELLED;
+
+      for (const pageName of missingPages) {
+        const chosenFile = selectedByPage[pageName];
+        if (chosenFile) finalMap[pageName] = chosenFile;
+      }
+
+      missingPages = requiredPages.filter(pageName => !finalMap[pageName]);
+    }
+
+    _processor = new AtlasProcessor(convertedText);
+    await _processor.loadImages(finalMap);
+
+    _currentAtlasFilename = atlasFile.name;
+    _currentAtlasDirectory = sourceDir;
+    _currentAtlasText = convertedText;
+    await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
+    _bumpLoadEpoch();
+
+    // Fresh session bound to the pristine processor + atlas text.
+    _session = new AtlasSession(_processor, _currentAtlasText, _currentAtlasFilename);
+
+    return true;
+  } catch (e) {
+    console.error('load_atlas error:', e);
+    return false;
+  }
+}
+
+/** Hold the sibling `.skel` (same stem as the atlas) so Save As can copy it.
+ *  Desktop: load from the atlas folder (Python `Path.with_suffix(".skel")`).
+ *  Browser: only if the user included the .skel in the picked/dropped files. */
+async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
+  _currentSkel = null;
+  const skelName = siblingSkelFilename(atlasFile?.name);
+  if (!skelName) { await _reparseSkelAndPushToProcessor(); return; }
+
+  const fromList = pickSiblingSkelFile(atlasFile.name, extraFiles);
+  if (fromList) {
+    _currentSkel = { name: skelName, blob: fromList };
+    await _reparseSkelAndPushToProcessor();
+    return;
+  }
+
+  if (!sourceDir) { await _reparseSkelAndPushToProcessor(); return; }
+  try {
+    let skelPath = joinNativePath(sourceDir, skelName);
+    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
+      const atlasPath = joinNativePath(sourceDir, atlasFile.name);
+      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
+      if (resolved) skelPath = resolved;
+      else { await _reparseSkelAndPushToProcessor(); return; }
+    }
+    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    if (file && file.size > 0) _currentSkel = { name: skelName, blob: file };
+  } catch (_) {
+    // No sibling on disk — Copy .skel is a no-op; mask state stays unavailable.
+  }
+  await _reparseSkelAndPushToProcessor();
+}
+
+/** Parses _currentSkel.blob (if set) into _parsedSkeleton/_meshLookup and
+ *  pushes the result into _processor, then clears the preview memo since
+ *  the effective output for already-cached selections has changed. Safe
+ *  to call with _currentSkel === null (clears mask state instead).
+ *  Does NOT touch _meshMaskEnabled -- that's a persisted user preference
+ *  (same pattern as other persisted prefs), not something that resets per atlas load. Sets
+ *  _meshUnavailableReason to explain why the current .skel (if any) can't
+ *  be used, for the picker button's tooltip. */
+async function _reparseSkelAndPushToProcessor() {
+  _parsedSkeleton = null;
+  _meshLookup = null;
+  _meshUnavailableReason = null;
+  if (_currentSkel) {
+    try {
+      const bytes = new Uint8Array(await _currentSkel.blob.arrayBuffer());
+      _parsedSkeleton = parseSkeleton(bytes);
+      _meshLookup = buildMeshLookup(_parsedSkeleton);
+      // buildMeshLookup always returns a Map (never null), so an all-Region
+      // .skel or one with zero Mesh attachments parses "successfully" but
+      // has nothing this feature could ever mask (found by Fable scrutinize
+      // review, 2026-08-31) -- report that distinctly from a parse failure.
+      if (_meshLookup.size === 0) _meshUnavailableReason = 'no-mesh-attachments';
+    } catch (e) {
+      if (e instanceof UnsupportedVersionError) {
+        _meshUnavailableReason = 'unsupported-version';
+      } else {
+        console.error('skel parse error:', e);
+        _meshUnavailableReason = 'parse-error';
+      }
+    }
+  }
+  if (_processor) {
+    _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+  }
+  _skelEpoch++;
+}
+
+/** Prefer the skel captured at load; otherwise retry from the atlas folder
+ *  at save time (historical Python copied at save, not at open). */
+async function _skelForSave() {
+  const copySkel = await AtlasAPI.get_pref('copySkel', true);
+  if (!copySkel) return null;
+  if (_currentSkel) return _currentSkel;
+  const skelName = siblingSkelFilename(_currentAtlasFilename);
+  if (!skelName || !_currentAtlasDirectory) return null;
+  try {
+    let skelPath = joinNativePath(_currentAtlasDirectory, skelName);
+    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
+      const atlasPath = joinNativePath(_currentAtlasDirectory, _currentAtlasFilename);
+      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
+      if (!resolved) return null;
+      skelPath = resolved;
+    }
+    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    if (file && file.size > 0) return { name: skelName, blob: file };
+  } catch (_) {
+    // Still no sibling .skel.
+  }
+  return null;
+}
+
+async function buildPreviewWorkerMessage(names, forceResize) {
+  const spec = _processor.previewJobSpec(names, forceResize);
+  const pages = [];
+  const transfer = [];
+  for (const pageId of spec.pageIds) {
+    const img = _processor.getPageImage(pageId);
+    if (!img) continue;
+    const bitmap = await createImageBitmap(img);
+    pages.push({ id: pageId, bitmap });
+    transfer.push(bitmap);
+  }
+  return {
+    forceResize: spec.forceResize,
+    regions: spec.regions,
+    pages,
+    transfer,
+  };
+}
+
+// ─── Public API (mirrors pywebview.api) ───────────────────────────────────────
+
+export const AtlasAPI = {
+
+  /** Read a preference from localStorage. Returns a Promise. */
+  get_pref(key, defaultValue = null) {
+    return platform.loadPref(key, defaultValue);
+  },
+
+  set_pref(key, value) {
+    platform.savePref(key, value);
+  },
+
+  /** Whether the currently loaded atlas spans more than one page. Sync getter
+   *  (no await) — read straight off the active session. */
+  is_multi_page() {
+    return !!(_session && _session.isMultiPage);
+  },
+
+  /** Reads the persisted 'meshCropping' pref into _meshMaskEnabled. Call
+   *  once at app startup, NOT per atlas load -- this toggle persists across
+   *  sessions the same way other startup-restored prefs do (advanceMode,
+   *  copySkel). */
+  async init_mesh_mask_from_pref() {
+    _meshMaskEnabled = await AtlasAPI.get_pref('meshCropping', true);
+  },
+
+  /** Reads the persisted 'forcedResizing' pref. Call once at startup. */
+  async init_forced_resizing_from_pref() {
+    _forcedResizing = !!(await AtlasAPI.get_pref('forcedResizing', false));
+  },
+
+  get_forced_resizing() {
+    return _forcedResizing;
+  },
+
+  async set_forced_resizing(enabled) {
+    _forcedResizing = !!enabled;
+    AtlasAPI.set_pref('forcedResizing', _forcedResizing);
+  },
+
+  /** Reads the persisted 'meshHullView' pref. Call once at startup. */
+  async init_mesh_hull_from_pref() {
+    _meshHullEnabled = !!(await AtlasAPI.get_pref('meshHullView', false));
+  },
+
+  get_mesh_hull_enabled() {
+    return _meshHullEnabled;
+  },
+
+  async set_mesh_hull_enabled(enabled) {
+    _meshHullEnabled = !!enabled;
+    AtlasAPI.set_pref('meshHullView', _meshHullEnabled);
+  },
+
+  /** Composite-space hulls for the current View selection. Null when the
+   *  overlay is off. Independent of Mesh Cropping. */
+  get_mesh_hull_layout(names) {
+    if (!_meshHullEnabled || !_processor) return null;
+    return _processor.previewHullLayout(names || [], _forcedResizing);
+  },
+
+  /** Reads the persisted 'meshAwareRepack' pref into _meshAwareRepackEnabled.
+   *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. */
+  async init_mesh_aware_repack_from_pref() {
+    _meshAwareRepackEnabled = await AtlasAPI.get_pref('meshAwareRepack', true);
+  },
+
+  get_mesh_mask_state() {
+    return {
+      available: !!_meshLookup && _meshLookup.size > 0,
+      enabled: _meshMaskEnabled,
+      repackEnabled: _meshAwareRepackEnabled,
+      skelFileName: _currentSkel ? _currentSkel.name : null,
+      unavailableReason: _meshUnavailableReason,
+    };
+  },
+
+  async set_mesh_mask_enabled(enabled) {
+    _meshMaskEnabled = !!enabled;
+    AtlasAPI.set_pref('meshCropping', _meshMaskEnabled);
+    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    return null; // Mesh Cropping no longer affects repack output at all now that the two toggles are decoupled -- no rerun needed.
+  },
+
+  async set_mesh_aware_repack_enabled(enabled) {
+    _meshAwareRepackEnabled = !!enabled;
+    AtlasAPI.set_pref('meshAwareRepack', _meshAwareRepackEnabled);
+    if (_processor) _processor.setMeshMaskData(_meshLookup, _meshMaskEnabled, _meshAwareRepackEnabled);
+    return await _maybeRerunRepack();
+  },
+
+  /** Reads the persisted 'nestRegionsEnabled'/'nestGapDistance' prefs.
+   *  Same call-once-at-startup pattern as init_mesh_mask_from_pref. Also
+   *  pushes the result to _processor if one already exists (mirrors
+   *  init_mesh_mask_from_pref's own ordering relative to atlas load --
+   *  in practice this fires before any atlas is loaded, but stays correct
+   *  either way). */
+  async init_nest_regions_from_pref() {
+    _nestRegionsEnabled = await AtlasAPI.get_pref('nestRegionsEnabled', false);
+    // normalizeGap here too, not just in the setter -- a pref written by an
+    // older build (before set_nest_gap_distance normalized on write), or
+    // hand-edited storage, must not reach the packer/UI unnormalized either.
+    _nestGapDistance = normalizeGap(await AtlasAPI.get_pref('nestGapDistance', 4));
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+  },
+
+  get_nest_options() {
+    return { enabled: _nestRegionsEnabled, gapDistance: _nestGapDistance };
+  },
+
+  async set_nest_regions_enabled(enabled) {
+    _nestRegionsEnabled = !!enabled;
+    AtlasAPI.set_pref('nestRegionsEnabled', _nestRegionsEnabled);
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+    return await _maybeRerunRepack();
+  },
+
+  async set_nest_gap_distance(px) {
+    // Normalize to a finite integer >=1 (clamped to 256) at the boundary so a
+    // raw string from a UI <input> (e.g. '5') can't be persisted unnormalized
+    // and then silently diverge: getNestOptions()'s Number.isFinite guard would
+    // substitute 4 for the actual packer while get_nest_options() kept reporting
+    // the raw value. Enforces the Global Constraint (gapDistance normalized
+    // everywhere it is read).
+    _nestGapDistance = normalizeGap(px);
+    AtlasAPI.set_pref('nestGapDistance', _nestGapDistance);
+    if (_processor) _processor.setNestOptions(_nestRegionsEnabled, _nestGapDistance);
+    return await _maybeRerunRepack();
+  },
+
+  /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
+   *  captured sibling. Returns false if `file` is missing or not a .skel. */
+  async apply_skel_file(file) {
+    if (!file || !isSkelFilename(file.name)) return false;
+    _currentSkel = { name: file.name, blob: file };
+    await _reparseSkelAndPushToProcessor();
+    return true;
+  },
+
+  /** Manual .skel picker — covers sibling auto-resolve misses and the
+   *  browser/PWA target where .skel isn't in the picked/dropped file set.
+   *  pywebview uses the native Open dialog at the atlas folder, same as
+   *  pick_mod_image / pick_page_image — a plain file input cannot. */
+  async pick_skel_file() {
+    if (isPywebviewDesktop() && window.pywebview.api.pick_skel_file) {
+      const path = await window.pywebview.api.pick_skel_file(_currentAtlasDirectory);
+      if (!path) return false;
+      try {
+        const file = await loadFileAsFile(path, 'application/octet-stream');
+        return AtlasAPI.apply_skel_file(file);
+      } catch (e) {
+        console.error('pick_skel_file error:', e);
+        return false;
+      }
+    }
+    const files = await _pickFiles({ accept: '.skel', multiple: false });
+    if (files.length === 0) return false;
+    return AtlasAPI.apply_skel_file(files[0]);
+  },
+
+  /**
+   * Open a file picker that accepts .atlas and image files. Under pywebview,
+   * use the native single-file Open dialog + list_sibling_page_images() to
+   * auto-resolve sibling PNGs from disk (matching the old Python-engine
+   * desktop UX) instead of requiring the user to multi-select the atlas +
+   * every PNG together in a browser `<input type=file>` picker.
+   */
+  async choose_file() {
+    if (isPywebviewDesktop() && window.pywebview.api.pick_atlas_file) {
+      const picked = await window.pywebview.api.pick_atlas_file();
+      const path = Array.isArray(picked) ? picked[0] : picked;
+      if (!path) return false;
+      try {
+        const atlasInfo = await window.pywebview.api.read_file_as_base64(path);
+        const atlasFile = base64ToFile(atlasInfo.base64, atlasInfo.name, 'text/plain');
+        const dir = _dirnameOf(String(path));
+        const imageFileMap = {};
+        // Resolve each atlas page line against the .atlas folder — same rule
+        // as Python session.resolve_page_images (drag/CLI). Do not depend on
+        // list_sibling_page_images's js_api dict (Open was showing missing
+        // even when siblings existed, 2026-08-24). Image() loads file://
+        // directly, same as native mod-image drop.
+        let resolved = {};
+        let resolverUsed = false;
+        if (window.pywebview.api.resolve_sibling_page_images) {
+          resolverUsed = true;
+          const pairs = await window.pywebview.api.resolve_sibling_page_images(path);
+          if (Array.isArray(pairs)) {
+            for (const row of pairs) {
+              if (row && row.name && row.path) resolved[row.name] = row.path;
+            }
+          } else if (pairs && typeof pairs === 'object') {
+            resolved = pairs;
+          }
+        }
+        if (!resolverUsed) {
+          // Older bridge without the exists()-checked resolver: try dirname
+          // + page line. Do not do this after an empty resolver result —
+          // missing files must stay out of the map so the missing-images
+          // dialog still appears.
+          for (const pageName of _extractRequiredPages(autoConvertAtlas(await _readFileAsText(atlasFile)))) {
+            resolved[pageName] = joinNativePath(dir, pageName);
+          }
+        }
+        for (const [pageName, imgPath] of Object.entries(resolved)) {
+          if (imgPath) imageFileMap[pageName] = pathToFileUrl(imgPath);
+        }
+        return _loadAtlasFiles(atlasFile, imageFileMap, dir);
+      } catch (e) {
+        console.error('choose_file (pywebview) error:', e);
+        if (typeof window.showToast === 'function') {
+          window.showToast(`Failed to load atlas file: ${e.message || e}`, 'error');
+        }
+        return false;
+      }
+    }
+
+    const files = await _pickFiles({
+      accept: '.atlas,.txt,text/plain,image/png,.png,.skel',
+      multiple: true,
+    });
+    return _loadAtlasFromFileList(files, {
+      showNoAtlasToast: true,
+    });
+  },
+
+  /** Load atlas from a mixed file list (used by drag-and-drop). */
+  async load_from_files(files, options = {}) {
+    return _loadAtlasFromFileList(files, {
+      showNoAtlasToast: options.showNoAtlasToast,
+    });
+  },
+
+  /** Load atlas directly from a File object (used by drag-and-drop). */
+  async load_atlas_from_file(atlasFile, imageFileMap = {}, sourceDir = '') {
+    return _loadAtlasFiles(atlasFile, imageFileMap, sourceDir);
+  },
+
+  /** Directory the current atlas was natively opened from, or '' — pywebview
+   * only (see `_currentAtlasDirectory`'s doc comment). Used as the starting
+   * directory for extract/save native dialogs. */
+  get_current_atlas_directory() {
+    return _currentAtlasDirectory;
+  },
+
+  /** Filename of the currently-loaded atlas, or '' if none — used by
+   * script.js to update the pywebview native window title. */
+  get_current_atlas_filename() {
+    return _currentAtlasFilename;
+  },
+
+  get_region_names() {
+    if (!_processor) return [];
+    if (_session && _session._hasStructuralBatches()) {
+      const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+      return effective.regionNames.map((key) => ({
+        key,
+        label: effective.labels[key] ?? (_testLabelOverrides.get(key) ?? key),
+      }));
+    }
+    return Object.entries(_processor.regions).map(([key]) => ({
+      key,
+      label: _testLabelOverrides.get(key) ?? key,
+    }));
+  },
+
+  get_region_page_name(key) {
+    if (!_processor || !key) return '';
+    const region = _processor.regions[key];
+    return region ? region.pageFilename : '';
+  },
+
+  preview_is_cached(names) {
+    if (!_processor || !names || names.length === 0) return false;
+    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
+    return _previewCache.has(key);
+  },
+
+  async get_preview(names) {
+    if (!_processor || !names || names.length === 0) return null;
+    const key = viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
+    const hit = _previewCache.get(key);
+    if (hit) return hit;
+    // A new selection joins this promise when the key matches, or starts
+    // another Worker when it does not. The result is cached either way.
+    return runPreviewJob(key, {
+      build: () => buildPreviewWorkerMessage(names, _forcedResizing),
+      fallback: () => _processor.getPreviewDataURL(names, { forceResize: _forcedResizing }),
+      store: (url) => { if (url) _previewCache.set(key, url); },
+    });
+  },
+
+  /**
+   * Extract regions to files (downloads).
+   * @param {{key:string,label:string}[]|null} regions  null = extract all
+   *
+   * Filenames are built from .key, not .label, deliberately. Today
+   * label === key for every region by construction (see
+   * get_region_names()), so this makes no visible difference yet -- but
+   * it matters once a future Rename feature lets label diverge from key:
+   * two regions could then share the same displayed label on purpose
+   * while keeping distinct internal keys, and .label would collide as a
+   * filename. .key stays collision-safe by construction and matches this
+   * function's pre-refactor behavior for every region. (Historically,
+   * before this refactor settled on that default, label was derived from
+   * the parser's atlasName field instead -- under which two regions
+   * sharing a literal atlas name, e.g. 'dagger'/'dagger#2', already had
+   * the same label with different keys and collided this exact way; see
+   * commit 6569241 for that incident.)
+   */
+  async extract_files(regions) {
+    if (!_processor) return 'No atlas loaded.';
+    const targets = regions || AtlasAPI.get_region_names();
+    if (targets.length === 0) return 'No regions to extract.';
+
+    const run = async () => {
+    const extracted = [];
+
+    let count = 0;
+    for (const { key, label } of targets) {
+      const canvas = _processor.extractRegion(key);
+      if (!canvas) continue;
+      try {
+        const safeName = key.replace(/[^\w.\- ]/g, '_');
+        const blob = await _canvasToBlob(canvas);
+        extracted.push({ filename: `${safeName}.png`, blob });
+        count++;
+      } catch (e) {
+        console.error(`Failed to extract ${key}:`, e);
+      }
+    }
+
+    if (extracted.length === 0) return 'No regions to extract.';
+
+    try {
+      // Single region, installed PWA / pywebview desktop: a native Save As
+      // dialog defaulting to "{region}.png" — matches the old Python engine's
+      // extract_files() single-file save flow (a folder picker for one file
+      // was a desktop-UX regression, found via parity audit 2026-08-23).
+      if (extracted.length === 1 && _useFolderPicker()) {
+        await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob, { defaultDir: _currentAtlasDirectory });
+        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+      }
+
+      // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
+      if (_useFolderPicker()) {
+        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
+        if (!folder) return 'Cancelled';
+        await platform.writeFilesToFolder(
+          folder,
+          extracted.map(item => ({ name: item.filename, data: item.blob })),
+          _confirmDialog,
+        );
+        return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
+      }
+
+      // Single image in a browser tab: a direct download beats a zip-of-one.
+      if (extracted.length === 1) {
+        await _downloadBlob(extracted[0].filename, extracted[0].blob);
+        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+      }
+
+      // Browser tab, multiple images: bundle into a zip.
+      const zipBlob = await createZip(
+        extracted.map(item => ({ name: item.filename, data: item.blob })),
+      );
+      await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
+      return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'Cancelled';
+      throw e;
+    }
+    };
+    if (targets.length > 1) return withBusy(BUSY_LABEL, run);
+    return run();
+  },
+
+  // ── Modify Mode ────────────────────────────────────────────────────────────
+
+  async enter_modify_mode() {
+    if (!_processor || !_session) return null;
+    return withBusy(BUSY_LOADING_LABEL, async () => {
+    try {
+      const pages = _processor.pages || [];
+      if (pages.length === 0) return null;
+      const initialPage = pages[0].filename;
+      const baseImg = _processor.getPageImage(initialPage);
+      if (!baseImg) return null;
+
+      // Fresh batches; bump gen so Edit-page cache from the previous
+      // session cannot be served as this pristine view. Do not invalidate
+      // PreviewCache — View keys omit gen and must survive enter/exit.
+      _session.clearModifyState();
+      _session.modGeneration++;
+      _packResultCache.invalidateAll();
+
+      // Build region bounds for overlay: { name: [x, y, w, h, rotate] }.
+      // Scaled per page to the real loaded image size (see
+      // AtlasSession.getModifyRegionBounds) so the overlay lines up even
+      // when a page's PNG doesn't match the atlas's declared `size:`.
+      const regionBounds = _session.getModifyRegionBounds();
+
+      // Preview as a blob: URL — see canvasToPreviewUrl (avoids toDataURL).
+      const baseCanvas = document.createElement('canvas');
+      baseCanvas.width = baseImg.naturalWidth || baseImg.width;
+      baseCanvas.height = baseImg.naturalHeight || baseImg.height;
+      baseCanvas.getContext('2d').drawImage(baseImg, 0, 0);
+
+      const image = await canvasToPreviewUrl(baseCanvas);
+      _ingestEditPage(0, image);
+      return {
+        image,
+        regions: regionBounds,
+        pages: pages.map(p => p.filename),
+        regionPages: _getRegionPageMap(),
+        activePage: initialPage,
+      };
+    } catch (e) {
+      console.error('enter_modify_mode error:', e);
+      return null;
+    }
+    });
+  },
+
+  exit_modify_mode() {
+    if (_session) _session.clearModifyState();
+    _packResultCache.invalidateAll();
+  },
+
+  preview_url_is_cached(url) {
+    return _previewCache.owns(url);
+  },
+
+  /**
+   * Preview data for one atlas page. Accepts a 0-based index (old Python
+   * `get_modify_page_image(index)`) or a page filename. Prefers the merged
+   * slot at that index once mods exist.
+   * @param {number|string} pageFilenameOrIndex
+   * @returns {Promise<{image: string, activePage: string, activeIndex: number}|null>}
+   */
+  async get_modify_page_preview(pageFilenameOrIndex) {
+    if (!_processor || !_session) return null;
+    try {
+      let index = pageFilenameOrIndex;
+      if (typeof pageFilenameOrIndex === 'string') {
+        index = _session.processor.pages.findIndex(p => p.filename === pageFilenameOrIndex);
+        if (index < 0 && _session.active && _session.active.text) {
+          index = AtlasDocument.parse(_session.active.text).pageFilenames()
+            .indexOf(pageFilenameOrIndex);
+        }
+      }
+      index = Number(index);
+      if (!Number.isInteger(index) || index < 0) return null;
+      const key = editPreviewKey(index, _session.modGeneration, _loadEpoch, _currentPackSig());
+      const hit = _previewCache.get(key);
+      const activePage = (_session.processor.pages[index] || {}).filename || String(pageFilenameOrIndex);
+      if (hit) return { image: hit, activePage, activeIndex: index };
+      const canvas = _session.getModifyPageImage(index);
+      if (!canvas) return null;
+      const image = await canvasToPreviewUrl(canvas);
+      if (image) _previewCache.set(key, image);
+      return { image, activePage, activeIndex: index };
+    } catch (e) {
+      console.error('get_modify_page_preview error:', e);
+      return null;
+    }
+  },
+
+  /** True when there are unsaved modify-mode modifications. */
+  has_pending_modifications() {
+    return !!_session && _session.hasPendingModifications();
+  },
+
+  /** Names of regions touched by any pending mod batch — old Python engine's
+   * `AtlasSession.modified_regions` property, used by region-list.js to render
+   * the bold-green "name*" highlight it had. Mirrors `moddedSprites`, which
+   * (like Python's `modded_sprites` dict) persists across every session-lifetime mod apply and
+   * accumulates across every mod apply, not just the latest. */
+  get_modified_region_names() {
+    if (!_session) return [];
+    if (_session._hasStructuralBatches()) {
+      return [...deriveEffectiveModel(_processor.regions, _session.modBatches).modifiedKeys];
+    }
+    return Object.keys(_session.moddedSprites);
+  },
+
+  /**
+   * Pick a mod PNG and process it. Under pywebview, use the native Open
+   * dialog (pick_mod_image) starting at the atlas's own folder, matching the
+   * old Python engine — a plain `<input type=file>` can't be pointed at a
+   * starting directory (found via parity audit, 2026-08-23).
+   */
+  async select_mod_image(selectedNames) {
+    if (!_session || !selectedNames || selectedNames.length === 0) return null;
+    let file;
+    if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
+      const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
+      if (!path) return null;
+      // Pass a file:// URL straight to process_mod_image — Image() loads
+      // it directly (no fetch→File copy, no toDataURL). Same trick as
+      // applyNativeModImageDrop (perf fix, 2026-08-23).
+      file = pathToFileUrl(path);
+    } else {
+      const files = await _pickFiles({ accept: IMAGE_PICKER_ACCEPT, multiple: false });
+      if (files.length === 0) return null;
+      file = files[0];
+    }
+    return AtlasAPI.process_mod_image(file, selectedNames);
+  },
+
+  /** Process a mod image (File or canvas/img) for the selected regions. */
+  async process_mod_image(source, selectedNames) {
+    if (!_session || !selectedNames || selectedNames.length === 0) return null;
+    return withBusy(BUSY_LABEL, async () => {
+      try {
+        const result = await _session.processModImage(source, selectedNames);
+        if (result) {
+          _packResultCache.invalidateAll();
+          _rememberPackResult(result);
+        }
+        return result;
+      } catch (e) {
+        console.error('process_mod_image error:', e);
+        if (typeof window.showToast === 'function') window.showToast(`Error: ${e.message}`, 'error');
+        return null;
+      }
+    });
+  },
+
+  /** Save the merged atlas files. Installed PWA: folder picker + batched
+   *  write. Browser tab: zip download. */
+  async save_modified() {
+    if (!_session || !_session.hasMergedOutput()) return 'Error: No merged data to save.';
+    const merged = _session.getMergedOutput();
+    try {
+      // Build the list of outputs (png(s), atlas text, optional skel) up front
+      // so we can route through either the folder writer or the zip download.
+      const outputs = [];
+
+      if (merged.pages && merged.pages.length > 0) {
+        const pageNames = pngNamesForSave(merged.text, merged.pages.length, _currentAtlasFilename);
+        for (let i = 0; i < merged.pages.length; i++) {
+          if (!merged.pages[i]) continue;
+          outputs.push({ name: pageNames[i], data: await _canvasToBlob(merged.pages[i]) });
+        }
+      } else if (merged.canvas) {
+        const pageName = pngNamesForSave(merged.text, 1, _currentAtlasFilename)[0];
+        outputs.push({ name: pageName, data: await _canvasToBlob(merged.canvas) });
+      } else {
+        return 'Error: No merged data to save.';
+      }
+
+      outputs.push({ name: _currentAtlasFilename, data: merged.text });
+      const skel = await _skelForSave();
+      if (skel) {
+        outputs.push({ name: skel.name, data: skel.blob });
+      }
+
+      // Installed PWA / pywebview desktop: pick a folder and write all outputs into it.
+      if (_useFolderPicker()) {
+        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
+        if (!folder) return 'Cancelled';
+        await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
+        _session.markSaved();
+        // Matches old Python engine's bridge.py save_merged_to() exactly
+        // (`f"Saved to: {result[0]}"`) when a real path is available
+        // (pywebview: folder is a plain string; browser: a
+        // FileSystemDirectoryHandle never exposes a full path) — parity fix,
+        // 2026-08-23.
+        return typeof folder === 'string'
+          ? `Saved to: ${folder}`
+          : 'Saved to selected folder.';
+      }
+
+      // Browser tab: bundle all outputs into a single zip download.
+      const zipBlob = await createZip(outputs);
+      await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, zipBlob);
+      _session.markSaved();
+      const summary = outputs.map(o => o.name).join(' and ');
+      return `Saved as zip: ${summary}`;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'Cancelled';
+      return `Error: ${e.message}`;
+    }
+  },
+
+  /**
+   * Generate an AddBatch's internal key: the candidate atlasName as the
+   * seed, disambiguated against existing pristine keys and any other
+   * AddBatch already in this session by appending _2, _3, ... to the SEED
+   * (never to atlasName — this key is never serialized, so it can never
+   * reach the reparse-collision class region-name-validation.js's '#' ban
+   * exists to prevent). Spec §2.5.
+   */
+  _generateAddInternalKey(seed) {
+    const existing = new Set(Object.keys(_processor.regions));
+    for (const batch of _session.modBatches) {
+      if (batch.type === 'add') existing.add(batch.internalKey);
+    }
+    if (!existing.has(seed)) return seed;
+    let n = 2;
+    while (existing.has(`${seed}_${n}`)) n += 1;
+    return `${seed}_${n}`;
+  },
+
+  async add_region(file, atlasName) {
+    if (!_session) throw new Error('No active modify session.');
+    const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+    const validation = validateRegionName(atlasName, Object.values({
+      ...Object.fromEntries(Object.keys(effective.regions).map((k) => [k, effective.labels[k] ?? k])),
+    }));
+    if (!validation.ok) throw new Error(validation.reason);
+    return withBusy(BUSY_LABEL, async () => {
+      const sourceCanvas = await _loadImage(file);
+      const internalKey = this._generateAddInternalKey(validation.value);
+      const result = await _session.applyStructuralBatch(new AddBatch(internalKey, validation.value, sourceCanvas));
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
+  },
+
+  async remove_regions(keys) {
+    if (!_session) throw new Error('No active modify session.');
+    return withBusy(BUSY_LABEL, async () => {
+      let result = null;
+      for (const key of keys) {
+        result = await _session.applyStructuralBatch(new RemoveBatch(key));
+      }
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
+  },
+
+  async rename_region(key, newAtlasName) {
+    if (!_session) throw new Error('No active modify session.');
+    const effective = deriveEffectiveModel(_processor.regions, _session.modBatches);
+    const others = Object.keys(effective.regions)
+      .filter((k) => k !== key)
+      .map((k) => effective.labels[k] ?? k);
+    const validation = validateRegionName(newAtlasName, others);
+    if (!validation.ok) throw new Error(validation.reason);
+    return withBusy(BUSY_LABEL, async () => {
+      const result = await _session.applyStructuralBatch(new RenameBatch(key, validation.value));
+      _packResultCache.invalidateAll();
+      _rememberPackResult(result);
+      return result;
+    });
+  },
+
+};
+
+/**
+ * Test-only: register a label override consulted by get_region_names(),
+ * so a test can verify the key/label split is wired correctly end-to-end
+ * (nothing in production behavior creates this divergence yet -- see the
+ * region-identity-key-refactor spec's § Acceptance criterion). Deliberately
+ * a plain named export, NOT attached to the `AtlasAPI` object or `window`
+ * -- reachable only via a direct ES module import
+ * (`import { __testOnlySetLabel } from './atlas-api.js'`), the same access
+ * pattern `tests/browser/verify-ui-flows.mjs` already uses for other module
+ * internals. Not part of the public API.
+ */
+export function __testOnlySetLabel(key, label) {
+  _testLabelOverrides.set(key, label);
+}
+
+export { _loadAtlasFiles };

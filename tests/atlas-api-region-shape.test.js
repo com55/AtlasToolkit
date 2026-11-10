@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AtlasAPI, __testOnlySetLabel } from '../www/js/atlas-api.js';
+import { AtlasAPI, __testOnlySetLabel } from '../www/js/atlas-api-legacy.js';
 
 test('get_region_names returns an empty array with no atlas loaded', () => {
   assert.deepEqual(AtlasAPI.get_region_names(), []);

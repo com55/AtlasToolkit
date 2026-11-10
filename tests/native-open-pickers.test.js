@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AtlasAPI } from '../www/js/atlas-api.js';
+import { AtlasAPI } from '../www/js/atlas-api-legacy.js';
 import { openAddRegionModal } from '../www/js/dialogs.js';
 
 function installWindow({ pickSkel } = {}) {

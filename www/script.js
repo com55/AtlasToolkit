@@ -1,3 +1,4 @@
+import { startEngine } from './js/engine-client.js';
 import { AtlasAPI } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
@@ -64,6 +65,15 @@ function _waitForPywebviewReady() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+  const loading = document.getElementById('engine-loading');
+  try {
+    await startEngine(status => { document.getElementById('engine-loading-status').textContent = status; });
+    loading.classList.add('hidden');
+  } catch (error) {
+    loading.classList.add('hidden');
+    await window.showAlert('The Python engine failed to start: ' + error.message, 'Engine error');
+    return;
+  }
   await _waitForPywebviewReady();
   appVersion = await resolveAppVersion();
   applyAppTitle('');
