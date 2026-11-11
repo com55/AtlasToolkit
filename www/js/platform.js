@@ -518,7 +518,7 @@ export async function loadPref(key, defaultValue = null) {
     } catch (_) { return defaultValue; }
   }
   try {
-    const raw = localStorage.getItem(`atlastoolkit.${key}`);
+    const raw = localStorage.getItem(`atlastoolkit-py.${key}`);
     return raw !== null ? JSON.parse(raw) : defaultValue;
   } catch (_) { return defaultValue; }
 }
@@ -528,7 +528,7 @@ export function savePref(key, value) {
     window.pywebview.api.set_pref(key, value);
     return;
   }
-  try { localStorage.setItem(`atlastoolkit.${key}`, JSON.stringify(value)); } catch (_) {}
+  try { localStorage.setItem(`atlastoolkit-py.${key}`, JSON.stringify(value)); } catch (_) {}
 }
 
 export const platform = {

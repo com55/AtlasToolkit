@@ -73,7 +73,7 @@ const server = http.createServer((req, res) => {
   }
   let filename;
   try {
-    filename = path.resolve(SITE, '.' + decodeURIComponent(pathname));
+    filename = path.resolve(SITE, '.' + decodeURIComponent(pathname === '/' ? '/index.html' : pathname));
   } catch {
     res.writeHead(400).end();
     return;
@@ -738,6 +738,63 @@ try {
   await pendingPage.close();
   console.log('PASS pending Add/Modify UI, Auto/chosen page, single-page selector hidden, late skeleton, polygon locks, skeleton during Edit rebuild');
 
+
+  const keys = await app.evaluate(() => Object.keys(localStorage));
+  if (!keys.length || keys.some(key => !key.startsWith('atlastoolkit-py.'))) {
+    throw new Error('App preferences escaped the Python storage namespace');
+  }
+  console.log('PASS app localStorage keys use the Python namespace');
+
+  const offlineContext = await browser.newContext({serviceWorkers: 'allow'});
+  offlineContext.on('request', request => {
+    const url = new URL(request.url());
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      if (url.origin !== origin) external.push(request.url());
+    }
+  });
+  await offlineContext.route('**/*', localOnly);
+  const offlinePage = await offlineContext.newPage();
+  try {
+    await offlinePage.goto(origin + '/index.html');
+    await offlinePage.evaluate(async () => { await navigator.serviceWorker.ready; });
+    if (!await offlinePage.evaluate(() => !!navigator.serviceWorker.controller)) {
+      await offlinePage.reload();
+    }
+    await offlinePage.waitForFunction(() => !!navigator.serviceWorker.controller, null, {timeout:120000, polling:500});
+    await offlineContext.setOffline(true);
+    await offlinePage.reload();
+    await offlinePage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000, polling:500});
+    await offlinePage.evaluate(async () => {
+      const {AtlasAPI} = await import('/js/atlas-api.js');
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 12;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#d02030'; ctx.fillRect(0, 0, 12, 12);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const atlas = 'p.png\nsize: 12,12\npma: false\na\n bounds: 0,0,10,2\n';
+      if (!await AtlasAPI.load_from_files([new File([atlas], 'synthetic.atlas'), new File([blob], 'p.png', {type:'image/png'})])) {
+        throw new Error('Offline synthetic atlas load failed');
+      }
+      await (await import('/js/region-list.js')).loadRegions();
+    });
+    await offlinePage.locator('.region-item').first().click();
+    await offlinePage.waitForFunction(() => {
+      const img = document.getElementById('preview-img');
+      return img.complete && img.naturalWidth === 10 && img.naturalHeight === 2;
+    }, null, {timeout:60000, polling:500});
+    if (!await offlinePage.evaluate(() => {
+      const img = document.getElementById('preview-img');
+      const canvas = document.createElement('canvas'); canvas.width = 10; canvas.height = 2;
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
+      return [...ctx.getImageData(0, 0, 10, 2).data].some((v, i) => i % 4 === 3 && v > 0);
+    })) throw new Error('Offline preview is blank');
+    const offlineKeys = await offlinePage.evaluate(() => Object.keys(localStorage));
+    if (offlineKeys.some(key => !key.startsWith('atlastoolkit-py.'))) throw new Error('Offline storage namespace mismatch');
+    console.log('PASS controlled offline reload starts engine and renders synthetic atlas');
+  } finally {
+    await offlineContext.setOffline(false);
+    await offlineContext.close();
+  }
 
   if (external.length) throw new Error(`Non-local requests recorded: ${external.length}`);
   console.log('PASS no request leaves the local server');

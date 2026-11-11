@@ -204,3 +204,66 @@ def test_parser_cache_is_keyed_by_tag(tmp_path, monkeypatch):
     monkeypatch.setattr(build_web.subprocess, "run", lambda *args, **kwargs: None)
     build_web.build_project_wheels(tmp_path)
     assert built == [build_web.ROOT, source]
+
+
+def test_generated_sw_inventory_and_content_identity(tmp_path):
+    template = (build_web.ROOT / 'www/sw.js').read_text()
+    (tmp_path / 'index.html').write_text('shell')
+    (tmp_path / 'wheels').mkdir()
+    (tmp_path / 'wheels/engine.whl').write_bytes(b'wheel')
+    (tmp_path / 'sw.js').write_text('old worker')
+    first = build_web.generate_sw(tmp_path, template)
+    import re
+    assets = json.loads(re.search(r'const CORE_ASSETS = (\[.*?\])', first, re.S)[1])
+    assert assets == ['.', 'index.html', 'wheels/engine.whl']
+    name = re.search(r'const CACHE_NAME = [\"\x27]([^\"\x27]+)', first)[1]
+    assert re.fullmatch(r'atlas-toolkit-py-[0-9a-f]{12}', name)
+    assert not re.fullmatch(r'atlas-toolkit-v\d+', name)
+    assert build_web.generate_sw(tmp_path, template) == first
+    (tmp_path / 'wheels/engine.whl').write_bytes(b'changed')
+    assert build_web.generate_sw(tmp_path, template) != first
+
+
+def test_assemble_stamps_and_generates_complete_site(tmp_path, monkeypatch):
+    template = (build_web.ROOT / 'www/sw.js').read_text()
+    source = tmp_path / 'www'
+    (source / 'js/vendor').mkdir(parents=True)
+    (source / 'index.html').write_text('<title>Atlas Toolkit</title>')
+    (source / 'sw.js').write_text(template)
+    (source / 'js/vendor/old.js').write_text('excluded')
+    (source / 'js/atlas-document.js').write_text('excluded')
+    (source / 'script.js').write_text('retained')
+    (tmp_path / 'pyproject.toml').write_text('version = "1.2.3"')
+    runtime = tmp_path / 'runtime.wasm'
+    runtime.write_bytes(b'runtime')
+    wheel = tmp_path / 'engine.whl'
+    wheel.write_bytes(b'wheel')
+    monkeypatch.setattr(build_web, 'ROOT', tmp_path)
+    out = tmp_path / 'site'
+    build_web.assemble_site(out, [runtime], {'atlas_toolkit': wheel})
+    assert sorted(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()) == [
+        'index.html', 'pyodide/runtime.wasm', 'script.js', 'sw.js',
+        'wheels/engine.whl', 'wheels/manifest.json',
+    ]
+    assert json.loads((out / 'wheels/manifest.json').read_text()) == {'atlas_toolkit': 'engine.whl'}
+    assert '<title>Atlas Toolkit v1.2.3</title>' in (out / 'index.html').read_text()
+    assert 'name="app-version" content="1.2.3"' in (out / 'index.html').read_text()
+    assert (out / 'sw.js').read_text() == build_web.generate_sw(out, template)
+
+
+def test_import_offenders_follows_exports_and_rejects_escape(tmp_path):
+    (tmp_path / 'script.js').write_text("export { a } from './a.js'; export * from './missing.js';")
+    (tmp_path / 'a.js').write_text("import '../outside.js';")
+    (tmp_path.parent / 'outside.js').write_text('exists outside site')
+    assert import_offenders(tmp_path) == ['../outside.js', 'missing.js']
+
+
+@pytest.mark.parametrize('flags, expected', [([], 1), (['--strict'], 1), (['--no-strict'], 0)])
+def test_main_strict_default(tmp_path, monkeypatch, flags, expected):
+    monkeypatch.setattr(build_web, 'ROOT', tmp_path)
+    monkeypatch.setattr(sys, 'argv', ['build_web.py', *flags])
+    monkeypatch.setattr(build_web, 'download_runtime', lambda path: [])
+    monkeypatch.setattr(build_web, 'build_project_wheels', lambda path: {})
+    monkeypatch.setattr(build_web, 'assemble_site', lambda *args: None)
+    monkeypatch.setattr(build_web, 'import_offenders', lambda site: ['missing.js'])
+    assert build_web.main() == expected

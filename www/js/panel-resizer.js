@@ -60,7 +60,7 @@ export function initPanelResizer() {
       leftPanel.style.removeProperty('min-width');
       leftPanel.style.removeProperty('flex');
 
-      const stored   = Number(localStorage.getItem('atlastoolkit.layout.portrait.previewHeight'));
+      const stored   = Number(localStorage.getItem('atlastoolkit-py.layout.portrait.previewHeight'));
       const fallback = Math.round(window.innerHeight * 0.44);
       const minH     = minRightHeight();
       const maxH     = maxRightHeight();
@@ -114,7 +114,7 @@ export function initPanelResizer() {
       splitter.releasePointerCapture(e.pointerId);
     }
     localStorage.setItem(
-      'atlastoolkit.layout.portrait.previewHeight',
+      'atlastoolkit-py.layout.portrait.previewHeight',
       String(Math.round(rightPanel.getBoundingClientRect().height)),
     );
   };

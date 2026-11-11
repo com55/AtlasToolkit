@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from urllib.request import urlretrieve
 
+from web_version import load_version, stamp_index_html
+
 ROOT = Path(__file__).resolve().parents[1]
 PYODIDE_VERSION = "314.0.7"
 PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
@@ -26,7 +28,7 @@ EXCLUDED = {
     )
 } | {"workers/engine-job-worker.js", "workers/preview-job-worker.js"}
 IMPORT_RE = re.compile(
-    r"\bimport\s*(?:\(\s*|(?:[^;'\"()]*?\bfrom\s*)?)[\"']([^\"']+)[\"']"
+    r"\b(?:export\s+[^;\"\']*?\bfrom\s*|import\s*(?:\(\s*|(?:[^;'\"()]*?\bfrom\s*)?))[\"']([^\"']+)[\"']"
 )
 
 
@@ -128,8 +130,20 @@ def prepare_output(out: Path) -> None:
     raise ValueError(f"{out} does not look like a build output")
 
 
+def generate_sw(site: Path, template: str) -> str:
+    """Fill the worker template with a deterministic inventory and content ID."""
+    paths = sorted(path.relative_to(site).as_posix()
+                   for path in site.rglob("*")
+                   if path.is_file() and path.relative_to(site).as_posix() != "sw.js")
+    pairs = [(name, hashlib.sha256((site / name).read_bytes()).hexdigest())
+             for name in paths]
+    digest = hashlib.sha256(json.dumps(pairs, separators=(",", ":")).encode()).hexdigest()[:12]
+    return (template.replace("__CACHE_NAME__", json.dumps("atlas-toolkit-py-" + digest))
+            .replace("__CORE_ASSETS__", json.dumps(sorted([".", *paths]), indent=2)))
+
+
 def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:
-    """Copy the UI and built dependencies, omitting the old service worker."""
+    """Copy dependencies, stamp the shell, then generate the offline worker."""
     for source in (ROOT / "www").rglob("*"):
         relative = source.relative_to(ROOT / "www")
         if not source.is_file() or excluded(relative.as_posix()) or relative.as_posix() == "sw.js":
@@ -147,11 +161,19 @@ def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> No
         encoding="utf-8",
     )
 
+    index = out / "index.html"
+    index.write_text(stamp_index_html(index.read_text(encoding="utf-8"), load_version(ROOT)),
+                     encoding="utf-8")
+    (out / "sw.js").write_text(
+        generate_sw(out, (ROOT / "www/sw.js").read_text(encoding="utf-8")),
+        encoding="utf-8",
+    )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path("dist/web"))
-    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
     out = (ROOT / args.out).resolve()
     cache = ROOT / "dist/.cache"
