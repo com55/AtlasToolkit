@@ -129,14 +129,12 @@
         <div id="options-row-wrap">
           <ul id="options-row">
           <li id="options-group-skel" class="hidden"><button id="btn-pick-skel" class="skel-picker-btn" type="button"></button></li>
-          <li id="options-group-mesh">
-            <div class="only-view-mode">
+          <li id="options-group-mesh" class="only-view-mode">
               <label class="toggle-label" id="mesh-mask-toggle-row" data-help="Mesh Cropping will crop each region using its real mesh silhouette from the .skel file instead of a plain rectangle, preventing bleed from other regions packed nearby.">
                 <input type="checkbox" id="chk-mesh-mask" />
                 <span class="toggle-switch"></span>
                 <span>Mesh Cropping</span>
               </label>
-            </div>
           </li>
           <li id="options-group-mesh-hull" class="only-view-mode">
             <label class="toggle-label" id="mesh-hull-toggle-row" data-help="Draw each selected region's mesh silhouette in blue over the preview. The saved image stays unchanged.">

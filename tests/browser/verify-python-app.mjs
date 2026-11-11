@@ -432,7 +432,8 @@ try {
   const settingsPage = await context.newPage();
   await settingsPage.goto(origin + '/index.html', {waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
-  const loadSettingsFixture = async (count = 2, pma = false) => {
+  const returnSettingsToView = async () => {
+    await settingsPage.waitForFunction(async () => !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
     if (await settingsPage.evaluate(() => document.body.classList.contains('mode-modify'))) {
       const pending = await settingsPage.evaluate(() => window.settingsAPI.has_pending_modifications());
       await settingsPage.locator('#mode-extract').click();
@@ -440,8 +441,11 @@ try {
         await settingsPage.locator('#modal-overlay').waitFor({state:'visible'});
         await settingsPage.locator('#btn-modal-confirm').click();
       }
-      await settingsPage.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});
+      await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-extract') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
     }
+  };
+  const loadSettingsFixture = async (count = 2, pma = false) => {
+    await returnSettingsToView();
     return settingsPage.evaluate(async ({count,pma}) => {
     const {AtlasAPI: api} = await import('/js/atlas-api.js');
     window.settingsAPI = api;
@@ -469,6 +473,7 @@ try {
   if (!await settingsPage.locator('#options-row > li:first-child #btn-pick-skel').isVisible()) throw new Error('View picker placement');
   if (!await settingsPage.locator('#chk-mesh-mask').isDisabled() || !await settingsPage.locator('#chk-mesh-hull').isDisabled()) throw new Error('Mesh controls enabled without mesh');
   if (!await settingsPage.locator('#chk-forced-resizing').isEnabled()) throw new Error('Forced resizing disabled');
+  await returnSettingsToView();
   await settingsPage.locator('#mode-modify').click();
   await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
   await settingsPage.locator('#btn-pack-chip').click();
@@ -481,10 +486,42 @@ try {
     if (!await row.isDisabled() || !(await row.innerText()).includes('Needs a .skel file')) throw new Error('Polygon availability');
   }
   if (await settingsPage.locator('#s-alpha').count()) throw new Error('Alpha shown for straight atlas');
-  const beforePacking = await settingsPage.locator('#preview-img').getAttribute('src');
+  if (await settingsPage.locator('#options-group-mesh').isVisible()) throw new Error('Empty mesh divider visible in Edit');
+  if (await settingsPage.locator('#options-row > li').evaluateAll(items => items.some(li => getComputedStyle(li).display !== 'none' && ![...li.querySelectorAll('button,label')].some(child => child.getClientRects().length)))) throw new Error('Visible empty options item');
+  await settingsPage.evaluate(async () => {
+    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const unedited = await window.settingsAPI.set_settings({keepLayout:false});
+    await onModPreviewReceived(unedited);
+    const {state} = await import('/js/state.js');
+    if (state.hasModImage || !document.getElementById('btn-save-mod').disabled || !document.getElementById('btn-reset-mod').disabled) throw new Error('Unedited settings result enables Save or Reset');
+    const sizes = [[120,60],[120,60],[150,190],[130,130],[70,160],[70,160],[170,110],[90,40]];
+    for (let i=0; i<sizes.length; i++) {
+      const [w,h] = sizes[i]; const c = new OffscreenCanvas(w,h); const ctx = c.getContext('2d');
+      ctx.fillStyle = 'rgb('+(20+i*25)+',80,120)'; ctx.fillRect(0,0,w,h);
+      const file = new File([await c.convertToBlob({type:'image/png'})],'edit.png');
+      const result = i<2 ? await window.settingsAPI.process_mod_image(file,['r'+i]) : await window.settingsAPI.add_region(file,'shape'+i);
+      await onModPreviewReceived(result);
+    }
+    window.settingsPreviewPixels = async () => {
+      const img = document.getElementById('preview-img'); await img.decode();
+      const c = new OffscreenCanvas(img.naturalWidth,img.naturalHeight); const ctx = c.getContext('2d'); ctx.drawImage(img,0,0);
+      return img.naturalWidth+'x'+img.naturalHeight+':'+[...ctx.getImageData(0,0,c.width,c.height).data].join(',');
+    };
+  });
+  const beforePacking = await settingsPage.evaluate(() => window.settingsPreviewPixels());
   await settingsPage.locator('[data-packer="rectangles"]').click();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await settingsPage.waitForFunction(before => document.getElementById('preview-img').getAttribute('src') !== before, beforePacking, {polling:500});
+  await settingsPage.waitForFunction(async () => !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  // Wait for the returned EditResult to reach the displayed image, then
+  // compare decoded pixels/dimensions rather than minted blob URLs.
+  await settingsPage.waitForFunction(async before => (await window.settingsPreviewPixels()) !== before, beforePacking, {polling:500});
+  await settingsPage.locator('#p-num').fill('');
+  await settingsPage.keyboard.type('1');
+  await settingsPage.waitForFunction(async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await settingsPage.keyboard.type('5');
+  await settingsPage.waitForFunction(async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
+  if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
   await settingsPage.locator('#p-num').fill('5');
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('5px'), null, {polling:500});
   await settingsPage.locator('[data-packer="rectangles_in_place"]').click();
@@ -525,8 +562,10 @@ try {
     const {renderSettings} = await import('/js/settings-panel.js');
     renderSettings(window.settingsAPI.get_settings()); renderSettings(window.settingsAPI.get_settings());
     if (window.settingsToasts.filter(([text]) => text === 'Polygons need a .skel file; using Rectangles.').length !== 1) throw new Error('Fallback toast count');
-    await window.settingsAPI.set_settings({packer:'shelf',padding:2,keepLayout:false});
   });
+  await loadSettingsFixture();
+  if (await settingsPage.evaluate(() => window.settingsToasts.filter(([text]) => text === 'Polygons need a .skel file; using Rectangles.').length) !== 2) throw new Error('Second atlas fallback toast missing');
+  await settingsPage.evaluate(() => window.settingsAPI.set_settings({packer:'shelf',padding:2,keepLayout:false}));
   await loadSettingsFixture(1600, true);
   await settingsPage.locator('#mode-modify').click();
   await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});

@@ -154,12 +154,11 @@ test('withBusy Loading... label is used when passed explicitly', async () => {
 });
 
 test('withBusy closes work overlays including confirm before painting', async () => {
-  const { rename, add, gap, help, body, modal } = installBusyDom();
+  const { rename, add, help, body, modal } = installBusyDom();
   modal.classList.remove('hidden');
   await withBusy(async () => {
     assert.equal(rename.classList.contains('hidden'), true);
     assert.equal(add.classList.contains('hidden'), true);
-    assert.equal(gap.classList.contains('hidden'), true);
     assert.equal(help.classList.contains('hidden'), true);
     assert.equal(modal.classList.contains('hidden'), true);
     assert.equal(body.dataset.addRegionDialogOpen, 'false');

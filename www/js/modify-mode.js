@@ -54,8 +54,6 @@ export function setMode(mode) {
   updatePageSwitcher();
   hideHelpPopover();
   closeSettingsPanel();
-  // Picker visibility follows the mode-relevant mesh toggle; refresh so a
-  // View↔Edit switch doesn't leave the button stuck on the previous mode.
   updateMeshCroppingUI();
   // Wrapping extra <li> groups can change #options-row height when expanded,
   // so re-measure overflow after the mode-gated children settle, then
@@ -193,7 +191,7 @@ export async function ReplaceSelected() {
 }
 
 export async function onModPreviewReceived(data) {
-  state.hasModImage = true;
+  state.hasModImage = data.state ? !!data.state.hasPending : AtlasAPI.has_pending_modifications();
   if (data.regions) state.modifyRegionBounds = data.regions;
   if (Array.isArray(data.pages) && data.pages.length > 0) {
     state.modifyPages = data.pages;
@@ -220,7 +218,7 @@ export async function onModPreviewReceived(data) {
 
   setPreviewSrc(image);
   previewImg.style.display = 'block';
-  setStatus('Mod image merged. Ready to save.');
+  setStatus(state.hasModImage ? 'Mod image merged. Ready to save.' : 'Select regions and click Modify Selected');
   updateModifyActionButtons();
   refreshModifiedHighlight();
   previewImg.onload = function () {
@@ -228,7 +226,7 @@ export async function onModPreviewReceived(data) {
     const imgH = previewImg.naturalHeight;
     // Always the WxH form, regardless of page count — matches old Python
     // engine's ui/js/modify.js exactly (parity fix, 2026-08-23).
-    setStatus(`Merged preview (${imgW}x${imgH}). Ready to save.`);
+    setStatus(state.hasModImage ? `Merged preview (${imgW}x${imgH}). Ready to save.` : 'Select regions and click Modify Selected');
     applyAutoFit();
     previewImg.onload = null;
   };
@@ -300,12 +298,6 @@ export function updateMeshCroppingUI() {
   document.getElementById('chk-mesh-mask').disabled = !available;
   updateMeshHullUI();
 
-  // Shared .skel picker button -- relevant toggle depends on which mode is
-  // currently active: View mode shows Mesh Cropping row, Edit mode shows
-  // Mesh-Aware Repack row (CSS hides whichever one is not current), so the
-  // button follows whichever toggle is actually visible right now, not
-  // "either toggle is on" -- the two toggles are otherwise fully
-  // independent of each other.
   const btn = document.getElementById('btn-pick-skel');
   const atlasLoaded = !!AtlasAPI.get_current_atlas_filename();
   if (!atlasLoaded) {
@@ -403,7 +395,7 @@ document.getElementById('chk-mesh-mask').addEventListener('change', async (e) =>
   }
 });
 
- document.getElementById('btn-pick-skel').addEventListener('click', async () => {
+document.getElementById('btn-pick-skel').addEventListener('click', async () => {
   const picked = await AtlasAPI.pick_skel_file();
   if (picked) {
     updateMeshCroppingUI();

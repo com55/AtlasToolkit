@@ -36,23 +36,18 @@ export function hideBusyStatus() {
   }
 }
 
-/** Hide gap/rename/add/help/confirm so they are gone before busy paints.
+/** Hide rename/add/help/confirm so they are gone before busy paints.
  *  Confirm is already resolved by the time withBusy runs. */
 export function dismissWorkOverlays() {
   for (const id of [
     'rename-modal',
     'add-region-modal',
-    'nest-gap-overlay',
     'opt-help-popover',
     'modal-overlay',
   ]) {
     const node = el(id);
     if (node && node.classList) node.classList.add('hidden');
   }
-  const gap = el('nest-gap-overlay');
-  if (gap && gap.classList) gap.classList.remove('is-touch-modal');
-  const gear = el('btn-nest-settings');
-  if (gear && gear.setAttribute) gear.setAttribute('aria-expanded', 'false');
   if (typeof document !== 'undefined' && document.body && document.body.dataset) {
     document.body.dataset.addRegionDialogOpen = 'false';
   }

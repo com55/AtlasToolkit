@@ -325,6 +325,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
     const skel = await _captureSiblingSkel(atlasFile, sourceDir, extraFiles);
     const skelBytes = skel ? new Uint8Array(await skel.blob.arrayBuffer()) : null;
     const loaded = await callHost('load', [atlasFile.name, rawText, pages, skel?.name || null, skelBytes]);
+    (await import('./settings-panel.js')).resetSettingsFallback();
     _state = loaded;
     await publishSettings();
     _edit = false;
@@ -469,15 +470,15 @@ export const AtlasAPI = {
   async init_settings_from_prefs() {
     const partial = {};
     for (const [key, pref, value] of SETTING_PREFS) partial[key] = await AtlasAPI.get_pref(pref, value);
-    try { await AtlasAPI.set_settings(partial); }
+    try { await AtlasAPI.set_settings(partial, {busy: false}); }
     catch (e) {
       if (!(e instanceof HostError) || e.type !== 'ValueError') throw e;
       for (const [key, pref, value] of SETTING_PREFS) { partial[key] = value; await AtlasAPI.set_pref(pref, value); }
-      await AtlasAPI.set_settings(partial);
+      await AtlasAPI.set_settings(partial, {busy: false});
     }
   },
-  async set_settings(partial) {
-    return withBusy(BUSY_LABEL, async () => {
+  async set_settings(partial, {busy = true} = {}) {
+    const run = async () => {
       const result = await callHost('set_settings', [partial]);
       // Persist the requested values before publishing state: the chip can
       // become visible before Edit preview conversion finishes. Never save
@@ -490,7 +491,8 @@ export const AtlasAPI = {
       _previewCache.invalidateAll(); _hulls.clear();
       await publishSettings();
       return applied;
-    });
+    };
+    return busy ? withBusy(BUSY_LABEL, run) : run();
   },
 
   /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
