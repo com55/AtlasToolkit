@@ -1,4 +1,5 @@
 import { loadPyodide } from '../pyodide/pyodide.mjs';
+import { makeTransferCaller } from './engine-transfer.js';
 
 let callHost;
 
@@ -25,9 +26,9 @@ async function start() {
 from atlas_toolkit.host import AppHost, wire
 _host = AppHost()
 def _call_host(method, args_json, buffers):
-    return wire.call(_host, method, args_json, [b.to_bytes() for b in buffers])
+    return wire.call(_host, method, args_json, buffers)
 `);
-    callHost = pyodide.globals.get('_call_host');
+    callHost = makeTransferCaller(pyodide, '_call_host');
     self.postMessage({ type: 'status', message: 'Starting application host', progress: 1 });
     self.postMessage({ type: 'ready' });
   } catch (error) {
@@ -37,35 +38,11 @@ def _call_host(method, args_json, buffers):
 
 self.onmessage = ({ data }) => {
   const { id, method, argsJson, buffers } = data;
-  let result;
-  let output;
   try {
-    result = callHost(method, argsJson, buffers.map((buffer) => new Uint8Array(buffer)));
-    const json = result.get(0);
-    output = result.get(1);
-    const copies = [];
-    for (const item of output) {
-      try {
-        const view = item.getBuffer('u8');
-        try {
-          copies.push(view.data.slice().buffer);
-        } finally {
-          view.release();
-        }
-      } finally {
-        item.destroy();
-      }
-    }
-    output.destroy();
-    output = null;
-    result.destroy();
-    result = null;
+    const { json, buffers: copies } = callHost(method, argsJson, buffers);
     self.postMessage({ id, json, buffers: copies }, copies);
   } catch (error) {
     self.postMessage({ id, fatal: true, error: String(error) });
-  } finally {
-    output?.destroy();
-    result?.destroy();
   }
 };
 
