@@ -141,3 +141,33 @@ def test_composite_converts_each_pending_page_and_warns_for_mixed_default():
     built = atlas.build()
     for name in ['pma', 'straight']:
         assert built.extract(name).tobytes() == decode(page_bytes(2, 3)).tobytes()
+
+
+@pytest.mark.parametrize('composite', [False, True])
+def test_pristine_failure_does_not_record_pending_half(composite, monkeypatch):
+    atlas = atlas_with_adds('n1')
+    before = list(atlas._session._mod_batches)
+    def fail(*args, **kwargs):
+        raise MemoryError('pristine preparation failed')
+    monkeypatch.setattr(atlas._session, 'apply_mod_image', fail)
+    with pytest.raises(MemoryError, match='pristine preparation'):
+        if composite:
+            atlas.replace_composite(['n1', 'a'], decode(page_bytes(4, 5)))
+        else:
+            atlas.replace({'n1': decode(page_bytes(4, 5)), 'a': decode(page_bytes(4, 5))})
+    assert atlas._session._mod_batches == before
+    assert atlas.build().extract('n1').tobytes() == decode(page_bytes(2, 3)).tobytes()
+
+
+def test_immediate_session_replacement_repacks():
+    from atlas_toolkit.engine.session import AtlasSession
+    from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+    text, pages = one_page()
+    session = AtlasSession.load_images(text, {name: decode(data) for name, data in pages.items()}, PillowRasterBackend())
+    session.add_region(decode(page_bytes(2, 3)), 'fresh')
+    replacement = decode(page_bytes(4, 5))
+    session.replace_added_source('fresh', replacement)
+    text, pages = session.save()
+    built = SpineAtlas.load(text, {name: decode(data) for name, data in pages.items()})
+    assert built.extract('fresh').size == replacement.size
+    assert built.extract('fresh').tobytes() == replacement.tobytes()

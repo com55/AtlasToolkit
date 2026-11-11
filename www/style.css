@@ -1196,7 +1196,8 @@ img#preview-img {
   text-align: center;
 }
 
-#add-name-input {
+#add-name-input,
+#add-page-select {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
@@ -1209,7 +1210,8 @@ img#preview-img {
   margin-bottom: 8px;
 }
 
-#add-name-input:focus {
+#add-name-input:focus,
+#add-page-select:focus {
   outline: none;
   border-color: #0e639c;
 }

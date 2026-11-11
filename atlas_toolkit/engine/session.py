@@ -931,10 +931,15 @@ class AtlasSession:
                       if batch.get("type") == "add" and batch["internal_key"] == key), None)
         if index is None:
             raise KeyError(key)
-        source = self._load_source(image)
-        batches = list(self._mod_batches)
-        batches[index] = {**batches[index], "source": source}
-        self._record(batches, dict(self._modded_sprites))
+        before = self._raster.checkpoint()
+        try:
+            source = self._load_source(image)
+            batches = list(self._mod_batches)
+            batches[index] = {**batches[index], "source": source}
+        except BaseException:
+            self._raster.release_except(before)
+            raise
+        self._apply_structural_batches(batches, before=before)
 
     def rename_region(self, key: str, new_name: str) -> None:
         self._require_open()

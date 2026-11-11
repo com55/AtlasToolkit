@@ -671,10 +671,11 @@ class SpineAtlas:
             return
         try:
             for key, image in entries:
+                if key not in self._added_pages:
+                    self._session.apply_mod_image(image, [key])
+            for key, image in entries:
                 if key in self._added_pages:
                     self._session.replace_added_source(key, image)
-                else:
-                    self._session.apply_mod_image(image, [key])
         finally:
             self._edited()
 
@@ -733,16 +734,13 @@ class SpineAtlas:
             )
         if not keys:
             return
+        picture = _to_page(picture, alpha_mode, self._key_pma(keys[0]))
         pristine = [key for key in keys if key not in self._added_pages]
-        pending = [
-            (key, _to_page(picture, alpha_mode, self._key_pma(key)))
-            for key in keys if key in self._added_pages
-        ]
-        pristine_picture = _to_page(picture, alpha_mode, self._key_pma(pristine[0])) if pristine else None
-        for key, source in pending:
-            self._session.replace_added_source(key, source)
         if pristine:
-            self._session.apply_mod_image(pristine_picture, pristine, composite=True)
+            self._session.apply_mod_image(picture, pristine, composite=True)
+        for key in keys:
+            if key in self._added_pages:
+                self._session.replace_added_source(key, picture)
         self._edited()
 
     def add_region(

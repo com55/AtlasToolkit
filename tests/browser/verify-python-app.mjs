@@ -8,16 +8,20 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SITE = path.resolve(HERE, '../../dist/web');
 
-async function waitForEdit(page) {
-  await page.evaluate(async () => {
-    const {isBusy} = await import('/js/busy-overlay.js');
-    const deadline = Date.now() + 60000;
+async function waitInPage(page, asyncPredicate, timeout = 60000, arg = null) {
+  await page.evaluate(async ({source, timeout, arg}) => {
+    const predicate = (0, eval)('(' + source + ')');
+    const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      if (document.body.classList.contains('mode-modify') && !isBusy()) return;
+      if (await predicate(arg)) return;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error('Edit mode did not become ready within 60 seconds');
-  });
+    throw new Error('Page condition did not become true within ' + timeout + ' ms');
+  }, {source: asyncPredicate.toString(), timeout, arg});
+}
+
+async function waitForEdit(page) {
+  await waitInPage(page, async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy());
 }
 
 async function loadChromium() {
@@ -300,7 +304,6 @@ try {
   if (await app.evaluate(() => window.pendingDuplicate) !== false) throw new Error('Duplicate load should return false');
   await app.locator('#mode-modify').click();
   await waitForEdit(app);
-  await app.waitForFunction(() => document.body.classList.contains('mode-modify'), null, {polling:500});
   if (!await app.locator('#advance-toolbar').isVisible()) throw new Error('Edit toolbar hidden');
   if (await app.locator('#options-group-advance').count()) throw new Error('Advance toggle remains');
   await app.locator('#page-next').click();
@@ -445,7 +448,7 @@ try {
   await settingsPage.goto(origin + '/index.html', {waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   const returnSettingsToView = async () => {
-    await settingsPage.waitForFunction(async () => !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+    await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
     if (await settingsPage.evaluate(() => document.body.classList.contains('mode-modify'))) {
       const pending = await settingsPage.evaluate(() => window.settingsAPI.has_pending_modifications());
       await settingsPage.locator('#mode-extract').click();
@@ -453,7 +456,7 @@ try {
         await settingsPage.locator('#modal-overlay').waitFor({state:'visible'});
         await settingsPage.locator('#btn-modal-confirm').click();
       }
-      await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-extract') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+      await waitInPage(settingsPage, async () => document.body.classList.contains('mode-extract') && !(await import('/js/busy-overlay.js')).isBusy());
     }
   };
   const loadSettingsFixture = async (count = 2, pma = false) => {
@@ -523,15 +526,15 @@ try {
   const beforePacking = await settingsPage.evaluate(() => window.settingsPreviewPixels());
   await settingsPage.locator('[data-packer="rectangles"]').click();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await settingsPage.waitForFunction(async () => !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
   // Wait for the returned EditResult to reach the displayed image, then
   // compare decoded pixels/dimensions rather than minted blob URLs.
-  await settingsPage.waitForFunction(async before => (await window.settingsPreviewPixels()) !== before, beforePacking, {polling:500});
+  await waitInPage(settingsPage, async before => (await window.settingsPreviewPixels()) !== before, 60000, beforePacking);
   await settingsPage.locator('#p-num').fill('');
   await settingsPage.keyboard.type('1');
-  await settingsPage.waitForFunction(async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await import('/js/busy-overlay.js')).isBusy());
   await settingsPage.keyboard.type('5');
-  await settingsPage.waitForFunction(async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await import('/js/busy-overlay.js')).isBusy());
   if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
   if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
   await settingsPage.locator('#p-num').fill('5');
@@ -672,25 +675,30 @@ try {
     if (assigned !== (pageName || 'q.png')) throw new Error('Added region assigned to wrong page');
   };
   await addThroughDialog('auto_added', null);
-  await addThroughDialog('chosen_added', 'p.png');
-  const modifyThroughUI = async names => {
+  await addThroughDialog('chosen_added', 'q.png');
+  const modifyThroughUI = async (names, size) => {
+    const replacementPNG = Buffer.from(await pendingPage.evaluate(async size => {
+      const c = new OffscreenCanvas(size,size); const ctx = c.getContext('2d');
+      ctx.fillStyle = '#b04080'; ctx.fillRect(0,0,size,size);
+      return [...new Uint8Array(await (await c.convertToBlob({type:'image/png'})).arrayBuffer())];
+    }, size));
     await pendingPage.locator('.region-item[data-label="'+names[0]+'"]').click();
     for (const name of names.slice(1)) await pendingPage.locator('.region-item[data-label="'+name+'"]').click({modifiers:['Control']});
     const chooserPromise = pendingPage.waitForEvent('filechooser');
     await pendingPage.locator('#btn-modify-sel').click();
-    await (await chooserPromise).setFiles({name:'replacement.png',mimeType:'image/png',buffer:pendingPNG});
-    await pendingPage.waitForFunction(names => {
+    await (await chooserPromise).setFiles({name:'replacement.png',mimeType:'image/png',buffer:replacementPNG});
+    await pendingPage.waitForFunction(({names,size}) => {
       const bounds = window.pendingBounds;
-      return names.every(name => bounds()?.[name]?.[2] === 32 && bounds()?.[name]?.[3] === 32);
-    }, names, {polling:500});
+      return names.every(name => bounds()?.[name]?.[2] === size && bounds()?.[name]?.[3] === size);
+    }, {names,size}, {polling:500});
     await waitForEdit(pendingPage);
   };
   await pendingPage.evaluate(async () => {
     const {state} = await import('/js/state.js');
     window.pendingBounds = () => state.modifyRegionBounds;
   });
-  await modifyThroughUI(['auto_added']);
-  await modifyThroughUI(['auto_added','chosen_added']);
+  await modifyThroughUI(['auto_added'], 16);
+  await modifyThroughUI(['auto_added','chosen_added'], 24);
   await returnPendingToView();
   await loadPendingFixture(false);
   // Apply a late skeleton in View: no sibling skeleton was loaded with the atlas.
