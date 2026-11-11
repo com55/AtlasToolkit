@@ -8,6 +8,18 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SITE = path.resolve(HERE, '../../dist/web');
 
+async function waitForEdit(page) {
+  await page.evaluate(async () => {
+    const {isBusy} = await import('/js/busy-overlay.js');
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      if (document.body.classList.contains('mode-modify') && !isBusy()) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error('Edit mode did not become ready within 60 seconds');
+  });
+}
+
 async function loadChromium() {
   const candidates = [
     process.env.PLAYWRIGHT_CORE,
@@ -287,7 +299,7 @@ try {
   await app.locator('#btn-modal-confirm').click();
   if (await app.evaluate(() => window.pendingDuplicate) !== false) throw new Error('Duplicate load should return false');
   await app.locator('#mode-modify').click();
-  await app.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitForEdit(app);
   await app.waitForFunction(() => document.body.classList.contains('mode-modify'), null, {polling:500});
   if (!await app.locator('#advance-toolbar').isVisible()) throw new Error('Edit toolbar hidden');
   if (await app.locator('#options-group-advance').count()) throw new Error('Advance toggle remains');
@@ -390,7 +402,7 @@ try {
   await app.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});
   if (await app.locator('#advance-toolbar').isVisible()) throw new Error('Toolbar visible in View');
   console.log('PASS real app Edit modify, composite, pages, structural edits, validation, PNG, failed edit rollback, unsaved prompt, Reset, Save ZIP');
-  console.log('SKIP late skeleton mesh check: synthetic JSON fixture is not a binary .skel fixture');
+
   if (pageErrors.length) throw new Error('App page errors: ' + pageErrors.join('; '));
   console.log('PASS real app DuplicateRegionName alert');
   await app.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
@@ -475,7 +487,7 @@ try {
   if (!await settingsPage.locator('#chk-forced-resizing').isEnabled()) throw new Error('Forced resizing disabled');
   await returnSettingsToView();
   await settingsPage.locator('#mode-modify').click();
-  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitForEdit(settingsPage);
   await settingsPage.locator('#btn-pack-chip').click();
   if (!await settingsPage.locator('body > #pack-panel').isVisible()) throw new Error('Settings panel placement');
   const labels = await settingsPage.locator('.pk-item > span:last-child').evaluateAll(nodes => nodes.map(n => n.firstChild.textContent));
@@ -535,7 +547,7 @@ try {
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await loadSettingsFixture();
   await settingsPage.locator('#mode-modify').click();
-  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitForEdit(settingsPage);
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles · 5px'), null, {polling:500});
   await settingsPage.locator('#btn-pack-chip').click();
   await settingsPage.locator('#btn-pad-reset').click();
@@ -568,7 +580,7 @@ try {
   await settingsPage.evaluate(() => window.settingsAPI.set_settings({packer:'shelf',padding:2,keepLayout:false}));
   await loadSettingsFixture(1600, true);
   await settingsPage.locator('#mode-modify').click();
-  await settingsPage.waitForFunction(async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy(), null, {polling:500});
+  await waitForEdit(settingsPage);
   await settingsPage.evaluate(async () => {
     const {onModPreviewReceived} = await import('/js/modify-mode.js');
     const recordPackedSize = async result => {
@@ -605,7 +617,118 @@ try {
   await settingsPage.locator('#btn-modal-confirm').click();
   await settingsPage.close();
   console.log('PASS settings controls, locks, picker placement, preview, reload prefs, reset, narrow modal, fallback toast, alpha visibility, real failure rollback');
-  console.log('SKIP polygon mesh lock: requires a usable binary .skel fixture');
+  // Task 12 uses the committed binary fixture, with a matching region name.
+  const pendingPage = await context.newPage();
+  await pendingPage.goto(origin + '/index.html?test-hooks', {waitUntil:'domcontentloaded'});
+  await pendingPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
+  const skeletonBytes = [...fs.readFileSync(path.join(HERE, '../fixtures/synthetic-skeleton-42.skel'))];
+  const loadPendingFixture = async multi => {
+    await pendingPage.evaluate(async multi => {
+      const {AtlasAPI: api} = await import('/js/atlas-api.js');
+      window.pendingAPI = api;
+      await api.set_pref('packer', 'shelf');
+      const c = new OffscreenCanvas(32,32); const ctx = c.getContext('2d');
+      ctx.fillStyle = '#40a060'; ctx.fillRect(0,0,32,32);
+      const blob = await c.convertToBlob({type:'image/png'});
+      window.pendingPNG = [...new Uint8Array(await blob.arrayBuffer())];
+      const text = 'p.png\nsize: 32,32\nmesh_a\n bounds: 0,0,8,8\n' + (multi ? '\nq.png\nsize: 32,32\nb\n bounds: 0,0,4,4\n' : '');
+      const files = [new File([text], 'pending.atlas'), new File([blob], 'p.png')];
+      if (multi) files.push(new File([blob], 'q.png'));
+      if (!await api.load_from_files(files)) throw new Error('Pending fixture load failed');
+      await (await import('/js/region-list.js')).loadRegions();
+      (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    }, multi);
+  };
+  const returnPendingToView = async () => {
+    const pending = await pendingPage.evaluate(() => window.pendingAPI.has_pending_modifications());
+    await pendingPage.locator('#mode-extract').click();
+    if (pending) {
+      await pendingPage.locator('#modal-overlay').waitFor({state:'visible'});
+      await pendingPage.locator('#btn-modal-confirm').click();
+    }
+    await pendingPage.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});
+  };
+  await loadPendingFixture(true);
+  await pendingPage.locator('#mode-modify').click();
+  await waitForEdit(pendingPage);
+  const pendingPNG = Buffer.from(await pendingPage.evaluate(() => window.pendingPNG));
+  const addThroughDialog = async (name, pageName) => {
+    await pendingPage.locator('#btn-add-region').click();
+    if (!await pendingPage.locator('#add-page-select').isVisible()) throw new Error('Multi-page Add selector hidden');
+    const options = await pendingPage.locator('#add-page-select option').evaluateAll(nodes => nodes.map(n => [n.textContent,n.value]));
+    if (JSON.stringify(options) !== JSON.stringify([['Auto (least used)',''],['p.png','p.png'],['q.png','q.png']])) throw new Error('Add page options/order');
+    if (await pendingPage.locator('#add-page-select').inputValue() !== '') throw new Error('Add should default to Auto');
+    if (pageName) await pendingPage.locator('#add-page-select').selectOption(pageName);
+    await pendingPage.locator('#add-file-input').setInputFiles({name:'new.png',mimeType:'image/png',buffer:pendingPNG});
+    await pendingPage.locator('#add-name-input').fill(name);
+    await pendingPage.waitForFunction(() => !document.getElementById('add-confirm-btn').disabled, null, {polling:500});
+    await pendingPage.locator('#add-confirm-btn').click();
+    await pendingPage.waitForFunction(name => !!document.querySelector('.region-item[data-label="'+name+'"]'), name, {polling:500});
+    await waitForEdit(pendingPage);
+    const assigned = await pendingPage.evaluate(name => {
+      const api = window.pendingAPI;
+      return api.get_region_page_name(api.get_region_names().find(r => r.label === name).key);
+    }, name);
+    if (assigned !== (pageName || 'q.png')) throw new Error('Added region assigned to wrong page');
+  };
+  await addThroughDialog('auto_added', null);
+  await addThroughDialog('chosen_added', 'p.png');
+  const modifyThroughUI = async names => {
+    await pendingPage.locator('.region-item[data-label="'+names[0]+'"]').click();
+    for (const name of names.slice(1)) await pendingPage.locator('.region-item[data-label="'+name+'"]').click({modifiers:['Control']});
+    const chooserPromise = pendingPage.waitForEvent('filechooser');
+    await pendingPage.locator('#btn-modify-sel').click();
+    await (await chooserPromise).setFiles({name:'replacement.png',mimeType:'image/png',buffer:pendingPNG});
+    await pendingPage.waitForFunction(names => {
+      const bounds = window.pendingBounds;
+      return names.every(name => bounds()?.[name]?.[2] === 32 && bounds()?.[name]?.[3] === 32);
+    }, names, {polling:500});
+    await waitForEdit(pendingPage);
+  };
+  await pendingPage.evaluate(async () => {
+    const {state} = await import('/js/state.js');
+    window.pendingBounds = () => state.modifyRegionBounds;
+  });
+  await modifyThroughUI(['auto_added']);
+  await modifyThroughUI(['auto_added','chosen_added']);
+  await returnPendingToView();
+  await loadPendingFixture(false);
+  // Apply a late skeleton in View: no sibling skeleton was loaded with the atlas.
+  await pendingPage.evaluate(async bytes => {
+    const api = window.pendingAPI;
+    if (!await api.apply_skel_file(new File([new Uint8Array(bytes)], 'synthetic.skel'))) throw new Error('Late skeleton rejected');
+    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+  }, skeletonBytes);
+  if (!await pendingPage.locator('#chk-mesh-hull').isEnabled()) throw new Error('Late skeleton did not enable silhouettes');
+  await pendingPage.locator('#mode-modify').click();
+  await waitForEdit(pendingPage);
+  await pendingPage.locator('#btn-add-region').click();
+  if (await pendingPage.locator('#add-page-select').isVisible()) throw new Error('Single-page Add selector visible');
+  await pendingPage.locator('#add-cancel-btn').click();
+  await pendingPage.locator('#btn-pack-chip').click();
+  for (const packer of ['polygons','polygons_in_place']) if (!await pendingPage.locator('[data-packer="'+packer+'"]').isEnabled()) throw new Error('Polygon row disabled with mesh');
+  await pendingPage.locator('[data-packer="polygons"]').click();
+  await pendingPage.waitForFunction(() => document.querySelector('[data-setting="meshAware"]')?.disabled && document.querySelector('[data-setting="meshAware"]')?.checked, null, {polling:500});
+  await waitForEdit(pendingPage);
+  await returnPendingToView();
+  await loadPendingFixture(false);
+  await pendingPage.locator('#mode-modify').click();
+  await waitForEdit(pendingPage);
+  await pendingPage.evaluate(async () => {
+    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    await onModPreviewReceived(await window.pendingAPI.process_mod_image(new File([new Uint8Array(window.pendingPNG)], 'edit.png'), ['mesh_a']));
+    window.beforeSkeletonPreview = document.getElementById('preview-img').src;
+  });
+  await pendingPage.evaluate(async bytes => {
+    if (!await window.pendingAPI.apply_skel_file(new File([new Uint8Array(bytes)], 'during-edit.skel'))) throw new Error('Edit skeleton rejected');
+    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    if (!window.pendingAPI.has_pending_modifications()) throw new Error('Edit skeleton discarded pending edits');
+  }, skeletonBytes);
+  await pendingPage.waitForFunction(() => document.getElementById('preview-img').src !== window.beforeSkeletonPreview, null, {polling:500});
+  await pendingPage.locator('#preview-img').evaluate(async img => { await img.decode(); if (!img.naturalWidth || !img.naturalHeight) throw new Error('Edit skeleton preview empty'); });
+  if (!await pendingPage.locator('#chk-mesh-hull').isEnabled()) throw new Error('Edit skeleton mesh state unavailable');
+  await pendingPage.close();
+  console.log('PASS pending Add/Modify UI, Auto/chosen page, single-page selector hidden, late skeleton, polygon locks, skeleton during Edit rebuild');
 
 
   if (external.length) throw new Error(`Non-local requests recorded: ${external.length}`);

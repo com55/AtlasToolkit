@@ -477,13 +477,17 @@ document.getElementById('btn-rename-region').addEventListener('click', openRenam
 
 document.getElementById('btn-add-region').addEventListener('click', () => {
   if (isBusy()) return;
+  const pages = AtlasAPI.get_page_names();
+  const pageSelect = document.getElementById('add-page-select');
+  pageSelect.replaceChildren(new Option('Auto (least used)', ''), ...pages.map(name => new Option(name, name)));
+  document.getElementById('add-page-row').classList.toggle('hidden', pages.length <= 1);
   openAddRegionModal({
     getEffectiveNames: () => state.regionsData.map((r) => r.label),
     onConfirm: async (file, atlasName) => {
       if (isBusy()) return;
       await withBusy(async () => {
         const prevSelectedKeys = getSelectedKeys();
-        const payload = await AtlasAPI.add_region(file, atlasName);
+        const payload = await AtlasAPI.add_region(file, atlasName, pageSelect.value || null);
         await onModPreviewReceived(payload);
         await refreshStructuralUi(prevSelectedKeys);
       });

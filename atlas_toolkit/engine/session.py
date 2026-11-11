@@ -924,6 +924,18 @@ class AtlasSession:
             raise
         self._apply_structural_batches(candidate_batches, before=before)
 
+    def replace_added_source(self, key: str, image: object) -> None:
+        """Replace an add's pixels, preserving its position and structural identity."""
+        self._require_open()
+        index = next((i for i, batch in enumerate(self._mod_batches)
+                      if batch.get("type") == "add" and batch["internal_key"] == key), None)
+        if index is None:
+            raise KeyError(key)
+        source = self._load_source(image)
+        batches = list(self._mod_batches)
+        batches[index] = {**batches[index], "source": source}
+        self._record(batches, dict(self._modded_sprites))
+
     def rename_region(self, key: str, new_name: str) -> None:
         self._require_open()
         self._require_single_page_structural()
@@ -958,7 +970,7 @@ class AtlasSession:
         one remove. Anything else (already undone or removed, unknown) is
         skipped, so no remove can name a key a later add might reuse.
         Mod batches are left alone: SpineAtlas never records a mod on an added
-        key (replace resolves names through _built_key)."""
+        key: replacing a pending add updates its AddBatch source instead."""
         batches = list(self._mod_batches)
         for key in targets:
             if any(b.get("type") == "add" and b["internal_key"] == key for b in batches):

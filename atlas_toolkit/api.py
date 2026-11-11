@@ -554,10 +554,11 @@ class SpineAtlas:
         return next(page.pma for page in self._document.pages if page.filename == filename)
 
     def _key_pma(self, key: str) -> bool:
-        return self._page_pma(self._pristine[key].page_filename)
+        page = self._added_pages[key] if key in self._added_pages else self._pristine[key].page_filename
+        return self._page_pma(page)
 
     def _spans_pma(self, keys: list[str]) -> bool:
-        """True when `keys` (built keys) live on both pma and non-pma pages."""
+        """True when `keys` (pristine or pending) live on both pma and non-pma pages."""
         return len({self._key_pma(key) for key in keys}) > 1
 
     def extract_to(
@@ -664,13 +665,16 @@ class SpineAtlas:
             raise TypeError(f"expected a mapping of region name to image, got {type(images).__name__}")
         entries = []
         for name, image in images.items():
-            key = self._built_key(name)
+            key = self._key(name)
             entries.append((key, _to_page(_edit_image(image), alpha_mode, self._key_pma(key))))
         if not entries:
             return
         try:
             for key, image in entries:
-                self._session.apply_mod_image(image, [key])
+                if key in self._added_pages:
+                    self._session.replace_added_source(key, image)
+                else:
+                    self._session.apply_mod_image(image, [key])
         finally:
             self._edited()
 
@@ -717,7 +721,7 @@ class SpineAtlas:
         MixedAlphaGroup and records nothing."""
         alpha_mode = parse_alpha_mode(alpha_mode)
         wanted = [names] if isinstance(names, str) else list(names)
-        keys = [self._built_key(name) for name in wanted]
+        keys = [self._key(name) for name in wanted]
         picture = _edit_image(image)
         if alpha_mode is not None and self._spans_pma(keys):
             raise MixedAlphaGroup(wanted)
@@ -729,8 +733,16 @@ class SpineAtlas:
             )
         if not keys:
             return
-        picture = _to_page(picture, alpha_mode, self._key_pma(keys[0]))
-        self._session.apply_mod_image(picture, keys, composite=True)
+        pristine = [key for key in keys if key not in self._added_pages]
+        pending = [
+            (key, _to_page(picture, alpha_mode, self._key_pma(key)))
+            for key in keys if key in self._added_pages
+        ]
+        pristine_picture = _to_page(picture, alpha_mode, self._key_pma(pristine[0])) if pristine else None
+        for key, source in pending:
+            self._session.replace_added_source(key, source)
+        if pristine:
+            self._session.apply_mod_image(pristine_picture, pristine, composite=True)
         self._edited()
 
     def add_region(

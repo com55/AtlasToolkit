@@ -631,6 +631,8 @@ export const AtlasAPI = {
 
   get_region_names() { return (_edit ? _state?.regions : _state?.pristineRegions) || []; },
 
+  get_page_names() { return [...(_state?.pages || [])]; },
+
   get_region_page_name(key) { return _state?.regionPages[key] || ''; },
 
   preview_is_cached(names) { return _previewCache.has(_viewKey(names)); },
@@ -804,7 +806,7 @@ export const AtlasAPI = {
       return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
     } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
   },
-  async add_region(file, name) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), null, _state.settings.alpha])); },
+  async add_region(file, name, page = null) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), page, _state.settings.alpha])); },
   rename_region(key, name) { return withBusy(BUSY_LABEL, () => editCall('rename', [key, name])); },
   remove_regions(keys) { return withBusy(BUSY_LABEL, () => editCall('remove', [keys])); },
 };

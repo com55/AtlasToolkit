@@ -73,13 +73,21 @@ def test_invalid_names():
     assert names(atlas)[-1] == ("Spaced", None)
 
 
-def test_pending_added_regions_refuse_replace_and_extract():
+def test_pending_added_regions_accept_replace_but_refuse_extract():
     atlas = SpineAtlas.load(ATLAS, page())
     atlas.add_region("New", sprite())
     before = names(atlas)
+    replacement = sprite(4, 2)
+    atlas.replace({"Head": sprite(6, 5), "New": replacement})
+    built = atlas.build()
+    assert built.extract("New").size == replacement.size
+    assert built.extract("New").tobytes() == replacement.tobytes()
+    composite = sprite(6, 5)
+    atlas.replace_composite(["Head", "New"], composite)
+    built = atlas.build()
+    assert built.extract("New").size == composite.size
+    assert built.extract("New").tobytes() == composite.tobytes()
     for call in (
-        lambda: atlas.replace({"Head": sprite(6, 5), "New": sprite()}),
-        lambda: atlas.replace_composite(["Head", "New"], sprite(6, 5)),
         lambda: atlas.extract("New"),
         lambda: atlas.extract_composite(["New"]),
     ):
@@ -133,10 +141,15 @@ def test_failing_replace_records_nothing():
         atlas.replace([("Head", sprite(6, 5))])
     assert not atlas.has_changes
     atlas.add_region("New", sprite())
-    batches = len(atlas._session._mod_batches)
-    with pytest.raises(AtlasError):
-        atlas.replace({"Head": sprite(6, 5), "New": sprite()})
-    assert len(atlas._session._mod_batches) == batches
+    batches = list(atlas._session._mod_batches)
+    with pytest.raises(TypeError):
+        atlas.replace({"New": sprite(4, 2), "Head": b"not an image"})
+    assert atlas._session._mod_batches == batches
+    replacement = sprite(4, 2)
+    atlas.replace({"Head": sprite(6, 5), "New": replacement})
+    built = atlas.build()
+    assert built.extract("New").size == replacement.size
+    assert built.extract("New").tobytes() == replacement.tobytes()
 
 
 def two_page_atlas():

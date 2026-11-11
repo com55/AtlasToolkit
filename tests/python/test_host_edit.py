@@ -222,3 +222,39 @@ def test_mark_saved_acknowledges_output_only_after_write():
     host.exit_edit()
     with pytest.raises(AtlasError, match='not in edit mode'):
         host.mark_saved()
+
+
+@pytest.mark.parametrize('keys', [['fresh'], ['a', 'fresh']])
+def test_modify_pending_add(keys):
+    host, _ = loaded(two_pages)
+    host.enter_edit()
+    added = host.add('fresh', page_bytes(2, 3), 'q.png', 'straight')
+    key = next(r['key'] for r in added['state']['regions'] if r['label'] == 'fresh')
+    result = host.modify([key if k == 'fresh' else k for k in keys], page_bytes(4, 5), 'straight')
+    assert result['regions'][key][2:4] == [4, 5]
+    assert result['regionPages'][key] == 'q.png'
+    assert result['state']['regions'] == added['state']['regions']
+    built = host._atlas.build()
+    assert built.extract('fresh').tobytes() == decode(page_bytes(4, 5)).tobytes()
+
+
+@pytest.mark.parametrize('keys', [['fresh'], ['a', 'fresh']])
+def test_failed_pending_modify_restores_source_and_preview(keys, monkeypatch):
+    host, _ = loaded(two_pages)
+    host.enter_edit()
+    added = host.add('fresh', page_bytes(2, 3), 'q.png', 'straight')
+    key = next(r['key'] for r in added['state']['regions'] if r['label'] == 'fresh')
+    before = host._state()
+    previews = [host.page_preview(i) for i in range(2)]
+    packed = host._packed
+    def fail(*args, **kwargs):
+        raise MemoryError('synthetic pack failure')
+    with monkeypatch.context() as patch:
+        patch.setattr(SpineAtlas, 'pack', fail)
+        with pytest.raises(MemoryError):
+            host.modify([key if k == 'fresh' else k for k in keys], page_bytes(4, 5), 'straight')
+    assert host._state() == before
+    assert host._packed is packed
+    assert [host.page_preview(i) for i in range(2)] == previews
+    # Build again to prove the old handle survived the failed transaction.
+    assert host._atlas.build().extract('fresh').tobytes() == decode(page_bytes(2, 3)).tobytes()
