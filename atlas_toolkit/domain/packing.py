@@ -559,6 +559,21 @@ def nest_pack(items: list[dict], gap_distance: int = 4) -> dict:
     }
 
 
+def trim_canvas(packed: dict) -> dict:
+    """A nest_pack result with its canvas cut back to the placements'
+    extent, rounded up to 4. nest_pack grows by whole item strips, so its
+    last strip is often partly empty. Placements are unchanged. Python-only:
+    repack-nest.js keeps the grown canvas."""
+    placements = packed["placements"]
+    if not placements:
+        return packed
+    return {
+        **packed,
+        "canvas_w": round_up_to_multiple(max(p["x"] + p["pw"] for p in placements)),
+        "canvas_h": round_up_to_multiple(max(p["y"] + p["ph"] for p in placements)),
+    }
+
+
 def rotate_grid_for_pack(grid: np.ndarray, degrees: int) -> np.ndarray:
     """An unrotated (h, w) mask turned into the orientation a region packed
     with `degrees` (0/90/180/270) is stored in on its page -- the mapping

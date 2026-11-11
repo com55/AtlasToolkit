@@ -79,17 +79,18 @@ def test_mixed_batch_keeps_share_scaling_and_straight_pieces():
     arr = np.zeros((1, 3, 4), np.uint8)
     arr[0] = [(64, 32, 16, 128), (90, 60, 30, 0), (200, 100, 50, 255)]
     pieces = cut(arr, ["T", "B"], pma={"T"})
-    assert pieces["B"][0, 1].tolist() == [0, 0, 0, 0]          # straight piece: alpha-0 zeroed
+    assert pieces["B"][0, 1].tolist() == [90, 60, 30, 0]       # straight piece keeps the input's RGB
     assert pieces["T"][0, 1].tolist() == [90, 60, 30, 0]       # pma topmost gets alpha-0 colour
 
 
 def test_mixed_batch_drops_alpha_zero_colour_under_a_straight_top():
-    # The colour goes only to the topmost holder, and only when that holder
-    # is pma: a pma holder below a straight top does not pick it up.
+    # A pma holder gets the colour only when it is the topmost holder: a pma
+    # holder below a straight top does not pick it up. The straight top
+    # keeps the input's RGB under alpha 0, as every straight piece does.
     arr = np.zeros((1, 3, 4), np.uint8)
     arr[0] = [(64, 32, 16, 128), (90, 60, 30, 0), (200, 100, 50, 255)]
     pieces = cut(arr, ["T", "B"], pma={"B"})
-    assert pieces["T"][0, 1].tolist() == [0, 0, 0, 0]
+    assert pieces["T"][0, 1].tolist() == [90, 60, 30, 0]
     assert pieces["B"][0, 1].tolist() == [0, 0, 0, 0]
 
 
@@ -102,7 +103,13 @@ def test_a_pixel_no_holder_covers_is_dropped(pma):
     arr[0, 6] = (70, 50, 20, 0)
     half = {"uvs": [0, 0, 0.5, 0, 0.5, 1, 0, 1], "triangles": QUAD}
     pieces = cut(arr, ["T", "B"], {"T": half, "B": half}, pma=pma)
-    assert not pieces["T"][:, 4:].any() and not pieces["B"][:, 4:].any()
+    for name in ("T", "B"):
+        outside = pieces[name][:, 4:]
+        assert not outside[..., 3].any()
+        if name in pma:
+            assert not outside.any()                       # pma: cleared outside the holder
+        else:
+            assert (outside[..., :3] == arr[:, 4:, :3]).all()  # straight: input RGB under alpha 0
 
 
 def test_alpha_one_stays_with_the_top_holder():

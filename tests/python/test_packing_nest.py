@@ -221,3 +221,32 @@ def test_footprint_for_canonical_with_mesh_lookup_returning_none_gives_solid():
     # When mesh_lookup_fn returns None (no mesh data), the result is solid
     # (all opaque).
     assert footprint_for_canonical(["a"], ctx) == solid_mask(4, 3)
+
+
+# --- trim_canvas: nest growth adds whole item strips; the final canvas is cut
+# back to the placements' extent, rounded up to 4 (Python-only, deliberate
+# divergence from repack-nest.js) ---------------------------------------------
+
+def test_trim_canvas_cuts_unused_growth_strip():
+    from atlas_toolkit.domain.packing import trim_canvas
+    items = [
+        {"name": "a", "w": 40, "h": 40, "footprint": bytes(_solid(40, 40))},
+        {"name": "b", "w": 30, "h": 10, "footprint": bytes(_solid(30, 10))},
+        {"name": "c", "w": 10, "h": 10, "footprint": bytes(_solid(10, 10))},
+    ]
+    packed = nest_pack(items, gap_distance=4)
+    assert (packed["canvas_w"], packed["canvas_h"]) == (72, 52)  # control: slack below
+    trimmed = trim_canvas(packed)
+    assert (trimmed["canvas_w"], trimmed["canvas_h"]) == (72, 40)
+    assert trimmed["placements"] == packed["placements"]
+
+
+def test_trim_canvas_rounds_up_to_four_and_keeps_empty():
+    from atlas_toolkit.domain.packing import trim_canvas
+    packed = {"canvas_w": 100, "canvas_h": 100, "placements": [
+        {"name": "a", "x": 0, "y": 0, "pw": 13, "ph": 5, "rotate": 0},
+        {"name": "b", "x": 20, "y": 30, "pw": 7, "ph": 9, "rotate": 90},
+    ]}
+    assert (trim_canvas(packed)["canvas_w"], trim_canvas(packed)["canvas_h"]) == (28, 40)
+    empty = {"canvas_w": 0, "canvas_h": 0, "placements": []}
+    assert trim_canvas(empty) == empty

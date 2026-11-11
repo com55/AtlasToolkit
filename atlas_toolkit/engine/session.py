@@ -1,9 +1,12 @@
 """Pristine session load, read, export, and lifetime management."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
+
+import numpy as np
 
 from atlas_toolkit.document import AtlasDocument
+from atlas_toolkit.domain.bleed import color_bleed
 from atlas_toolkit.domain.converter import auto_convert_atlas
 from atlas_toolkit.domain.effective_model import derive_effective_model
 from atlas_toolkit.domain.packing import CanvasTooLargeError, normalize_gap
@@ -448,11 +451,18 @@ class AtlasSession:
         patch_padding: int = 0,
         added_mesh_lookup=None,
         in_place: bool = False,
+        report: dict | None = None,
+        bleed: bool = False,
     ) -> tuple[AtlasDocument, dict[str, ImageHandle]]:
         """Deferred build (spec 2026-10-21 §3.1): pack each touched page on its
         own and splice it into the pristine document (port of JS
         replacePageInAtlas); every other page keeps its pristine image. Never
-        mutates self._document or its pages: every build reuses them."""
+        mutates self._document or its pages: every build reuses them.
+        `report`, when given, gets "padding_used": False when no page was
+        repacked and no add was placed, so the padding did not matter.
+        `bleed`: Spine's packer Bleed on every page packed here that is not
+        pma (domain/bleed.py); untouched, rename-only and emptied pages are
+        left as they are."""
         region_pages = self._region_pages(batches)
         shortcut = not (patch_adds or in_place) or not self._declared_size_matches(self._document.pages[0])
         touched = self._touched_pages(batches, region_pages, single_page_shortcut=shortcut)
@@ -473,15 +483,17 @@ class AtlasSession:
         mesh_lookup_fn = self._processor.get_repack_mesh_geometry
         pieces = self._composite_pieces(modifiers, batches, mesh_lookup_fn) if split_composite else {}
         packed: dict[str, PackResult] = {}
+        padding_used = False
         for filename in touched:
             if filename not in remaining:
                 continue
+            page_batches = self._page_batches(filename, batches, region_pages)
             try:
                 result = None
                 if filename in patching:
                     before = self._raster.checkpoint()
                     result = modifiers[filename].place_in_place(
-                        batches=self._page_batches(filename, batches, region_pages),
+                        batches=page_batches,
                         modded_sprites=sprites,
                         pieces={name: piece for name, piece in pieces.items() if name in modifiers[filename].regions},
                         mesh_lookup_fn=self._repack_mesh_lookup(added_mesh_lookup),
@@ -489,10 +501,13 @@ class AtlasSession:
                     )
                     if result is None:
                         self._raster.release_except(before)  # spec M-5: a refused attempt leaves nothing behind
+                    elif any(batch.get("type") == "add" for batch in page_batches):
+                        padding_used = True  # adds are placed with the padding as gap
                 if result is None:
+                    padding_used = True
                     result = self._pack_page(
                         modifiers[filename],
-                        self._page_batches(filename, batches, region_pages),
+                        page_batches,
                         sprites,
                         pieces,
                         shelf_padding=shelf_padding,
@@ -507,6 +522,12 @@ class AtlasSession:
             if width <= 0 or height <= 0:
                 raise ValueError("Repack output must have positive dimensions.")
             packed[filename] = result
+        if report is not None:
+            report["padding_used"] = padding_used
+        if bleed:
+            for filename, result in packed.items():
+                if not modifiers[filename].pma:
+                    packed[filename] = dataclass_replace(result, image=self._bled(result.image))
         pages, images = [], {}
         for page in self._document.pages:
             if page.filename in packed:
@@ -531,6 +552,11 @@ class AtlasSession:
                 pages.append(page)
                 images[page.filename] = self._page_images[page.filename]
         return AtlasDocument(pages), images
+
+    def _bled(self, handle: ImageHandle) -> ImageHandle:
+        width, height = self._raster.size(handle)
+        pixels = np.frombuffer(self._raster.get_pixels(handle), np.uint8).reshape(height, width, 4)
+        return self._raster.from_pixels(width, height, color_bleed(pixels).tobytes())
 
     def _composite_pieces(self, modifiers: dict[str, AtlasModifier], batches: list[dict], mesh_lookup_fn) -> dict:
         """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
@@ -1027,6 +1053,8 @@ class AtlasSession:
         added_mesh_lookup=None,
         in_place: bool = False,
         share_untouched: bool = False,
+        report: dict | None = None,
+        bleed: bool = False,
     ) -> tuple[str, dict[str, object]]:
         """Pack the recorded batches once and return
         (text, {page: native image}).
@@ -1042,9 +1070,12 @@ class AtlasSession:
         `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry
         for added regions.
         `in_place` (SpineAtlas only, spec 2026-11-05): every touched page whose
-        image is its declared size is tried in place; a page that does not fit repacks."""
+        image is its declared size is tried in place; a page that does not fit repacks.
+        `report`, `bleed`: see _build_pages."""
         self._require_open()
         if not self._mod_batches:
+            if report is not None:
+                report["padding_used"] = False
             return self._document.serialize(), {
                 name: (self._raster.view(handle) if share_untouched else self._raster.export(handle))
                 for name, handle in self._page_images.items()
@@ -1057,6 +1088,8 @@ class AtlasSession:
                 patch_adds=patch_adds, patch_padding=patch_padding,
                 added_mesh_lookup=added_mesh_lookup,
                 in_place=in_place,
+                report=report,
+                bleed=bleed,
             )
             return document.serialize(), {
                 filename: (self._raster.view(images[filename])

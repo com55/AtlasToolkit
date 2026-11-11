@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _load_golden():
     path = Path(__file__).with_name("gen_packer_refactor_golden.py")
@@ -16,6 +18,7 @@ golden = _load_golden()
 EXPECTED = json.loads(golden.FIXTURE.read_text())
 
 
+@pytest.mark.usefixtures("untrimmed_nest", "no_auto_bleed")
 def test_session_level_generator_reproduces_the_fixture():
     cases = golden.build_cases()
     assert sorted(cases) == sorted(EXPECTED)
@@ -26,8 +29,6 @@ def test_session_level_generator_reproduces_the_fixture():
 def test_fixture_axes_are_live():
     golden.self_check(EXPECTED)
 
-
-import pytest
 
 from atlas_toolkit.packer import PackerOptions
 
@@ -42,6 +43,7 @@ NEW_API = {
 @pytest.mark.parametrize("split", [False, True])
 @pytest.mark.parametrize("flag", sorted(NEW_API))
 @pytest.mark.parametrize("layout", ["single", "multi"])
+@pytest.mark.usefixtures("untrimmed_nest", "no_auto_bleed")
 def test_new_api_reproduces_the_old_nest_goldens(layout, flag, split):
     packer, options = NEW_API[flag]
     built = golden.edited_atlas(layout).build(packer=packer, packer_options=options, split_composite=split)

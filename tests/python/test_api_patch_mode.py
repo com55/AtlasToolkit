@@ -266,5 +266,5 @@ def test_always_after_auto_packs_again(monkeypatch):
     atlas.build()
     atlas.build(packer_options=PackerOptions(repack="always"))
     atlas.build()
-    # One-slot build cache: auto, always, then auto again packs three times.
-    assert [kw["patch_adds"] for kw in calls] == [True, False, True]
+    # auto and always are separate cache entries; the second auto is a hit.
+    assert [kw["patch_adds"] for kw in calls] == [True, False]

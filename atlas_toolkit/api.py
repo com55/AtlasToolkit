@@ -5,6 +5,7 @@ see docs/superpowers/specs/2026-10-11-python-stateless-api-design.md.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import warnings
@@ -37,6 +38,28 @@ __all__ = [
 ]
 
 ImageLike = Union[Image.Image, str, os.PathLike]
+
+# Packs of the current edits kept per atlas (the JS app kept 12). Untouched
+# pages are shared between entries, so each one costs only its edited pages.
+_BUILD_CACHE_SIZE = 8
+# ... and at most this many bytes of those edited pages' pixels, so large
+# atlases keep fewer packs. The newest pack is always kept.
+_BUILD_CACHE_BYTES = 512 * 1024 * 1024
+
+
+def _auto_bleed(split: bool) -> bool:
+    """PackerOptions(bleed=None): bleed when the pack splits composites,
+    where cut pieces meet edge to edge."""
+    return split
+
+
+def _pack_options(resolved: ResolvedPack, split_composite: bool) -> tuple[ResolvedPack, bool]:
+    """The build cache key: in-place modes always split (spec 2026-11-05
+    R5) and an auto bleed is resolved, so equivalent settings share one entry."""
+    split = bool(split_composite) or resolved.in_place
+    if resolved.bleed is None:
+        resolved = dataclasses.replace(resolved, bleed=_auto_bleed(split))
+    return resolved, split
 
 
 class AtlasError(Exception):
@@ -613,6 +636,46 @@ class SpineAtlas:
         self._build_cache = None
         self._refresh_names()
 
+    def _cache_hit(self, options: tuple) -> tuple | None:
+        """The cached pack for `options`: same options, or a pack that never
+        used its padding (key stored with padding 0) with the rest equal."""
+        resolved, split = options
+        padding_free = (dataclasses.replace(resolved, padding=0), split)
+        return next(
+            (entry for entry in self._build_cache or () if entry[0] in (options, padding_free)), None,
+        )
+
+    def _cached_pack(self, options: tuple) -> tuple:
+        """(text, pages, allowed) for the current edits packed with `options`.
+
+        The last _BUILD_CACHE_SIZE packs are kept (within _BUILD_CACHE_BYTES
+        of edited page pixels), most recent last, so
+        switching settings back and forth does not repack. Every edit drops
+        them all (_edited). The cache is an immutable tuple, replaced on
+        change, so a transaction restores it by reference.
+        """
+        entries = self._build_cache or ()
+        hit = self._cache_hit(options)
+        if hit is None:
+            report: dict = {}
+            text, pages = self._pack(*options, share_untouched=True, report=report)
+            key = options
+            if not report.get("padding_used", True):
+                key = (dataclasses.replace(options[0], padding=0), options[1])
+            hit = (key, text, pages, self._child_allowed())
+        if not entries or entries[-1] is not hit:
+            kept = tuple(entry for entry in entries if entry is not hit)
+            entries = (*kept, hit)[-_BUILD_CACHE_SIZE:]
+            pristine = {id(self._session._raster.view(h)) for h in self._session._page_images.values()}
+
+            def cost(entry: tuple) -> int:
+                return sum(image.width * image.height * 4 for image in entry[2].values() if id(image) not in pristine)
+
+            while len(entries) > 1 and sum(map(cost, entries)) > _BUILD_CACHE_BYTES:
+                entries = entries[1:]
+            self._build_cache = entries
+        return hit[1:]
+
     @contextmanager
     def transaction(self):
         """Roll back recorded edits, names and cached output if the block fails."""
@@ -814,7 +877,10 @@ class SpineAtlas:
             )
         return frozenset(allowed)
 
-    def _pack(self, resolved: ResolvedPack, split_composite: bool, *, share_untouched: bool = False) -> tuple[str, dict]:
+    def _pack(
+        self, resolved: ResolvedPack, split_composite: bool, *, share_untouched: bool = False,
+        report: dict | None = None,
+    ) -> tuple[str, dict]:
         session = self._session
         try:
             session.set_nest_regions_enabled(resolved.nest)
@@ -830,6 +896,8 @@ class SpineAtlas:
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
                 in_place=resolved.in_place,
                 share_untouched=share_untouched,
+                report=report,
+                bleed=resolved.bleed,
             )
         except CanvasTooLargeError as error:
             raise CanvasTooLarge(error.width, error.height, error.limit, getattr(error, "page", None)) from None
@@ -855,12 +923,22 @@ class SpineAtlas:
                 name: self._session._raster.view(handle)
                 for name, handle in self._session._page_images.items()
             }
-        options = (resolved, bool(split_composite) or resolved.in_place)
-        if self._build_cache is None or self._build_cache[0] != options:
-            text, pages = self._pack(*options, share_untouched=True)
-            self._build_cache = (options, text, pages, self._child_allowed())
-        _, text, pages, _ = self._build_cache
+        text, pages, _ = self._cached_pack(_pack_options(resolved, split_composite))
         return text, pages
+
+    def pack_is_cached(
+        self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
+        split_composite: bool = False,
+    ) -> bool:
+        """True when pack() with these settings returns without packing: the
+        atlas has no edits, or the result is cached (see pack). Raises like
+        pack() for invalid settings, SkeletonUnavailable included."""
+        resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
+        if needs_mesh:
+            self._require_mesh()
+        if not self.has_changes:
+            return True
+        return self._cache_hit(_pack_options(resolved, split_composite)) is not None
 
     def build(
         self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
@@ -903,11 +981,7 @@ class SpineAtlas:
             )
         # Spec 2026-11-05 R5: in-place modes always split composites, so both
         # split_composite values share one cache entry.
-        options = (resolved, bool(split_composite) or resolved.in_place)
-        if self._build_cache is None or self._build_cache[0] != options:
-            text, pages = self._pack(*options, share_untouched=True)
-            self._build_cache = (options, text, pages, self._child_allowed())
-        _, text, pages, allowed = self._build_cache
+        text, pages, allowed = self._cached_pack(_pack_options(resolved, split_composite))
         return SpineAtlas._create(text, pages, self._skeleton, allowed, (self._mesh_reason, self._mesh_lookup))
 
     def save(

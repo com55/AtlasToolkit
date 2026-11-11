@@ -70,3 +70,22 @@ def run_preview_oracle():
         return json.loads(result.stdout)
 
     return run
+
+
+@pytest.fixture
+def untrimmed_nest(monkeypatch):
+    """Nest pages keep their grown canvas, as in the JS app. For fixtures
+    pinned to the JS app or to commits before the Python-only final trim
+    (packing.trim_canvas); they still pin every placement."""
+    import atlas_toolkit.engine.modifier as modifier
+
+    monkeypatch.setattr(modifier, "trim_canvas", lambda packed: packed)
+
+
+@pytest.fixture
+def no_auto_bleed(monkeypatch):
+    """PackerOptions(bleed=None) stays off with split_composite, as before
+    bleed existed. For fixtures pinned to older commits."""
+    import atlas_toolkit.api as api
+
+    monkeypatch.setattr(api, "_auto_bleed", lambda split: False)

@@ -227,3 +227,17 @@ def test_auto_split_uses_hull_ownership():
         packer_options=PackerOptions(mesh_aware=False), split_composite=True))
     assert auto == on
     assert auto["pages"] != off["pages"]
+
+
+# --- nest pages are trimmed to their regions' extent -------------------------
+
+@pytest.mark.parametrize("packer", ["rectangles", "polygons"])
+def test_nest_page_is_trimmed_to_region_extent(packer):
+    from atlas_toolkit.domain.region_ops import round_up_to_multiple
+    built = golden.edited_atlas("single").build(packer=packer, packer_options=PackerOptions(padding=8))
+    rects = [footprint(r) for r in built.regions if r.page == "page.png"]
+    extent = (
+        round_up_to_multiple(max(x + w for x, _, w, _ in rects)),
+        round_up_to_multiple(max(y + h for _, y, _, h in rects)),
+    )
+    assert built.pages["page.png"].size == extent

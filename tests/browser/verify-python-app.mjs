@@ -524,6 +524,7 @@ try {
     if (!await row.isDisabled() || !(await row.innerText()).includes('Needs a .skel file')) throw new Error('Polygon availability');
   }
   if (await settingsPage.locator('#s-alpha').count()) throw new Error('Alpha shown for straight atlas');
+  if (!await settingsPage.locator('[data-setting="bleed"]').isChecked() || await settingsPage.locator('[data-setting="bleed"]').isDisabled()) throw new Error('Bleed default');
   if (await settingsPage.locator('#options-group-mesh').isVisible()) throw new Error('Empty mesh divider visible in Edit');
   if (await settingsPage.locator('#options-row > li').evaluateAll(items => items.some(li => getComputedStyle(li).display !== 'none' && ![...li.querySelectorAll('button,label')].some(child => child.getClientRects().length)))) throw new Error('Visible empty options item');
   await settingsPage.evaluate(async () => {
@@ -568,6 +569,25 @@ try {
   if (hint !== 'New regions go into free space.\nOff: every edited page is repacked.') throw new Error('Keep layout hint');
   await settingsPage.locator('[data-packer="rectangles"]').click();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
+  await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+  // Cached packs answer without the busy overlay; an uncached one shows it.
+  await settingsPage.evaluate(() => {
+    const overlay = document.getElementById('busy-overlay');
+    window.busyShown = 0;
+    new MutationObserver(() => { if (getComputedStyle(overlay).display !== 'none') window.busyShown++; })
+      .observe(overlay, {attributes:true});
+  });
+  for (const [key, label] of [['rectangles_in_place','Rectangles In-Place ·'],['rectangles','Rectangles ·']]) {
+    await settingsPage.locator('[data-packer="'+key+'"]').click();
+    await settingsPage.waitForFunction(text => document.getElementById('btn-pack-chip').textContent.includes(text), label, {polling:500});
+    await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+  }
+  if (await settingsPage.evaluate(() => window.busyShown) !== 0) throw new Error('Busy overlay shown for a cached pack');
+  await settingsPage.locator('[data-packer="shelf"]').click();
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Shelf ·') && !(await import('/js/busy-overlay.js')).isBusy());
+  if (await settingsPage.evaluate(() => window.busyShown) === 0) throw new Error('Busy overlay not seen for an uncached pack (observer control)');
+  await settingsPage.locator('[data-packer="rectangles"]').click();
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·') && !(await import('/js/busy-overlay.js')).isBusy());
   await settingsPage.reload({waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await loadSettingsFixture();
@@ -627,6 +647,7 @@ try {
   });
   await settingsPage.locator('#btn-pack-chip').click();
   if (!await settingsPage.locator('#s-alpha').isVisible()) throw new Error('PMA alpha hidden');
+  if (!await settingsPage.locator('[data-setting="bleed"]').isDisabled()) throw new Error('Bleed not locked for a pma atlas');
   await settingsPage.locator('#p-num').fill('256');
   try {
     await settingsPage.locator('#modal-overlay').waitFor({state:'visible',timeout:30000});

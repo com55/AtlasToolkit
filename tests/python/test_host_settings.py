@@ -118,7 +118,8 @@ def test_padding_boundaries(padding):
 def test_preferences_survive_load():
     host = loaded()
     requested = {'packer': 'polygons', 'padding': 7, 'meshAware': False,
-                 'splitComposite': True, 'keepLayout': False, 'alpha': 'premultiplied'}
+                 'splitComposite': True, 'keepLayout': False, 'alpha': 'premultiplied',
+                 'bleed': False}
     host.set_settings(requested)
     text, pages = one_page()
     state = host.load('second.atlas', text, pages, None, None)
@@ -240,8 +241,8 @@ def test_alpha_only_settings_cache_hit_keeps_saved_output():
     result = host.set_settings({'alpha': 'premultiplied'})
     assert host._packed[0] is packed[0]
     assert host._packed[1] is packed[1]
-    assert result['image'] == before['image']
-    assert host.page_preview(0)['image'] == result['image']
+    assert result['unchanged'] is True and 'image' not in result
+    assert host.page_preview(0)['image'] == before['image']
     assert result['state']['hasPending'] is False
     assert result['state']['hasChanges'] is True
     assert host._saved is True
@@ -250,7 +251,8 @@ def test_alpha_only_settings_cache_hit_keeps_saved_output():
 def test_preferences_can_be_restored_before_load():
     host = AppHost()
     requested = {'packer': 'rectangles', 'padding': 9, 'meshAware': False,
-                 'splitComposite': True, 'keepLayout': False, 'alpha': 'premultiplied'}
+                 'splitComposite': True, 'keepLayout': False, 'alpha': 'premultiplied',
+                 'bleed': False}
     assert host.set_settings(requested) is None
     assert host._pack_settings == requested
     for invalid in ({'padding': 0}, {'padding': 4, 'unknown': True}, {'packer': 'grid'}):
@@ -293,3 +295,59 @@ def test_late_skeleton_after_save_marks_changed_packing_pending(mesh):
     result = host.set_skeleton('late.skel', b'mesh')
     assert host._packed[0] is not previous
     assert result['state']['hasPending'] is True
+
+
+# --- settings changes that do not change the output -----------------------------
+
+def test_settings_need_pack_only_when_the_engine_must_pack(calls):
+    host = loaded()
+    assert host.settings_need_pack({'packer': 'rectangles'}) is False  # View: nothing packs
+    host.enter_edit()
+    assert host.settings_need_pack({'packer': 'rectangles'}) is False  # no edits yet
+    host.modify(['a'], page_bytes(12, 8), 'straight')
+    assert host.settings_need_pack({'packer': 'rectangles'}) is True
+    assert host.settings_need_pack({'alpha': 'premultiplied'}) is False  # same pack: cached
+    host.set_settings({'packer': 'rectangles'})
+    assert host.settings_need_pack({'packer': 'shelf'}) is False
+    assert host.settings_need_pack({'padding': 'x'}) is True  # invalid: set_settings reports it
+    assert host._settings()['packer'] == 'rectangles'  # asking never changes the settings
+
+
+def test_unchanged_output_returns_no_image(calls):
+    host = loaded()
+    host.enter_edit()
+    result = host.set_settings({'packer': 'rectangles', 'padding': 5})  # no edits: same pages
+    assert result == {'state': host._state(), 'unchanged': True}
+    host.modify(['a'], page_bytes(12, 8), 'straight')
+    changed = host.set_settings({'packer': 'shelf'})
+    assert 'image' in changed and 'unchanged' not in changed
+    assert host.set_settings({'alpha': 'premultiplied'})['unchanged'] is True
+
+
+def test_in_place_padding_that_did_not_matter_needs_no_pack():
+    host = loaded()
+    host.set_settings({'packer': 'rectangles_in_place'})
+    host.enter_edit()
+    host.modify(['a'], page_bytes(3, 2), 'straight')  # fits its slot
+    assert host.settings_need_pack({'padding': 40}) is False
+    assert host.set_settings({'padding': 40})['unchanged'] is True
+
+
+# --- bleed ------------------------------------------------------------------------
+
+def test_bleed_defaults_on_and_reaches_the_packer(calls):
+    host = loaded()
+    assert host._state()['settings']['bleed'] is True
+    assert host._state()['settings']['bleedLocked'] is False
+    host.enter_edit()
+    host.modify(['a'], page_bytes(12, 8), 'straight')
+    assert calls[-1]['packer_options'].bleed is True
+    host.set_settings({'bleed': False})
+    assert calls[-1]['packer_options'].bleed is False
+    with pytest.raises(ValueError, match='bleed'):
+        host.set_settings({'bleed': 'yes'})
+
+
+def test_bleed_is_locked_when_every_page_is_pma():
+    assert loaded(all_pma)._state()['settings']['bleedLocked'] is True
+    assert loaded(mixed_pma)._state()['settings']['bleedLocked'] is False

@@ -102,7 +102,7 @@ def split_composite(
 def _shared_layers(pixels: np.ndarray, holders: np.ndarray, pma: list[bool], windows: list) -> list[np.ndarray]:
     """Straight and mixed batches (spec 2026-10-26 §3.5): the SPLIT alpha
     hand-out, one layer per survivor cut to its rect window. Straight layers
-    are byte-identical to before. pma layers keep RGB x share, give an
+    keep the input's RGB everywhere, under alpha 0 too. pma layers keep RGB x share, give an
     alpha-0 pixel's colour to the topmost covering holder when it is pma,
     and are cleared outside their holder."""
     alphas = split_alphas(pixels[..., 3], holders)
@@ -122,8 +122,9 @@ def _shared_layers(pixels: np.ndarray, holders: np.ndarray, pma: list[bool], win
             additive = covered[window] & (top[window] == k) & (total == 0)
             layer[additive, :3] = source[additive, :3]
             layer[~holders[k][window]] = 0
-        else:
-            layer[layer[..., 3] == 0] = 0
+        # Straight: an alpha-0 pixel keeps the input's RGB (the neighbouring
+        # piece's colour at a seam), so linear filtering at the cut does
+        # not blend in black.
         layers.append(layer)
     return layers
 

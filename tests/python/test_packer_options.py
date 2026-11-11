@@ -184,3 +184,24 @@ def test_auto_and_always_are_different_cache_keys():
     auto, _ = resolve_packer("shelf", PackerOptions(repack="auto"), mesh_ready=True)
     always, _ = resolve_packer("shelf", PackerOptions(repack="always"), mesh_ready=True)
     assert auto != always and len({auto, always}) == 2
+
+
+# --- bleed (Spine's packer Bleed) -------------------------------------------
+
+@pytest.mark.parametrize("packer", ["shelf", "rectangles", "polygons", "rectangles_in_place"])
+@pytest.mark.parametrize("value, expected", [(None, None), (False, False), (True, True)])
+def test_bleed_resolves(packer, value, expected):
+    resolved, _ = resolve_packer(packer, PackerOptions(bleed=value), mesh_ready=True)
+    assert resolved.bleed is expected
+
+
+@pytest.mark.parametrize("value", [1, "yes"])
+def test_bleed_of_wrong_type(value):
+    with pytest.raises(TypeError, match="bleed"):
+        resolve_packer("shelf", PackerOptions(bleed=value), mesh_ready=True)
+
+
+def test_bleed_is_part_of_the_cache_key():
+    on, _ = resolve_packer("shelf", PackerOptions(bleed=True), mesh_ready=True)
+    off, _ = resolve_packer("shelf", None, mesh_ready=True)
+    assert on != off

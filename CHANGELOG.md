@@ -18,6 +18,15 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   regions on pma pages too, clearing all four channels outside the hull.
 
 ### Added
+- `PackerOptions(bleed=...)`: Spine's packer Bleed. On every page a build
+  writes that is not pma, transparent pixels within 2 px of an image take the
+  mean colour of their visible neighbours (alpha stays 0), so linear texture
+  filtering draws no dark edges. `None` (default) bleeds when the build
+  splits composites (`split_composite=True` and both in-place packers);
+  `True` / `False` force it. Untouched and rename-only pages keep their pixels.
+- `SpineAtlas.pack()` returns the packed text and page images without
+  creating a child atlas; `pack_is_cached()` tells whether a pack with the
+  given settings would return at once.
 - `packer="rectangles_in_place"` / `"polygons_in_place"`: a page whose edits
   fit keeps its layout. Removed regions leave empty space; a replaced region
   whose new pixels fit its old slot (the canvas size `extract()` gives,
@@ -68,6 +77,16 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   desktop shell's dependencies moved to the `app` extra.
 
 ### Changed
+- `"rectangles"` / `"polygons"` pages are trimmed to their regions' extent
+  (rounded up to a multiple of 4); nest growth used to leave part of its last
+  strip empty.
+- The build cache keeps the last 8 packs of the current edits (within 512 MB
+  of edited page pixels) instead of one, so switching settings back is
+  instant. A pack that never used its padding (in place, no repack, no
+  addition) is reused for any padding.
+- `build(split_composite=True)` on straight pages: each piece keeps the
+  composite's colour under its alpha-0 pixels instead of black, so the seam
+  between pieces filters cleanly where the piece is drawn in place.
 - A page whose only edits are additions and renames is no longer repacked by
   default (pass `repack="always"`).
 - Removing a region added in the same atlas undoes the add; a single-page
@@ -125,6 +144,7 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - Repack deduplication also compares sprite sizes.
 - Forced Resizing with Mesh Cropping resizes a region before masking it, so a
   scaled composite round-trips exactly.
+- Nest pages are trimmed to their regions (the app keeps the grown canvas).
 - The shelf packer leaves padding between sprites (the app packs them edge to
   edge), and nest packing defaults to 2 px padding (the app's gap is 4).
   `"rectangles"` can be combined with mesh_aware (the app always nests

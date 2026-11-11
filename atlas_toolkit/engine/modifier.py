@@ -44,6 +44,7 @@ from atlas_toolkit.domain.packing import (
     rotate_grid_for_pack,
     shelf_pack,
     solid_mask,
+    trim_canvas,
 )
 from atlas_toolkit.domain.region_ops import round_half_even
 from atlas_toolkit.raster.base import ImageHandle, RasterBackend
@@ -756,7 +757,8 @@ class AtlasModifier:
                         "mask_crop_rect_for_offsets": mask_crop_rect_for_offsets,
                     }),
                 })
-            packed = nest_pack(items, gap_distance=nest_options.get("gap_distance", 4))
+            # Python-only: cut the last, partly empty growth strip.
+            packed = trim_canvas(nest_pack(items, gap_distance=nest_options.get("gap_distance", 4)))
         else:
             items = []
             for name in unique_names:

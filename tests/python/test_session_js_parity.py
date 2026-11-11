@@ -247,6 +247,7 @@ def _record_png(record):
     "session_structural_last_remove_shelf", "session_structural_last_remove_nest",
     "session_cross_slice",
 ])
+@pytest.mark.usefixtures("untrimmed_nest")
 def test_structural_transaction_sequence_matches_real_browser(case_id):
     from atlas_toolkit.engine.session import AtlasSession
 
@@ -327,6 +328,7 @@ def test_structural_transaction_sequence_matches_real_browser(case_id):
 
 
 @pytest.mark.parametrize("case_id", ["session_mesh_nest_pixel", "session_mesh_nest_structural"])
+@pytest.mark.usefixtures("untrimmed_nest")
 def test_mesh_nest_sequence_matches_real_browser(case_id):
     from atlas_toolkit.engine.session import AtlasSession
 
@@ -435,6 +437,7 @@ def test_pixel_transaction_sequence_matches_real_browser(case_id):
 
 
 @pytest.mark.parametrize("case_id", ["session_multipage_shelf", "session_multipage_nest"])
+@pytest.mark.usefixtures("untrimmed_nest")
 def test_multi_page_replace_matches_real_browser(case_id):
     """Spec 2026-10-21 §3.10: deferred multi-page replace equals the app's
     _rebuildMultiPageRepack -- text after parse/serialize, pages as pixels."""

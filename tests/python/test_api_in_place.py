@@ -597,3 +597,52 @@ def test_clearing_rgb_under_a_shared_transparent_pixel_goes_in_place(monkeypatch
     arr[6, 6] = 0
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
     assert layout(atlas.build(packer="polygons_in_place")) == layout(atlas)
+
+
+# --- padding that the pack never used shares its cache entry ------------------
+
+PAD = "p.png\nsize: 32,16\nA\n bounds: 0,0,10,8\nB\n bounds: 16,0,12,12\n"
+
+
+def _pad_atlas(monkeypatch):
+    atlas = SpineAtlas.load(PAD, {"p.png": page(32, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
+    from atlas_toolkit.engine.session import AtlasSession
+    calls = []
+    original = AtlasSession.pack_pending
+    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))
+    return atlas, calls
+
+
+def test_in_place_fit_ignores_padding(monkeypatch):
+    atlas, calls = _pad_atlas(monkeypatch)
+    atlas.replace({"A": img(10, 8)})  # fits its slot: no repack, no add
+    first = atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
+    again = atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=9))
+    assert len(calls) == 1 and again[0] is first[0] and again[1] is first[1]
+    assert atlas.pack_is_cached(packer="rectangles_in_place", packer_options=PackerOptions(padding=30))
+    assert not atlas.pack_is_cached(packer="rectangles", packer_options=PackerOptions(padding=30))
+
+
+def test_in_place_add_or_repack_keeps_padding_in_the_key(monkeypatch):
+    atlas, calls = _pad_atlas(monkeypatch)
+    atlas.add_region("N", img(3, 3))  # placed into free space with the padding as gap
+    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
+    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=3))
+    assert len(calls) == 2
+    atlas, calls = _pad_atlas(monkeypatch)
+    atlas.replace({"A": img(20, 14)})  # does not fit: the page repacks
+    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
+    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=3))
+    assert len(calls) == 2
+
+
+def test_pack_is_cached_without_edits_and_after_a_pack(monkeypatch):
+    atlas, calls = _pad_atlas(monkeypatch)
+    assert atlas.pack_is_cached(packer="rectangles", packer_options=PackerOptions(padding=7))
+    atlas.replace({"A": img(20, 14)})
+    assert not atlas.pack_is_cached()
+    atlas.pack()
+    assert atlas.pack_is_cached() and not atlas.pack_is_cached(packer="rectangles")
+    assert len(calls) == 1
+    with pytest.raises(ValueError):
+        atlas.pack_is_cached(packer="rectangles_in_place", packer_options=PackerOptions(repack="always"))

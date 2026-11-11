@@ -489,7 +489,24 @@ def test_cross_page_nine_patch_member_falls_back(monkeypatch):
     text = TWO_PAGE_SAME.replace(" rotate: 90\n", " rotate: 90\n split: 1,1,1,1\n")
     atlas = load_two(monkeypatch, text, SAME_MESH)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
-    split, plain = atlas.build(split_composite=True), atlas.build()
+    # Bleed defaults on with split_composite; match it so only the split differs.
+    split, plain = atlas.build(split_composite=True), atlas.build(packer_options=PackerOptions(bleed=True))
     assert split.atlas_text == plain.atlas_text
     for name in ("A", "B", "C"):
         assert split.extract(name).tobytes() == plain.extract(name).tobytes(), name
+
+
+def test_straight_pieces_keep_the_composite_colour_under_alpha_zero(monkeypatch):
+    # At a seam the alpha-0 side of each piece holds the neighbouring piece's
+    # real colour, not black, so linear filtering at the cut stays clean.
+    # In place the pieces are written onto the page as they are; a repack
+    # pastes with source-over, which drops colour under alpha 0 (bleed then
+    # recolours the edge ring).
+    atlas = load(monkeypatch, SAME, SAME_MESH)
+    image = pattern(32, 16)
+    atlas.replace_composite(["A", "B", "C"], Image.fromarray(image, "RGBA"))
+    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(bleed=False))
+    pages = [np.asarray(page) for page in built.pages.values()]
+    clear = [page[page[..., 3] == 0] for page in pages]
+    assert any(len(c) for c in clear)
+    assert any(c[:, :3].any() for c in clear)

@@ -82,6 +82,7 @@ def test_load_reports_state():
             "splitCompositeLocked": False, "keepLayout": True,
             "keepLayoutLocked": False, "polygonsAllowed": False,
             "alpha": "straight", "alphaVisible": False, "fallbackFrom": None,
+            "bleed": True, "bleedLocked": False,
         },
     }
 

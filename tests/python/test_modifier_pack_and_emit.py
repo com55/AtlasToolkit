@@ -146,6 +146,7 @@ def js_results(run_packing_oracle):
 
 
 @pytest.mark.parametrize("case_id", list(CASES))
+@pytest.mark.usefixtures("untrimmed_nest")
 def test_matches_real_js(case_id, js_results):
     assert _python_result(*PY_ARGS[case_id]) == js_results[case_id]
 

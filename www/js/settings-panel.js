@@ -43,7 +43,7 @@ async function apply(key, value) {
   const previous = settings;
   try {
     const result = await AtlasAPI.set_settings({[key]:value});
-    if (result?.state) await (await import('./modify-mode.js')).onModPreviewReceived(result);
+    if (result?.state && !result.unchanged) await (await import('./modify-mode.js')).onModPreviewReceived(result);
     renderSettings(AtlasAPI.get_settings());
   } catch (e) {
     const number = document.getElementById('p-num');
@@ -75,6 +75,7 @@ export function renderSettings(value) {
   }).join('')}</div></div><div class="sec">${toggle('meshAware','Mesh-Aware','Cut each region to its mesh outline before packing.')}${toggle('splitComposite','Split Composite','Treat a composite image as the inverse of Forced Resizing and split it back per region.')}</div>
   <div class="sec"><div class="sec-head"><p class="pack-heading">Padding (px)</p><button id="btn-pad-reset" type="button" title="Reset to default (2)">${RESET}</button></div><div class="padding-controls"><input type="range" id="p-range" min="1" max="100" value="${Math.min(100,value.padding)}"><input type="number" id="p-num" min="1" max="256" step="1" value="${value.padding}"></div></div>
   <div class="sec">${toggle('keepLayout','Keep layout when only adding','A page with only additions and renames keeps every existing region where it is.')}<p class="hint">New regions go into free space.<br>Off: every edited page is repacked.</p></div>
+  <div class="sec">${toggle('bleed','Bleed','Give transparent pixels next to each image its colour (alpha stays 0), as Spine\'s packer does, so texture filtering draws no dark edges. Pages with premultiplied alpha are left as they are.')}</div>
   ${value.alphaVisible ? `<div class="sec"><p class="pack-heading">Image alpha</p><select id="s-alpha"><option value="straight">Straight alpha</option><option value="premultiplied">Premultiplied alpha</option></select></div>` : ''}<button id="pack-close" type="button">Close</button>`;
   if (focusedNumber) {
     // Keep the focused padding section in the live DOM so neither focus

@@ -44,11 +44,18 @@ class PackerOptions:
     moves; "always" repacks every edited page. "rectangles_in_place" /
     "polygons_in_place" refuse "always".
 
+    `bleed`: Spine's packer Bleed -- on every page the pack writes that is
+    not pma, transparent pixels within 2 px of an image take its colour
+    (alpha stays 0), so linear filtering draws no dark edges. None is auto:
+    on when the pack splits composites (split_composite=True and both
+    in-place packers), where cut pieces meet edge to edge.
+
     Validated by build() / save(), not here."""
 
     padding: int | None = None
     mesh_aware: bool | None = None
     repack: str | None = None
+    bleed: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +70,7 @@ class ResolvedPack:
     mesh_footprint: bool
     patch_adds: bool
     in_place: bool = False
+    bleed: bool | None = None  # None: auto, resolved with split_composite by the caller
 
 
 def _type_name(value: object) -> str:
@@ -129,12 +137,15 @@ def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tupl
     mesh_aware = options.mesh_aware
     if mesh_aware is not None and not isinstance(mesh_aware, bool):
         raise TypeError(f"mesh_aware must be True, False or None, not {_type_name(mesh_aware)}")
+    bleed = options.bleed
+    if bleed is not None and not isinstance(bleed, bool):
+        raise TypeError(f"bleed must be True, False or None, not {_type_name(bleed)}")
     if base is Packer.POLYGONS:
         if mesh_aware is False:
             raise ValueError(f"packer {mode.value!r} always uses the mesh; mesh_aware cannot be False")
         return ResolvedPack(
             nest=True, padding=padding, mesh_aware=True, mesh_footprint=True,
-            patch_adds=patch_adds, in_place=in_place,
+            patch_adds=patch_adds, in_place=in_place, bleed=bleed,
         ), True
     resolved = ResolvedPack(
         nest=base is Packer.RECTANGLES,
@@ -143,5 +154,6 @@ def resolve_packer(packer: object, options: object, *, mesh_ready: bool) -> tupl
         mesh_footprint=False,
         patch_adds=patch_adds,
         in_place=in_place,
+        bleed=bleed,
     )
     return resolved, mesh_aware is True

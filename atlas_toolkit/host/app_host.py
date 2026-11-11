@@ -37,6 +37,7 @@ class AppHost:
             "splitComposite": False,
             "keepLayout": True,
             "alpha": "straight",
+            "bleed": True,
         }
 
     def _settings(self) -> dict:
@@ -57,6 +58,7 @@ class AppHost:
             keepLayoutLocked=in_place,
             polygonsAllowed=usable_mesh,
             alphaVisible=self._all_pma,
+            bleedLocked=self._all_pma,  # bleed never touches pma pages
             fallbackFrom=requested if fallback else None,
         )
         return settings
@@ -69,11 +71,13 @@ class AppHost:
                 padding=settings["padding"],
                 mesh_aware=None if settings["packer"].startswith("polygons") else settings["meshAware"],
                 repack=None if settings["keepLayout"] else "always",
+                bleed=settings["bleed"],
             ),
             "split_composite": settings["splitComposite"],
         }
 
-    def set_settings(self, settings: dict) -> dict | None:
+    @staticmethod
+    def _validate_settings(settings: dict) -> None:
         if not isinstance(settings, dict):
             raise ValueError("settings must be a dict")
         for key, value in settings.items():
@@ -83,7 +87,7 @@ class AppHost:
                 )
             elif key == "padding":
                 valid = type(value) is int and 1 <= value <= 256
-            elif key in ("meshAware", "splitComposite", "keepLayout"):
+            elif key in ("meshAware", "splitComposite", "keepLayout", "bleed"):
                 valid = type(value) is bool
             elif key == "alpha":
                 valid = isinstance(value, str) and value in ("straight", "premultiplied")
@@ -91,6 +95,33 @@ class AppHost:
                 valid = False
             if not valid:
                 raise ValueError(f"invalid setting: {key}")
+
+    def settings_need_pack(self, settings: dict) -> bool:
+        """True when set_settings(settings) would pack: Edit Mode with edits
+        and no cached pack for the new settings. Invalid settings answer True
+        so that set_settings reports them. Never changes anything."""
+        try:
+            self._validate_settings(settings)
+        except ValueError:
+            return True
+        atlas = self._atlas
+        if atlas is None or self._packed is None:
+            return False
+        previous = self._pack_settings
+        self._pack_settings = {**previous, **settings}
+        try:
+            return not atlas.pack_is_cached(**self._pack_arguments())
+        except Exception:  # e.g. a missing skeleton: set_settings reports it
+            return True
+        finally:
+            self._pack_settings = previous
+
+    def set_settings(self, settings: dict) -> dict | None:
+        """Store the requested settings and repack in Edit Mode. When the
+        packed output is the very same as before (no edits, a setting the
+        pack does not use), returns {"state", "unchanged": True} without
+        page pixels."""
+        self._validate_settings(settings)
         atlas = self._atlas
         previous = self._pack_settings
         self._pack_settings = {**previous, **settings}
@@ -104,10 +135,14 @@ class AppHost:
         except BaseException:
             self._pack_settings = previous
             raise
-        if packed[0] is not self._packed[0]:
+        old_text, old_pages = self._packed
+        unchanged = packed[0] == old_text and packed[1].keys() == old_pages.keys() and all(
+            packed[1][name] is old_pages[name] for name in old_pages
+        )
+        if packed[0] is not old_text:
             self._saved = False
         self._packed = packed
-        return self._edit_result()
+        return {"state": self._state(), "unchanged": True} if unchanged else self._edit_result()
 
     @staticmethod
     def required_pages(atlas_text: str) -> list[str]:

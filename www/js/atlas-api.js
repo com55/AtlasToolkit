@@ -3,7 +3,7 @@ import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
-import { withBusy, BUSY_LABEL } from './busy-overlay.js';
+import { withBusy, withLock, BUSY_LABEL } from './busy-overlay.js';
 import { PreviewCache, viewPreviewKey } from './preview-cache.js';
 let engineStartupError = null;
 export function setEngineStartupError(error) { engineStartupError = error; }
@@ -486,13 +486,19 @@ export const AtlasAPI = {
       for (const [key, pref] of SETTING_PREFS) {
         if (Object.hasOwn(partial, key)) await AtlasAPI.set_pref(pref, partial[key]);
       }
-      const applied = result?.state ? await acceptEditResult(result) : result;
-      if (result && !result.state) _state = result;
+      // `unchanged`: same packed pages, so no image came back to convert.
+      const applied = result?.state && !result.unchanged ? await acceptEditResult(result) : result;
+      if (result?.unchanged) _state = result.state;
+      else if (result && !result.state) _state = result;
       _previewCache.invalidateAll(); _hulls.clear();
       await publishSettings();
       return applied;
     };
-    return busy ? withBusy(BUSY_LABEL, run) : run();
+    if (!busy) return run();
+    // Show the busy overlay only when the engine has to pack; a cached pack,
+    // an atlas without edits or View Mode answer at once (still locked).
+    const needsPack = await callHost('settings_need_pack', [partial]).catch(() => true);
+    return needsPack ? withBusy(BUSY_LABEL, run) : withLock(run);
   },
 
   /** Apply a `.skel` File (picker or drag-drop). Replaces any previously
@@ -860,6 +866,7 @@ const SETTING_PREFS = [
   ['packer', 'packer', 'shelf'], ['padding', 'packPadding', 2],
   ['meshAware', 'packMeshAware', true], ['splitComposite', 'packSplitComposite', false],
   ['keepLayout', 'packKeepLayout', true], ['alpha', 'imageAlpha', 'straight'],
+  ['bleed', 'packBleed', true],
 ];
 async function publishSettings() {
   if (_state?.settings) (await import('./settings-panel.js')).renderSettings(_state.settings);

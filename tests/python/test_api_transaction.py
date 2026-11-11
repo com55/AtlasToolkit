@@ -242,8 +242,8 @@ def test_build_shares_cache_without_changing_output(packer, monkeypatch):
     built = atlas.build(packer=packer)
     assert packed_bytes((built.atlas_text, built.pages)) == expected
     assert built._session._raster.view(built._session._page_images['p2.png']) is not pristine
-    assert atlas._build_cache[2]['p2.png'] is pristine
-    assert atlas.pack(packer=packer)[1] is atlas._build_cache[2]
+    assert atlas._build_cache[-1][2]['p2.png'] is pristine
+    assert atlas.pack(packer=packer)[1] is atlas._build_cache[-1][2]
 
 
 def test_rollback_after_a_successful_pack_inside_the_block():
