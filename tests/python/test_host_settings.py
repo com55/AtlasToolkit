@@ -243,6 +243,7 @@ def test_alpha_only_settings_cache_hit_keeps_saved_output():
     assert result['image'] == before['image']
     assert host.page_preview(0)['image'] == result['image']
     assert result['state']['hasPending'] is False
+    assert result['state']['hasChanges'] is True
     assert host._saved is True
 
 
@@ -280,3 +281,15 @@ def test_real_overflow_setting_restores_everything():
     assert host.page_preview(0) == preview and host._saved is True
     assert host._atlas._build_cache is cache
     assert host.rename('r1', 'renamed')['state']['settings']['padding'] == 2
+
+
+def test_late_skeleton_after_save_marks_changed_packing_pending(mesh):
+    host = loaded()
+    host.enter_edit()
+    host.modify(['a'], page_bytes(12, 8), 'straight')
+    host.save_output()
+    host.mark_saved()
+    previous = host._packed[0]
+    result = host.set_skeleton('late.skel', b'mesh')
+    assert host._packed[0] is not previous
+    assert result['state']['hasPending'] is True

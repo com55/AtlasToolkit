@@ -1,3 +1,4 @@
+import { HostError } from './engine-client.js';
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
 import { AtlasAPI } from './atlas-api.js';
 import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
@@ -340,7 +341,8 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
       await onConfirm(file, name);
     } catch (e) {
       console.error(e);
-      showToast('Failed to add region.', 'error');
+      if (e instanceof HostError) window.showAlert(e.message, 'Cannot add region');
+      else showToast('Failed to add region.', 'error');
     } finally {
       close();
       submitting = false;

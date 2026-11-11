@@ -136,6 +136,7 @@ class AppHost:
             "pristineRegions": [dict(region) for region in self._pristine_regions],
             "regionPages": {view.key: view.page for view in views},
             "modifiedKeys": [view.key for view in views if view.modified],
+            "hasChanges": atlas.has_changes,
             "hasPending": atlas.has_changes and not self._saved,
             "allPma": self._all_pma,
             "settings": self._settings(),
@@ -176,6 +177,8 @@ class AppHost:
             except BaseException:
                 atlas.set_skeleton(previous)
                 raise
+            if packed[0] is not self._packed[0]:
+                self._saved = False
             self._packed = packed
         else:
             atlas.set_skeleton(data)
@@ -346,6 +349,10 @@ class AppHost:
         self._require_edit()
         text, pages = self._packed
         names = png_names_for_save(text, len(pages), self._atlas_name)
+        for name in names:
+            if ("/" in name or "\\" in name or name == ".."
+                    or (len(name) >= 2 and name[0].isalpha() and name[1] == ":")):
+                raise AtlasError(f"unsafe page file name: {name}")
         page_order = self.required_pages(text)
         result = {
             "text": text,

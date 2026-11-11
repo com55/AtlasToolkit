@@ -401,6 +401,29 @@ try {
   const saved = await savedDownload;
   const savedZip = fs.readFileSync(await saved.path());
   if (!savedZip.includes(Buffer.from('synthetic.atlas')) || !savedZip.includes(Buffer.from('.png'))) throw new Error('Save ZIP missing atlas or PNG');
+  await app.evaluate(async () => {
+    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const result = await window.testAPI.set_settings({alpha:'premultiplied'});
+    await onModPreviewReceived(result);
+    if (result.state.hasPending) throw new Error('Cache-hit setting marked saved output pending');
+    if (document.getElementById('btn-save-mod').disabled || document.getElementById('btn-reset-mod').disabled) throw new Error('Cache-hit setting disabled Save As or Reset after Save');
+  });
+  await waitForEdit(app);
+  const beforeOversizedAdd = await app.locator('.region-item').allTextContents();
+  const oversizedPNG = Buffer.from(await app.evaluate(async () => {
+    const file = await window.makeMod(10001, 4);
+    return Array.from(new Uint8Array(await file.arrayBuffer()));
+  }));
+  await app.locator('#btn-add-region').click();
+  await app.locator('#add-file-input').setInputFiles({name:'oversized.png', mimeType:'image/png', buffer:oversizedPNG});
+  await app.locator('#add-name-input').fill('oversized');
+  await app.locator('#add-confirm-btn').click();
+  await app.waitForFunction(() => document.getElementById('modal-title').innerText === 'Cannot add region', null, {polling:500});
+  const oversizedMessage = await app.locator('#modal-message').innerText();
+  if (!/the packed layout would be about .*over the 10000 px per side limit/.test(oversizedMessage)) throw new Error('Oversized Add dialog discarded engine message: ' + oversizedMessage);
+  await app.locator('#btn-modal-confirm').click();
+  await waitForEdit(app);
+  if (JSON.stringify(await app.locator('.region-item').allTextContents()) !== JSON.stringify(beforeOversizedAdd)) throw new Error('Failed Add changed region list');
   await app.locator('#mode-extract').click();
   await app.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});
   if (await app.locator('#advance-toolbar').isVisible()) throw new Error('Toolbar visible in View');
@@ -537,8 +560,7 @@ try {
   await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await import('/js/busy-overlay.js')).isBusy());
   if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
   if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
-  await settingsPage.locator('#p-num').fill('5');
-  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('5px'), null, {polling:500});
+  // Keep the typed 15px value for the persistence check after reload.
   await settingsPage.locator('[data-packer="rectangles_in_place"]').click();
   await settingsPage.waitForFunction(() => document.querySelector('[data-setting="splitComposite"]').disabled, null, {polling:500});
   for (const key of ['splitComposite','keepLayout']) if (!await settingsPage.locator('[data-setting="'+key+'"]').isChecked()) throw new Error('In-place lock value');
@@ -551,7 +573,7 @@ try {
   await loadSettingsFixture();
   await settingsPage.locator('#mode-modify').click();
   await waitForEdit(settingsPage);
-  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles · 5px'), null, {polling:500});
+  await settingsPage.waitForFunction(() => document.querySelector('#btn-pack-chip .chip-value')?.textContent === 'Rectangles · 15px', null, {polling:500});
   await settingsPage.locator('#btn-pack-chip').click();
   await settingsPage.locator('#btn-pad-reset').click();
   await settingsPage.waitForFunction(() => document.getElementById('p-num').value === '2', null, {polling:500});

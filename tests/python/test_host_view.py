@@ -74,7 +74,7 @@ def test_load_reports_state():
         "atlasName": "sample.atlas", "pages": ["p.png", "q.png"], "isMultiPage": True,
         "regions": regions, "pristineRegions": regions,
         "regionPages": {"a": "p.png", "b": "p.png", "c": "q.png"},
-        "modifiedKeys": [], "hasPending": False, "allPma": False,
+        "modifiedKeys": [], "hasChanges": False, "hasPending": False, "allPma": False,
         "mesh": {"available": False, "reason": None, "skelName": None},
         "settings": {
             "packer": "shelf", "padding": 2, "meshAware": False,

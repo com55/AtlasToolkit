@@ -1,3 +1,4 @@
+import { HostError } from './engine-client.js';
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';
 import {
@@ -191,7 +192,7 @@ export async function ReplaceSelected() {
 }
 
 export async function onModPreviewReceived(data) {
-  state.hasModImage = data.state ? !!data.state.hasPending : AtlasAPI.has_pending_modifications();
+  state.hasModImage = data.state ? !!data.state.hasChanges : AtlasAPI.has_pending_modifications();
   if (data.regions) state.modifyRegionBounds = data.regions;
   if (Array.isArray(data.pages) && data.pages.length > 0) {
     state.modifyPages = data.pages;
@@ -461,7 +462,8 @@ function openRenameModal() {
         await refreshStructuralUi(prevSelectedKeys);
       } catch (e) {
         console.error(e);
-        showToast('Failed to rename region.', 'error');
+        if (e instanceof HostError) window.showAlert(e.message, 'Cannot rename region');
+        else showToast('Failed to rename region.', 'error');
         confirmBtn.disabled = false;
       }
     });
@@ -516,7 +518,8 @@ document.getElementById('btn-remove-region').addEventListener('click', async () 
           await refreshStructuralUi(prevSelectedKeys);
         } catch (e) {
           console.error(e);
-          showToast('Failed to remove region(s).', 'error');
+          if (e instanceof HostError) window.showAlert(e.message, 'Cannot remove region');
+          else showToast('Failed to remove region(s).', 'error');
         }
       });
     });

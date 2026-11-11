@@ -258,3 +258,17 @@ def test_failed_pending_modify_restores_source_and_preview(keys, monkeypatch):
     assert [host.page_preview(i) for i in range(2)] == previews
     # Build again to prove the old handle survived the failed transaction.
     assert host._atlas.build().extract('fresh').tobytes() == decode(page_bytes(2, 3)).tobytes()
+
+
+@pytest.mark.parametrize('page', ['../escape.png', 'dir/page.png', r'dir\page.png', 'C:escape.png', '/escape.png'])
+def test_save_rejects_unsafe_page_names_without_marking_saved(page):
+    host, _ = loaded(lambda: one_page(page=page))
+    host.enter_edit()
+    host.rename('a', 'renamed')
+    before = host._state()
+    with pytest.raises(AtlasError) as error:
+        host.save_output()
+    assert page in str(error.value)
+    assert host._state() == before
+    assert host._saved is False
+    assert host._state()['hasPending'] is True
