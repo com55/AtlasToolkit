@@ -2,17 +2,20 @@
 import http.client
 import json
 import queue
+import socket
 import struct
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from urllib.parse import urlsplit
+from unittest.mock import Mock
 
 import pytest
 
 from atlas_toolkit.app.events import EventBroker
 from atlas_toolkit.app.files import DesktopFiles
 from atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
-from atlas_toolkit.app.server import DesktopServer
+from atlas_toolkit.app.server import DesktopServer, _HTTPServer
 
 
 def test_broker_backlog_and_live():
@@ -45,6 +48,68 @@ def test_broker_close_wakes_all():
     assert list(broker.subscribe()) == []
     broker.publish("ignored")
     broker.close()
+
+
+@pytest.mark.parametrize("value, error", [(object(), TypeError), ([], ValueError)])
+def test_broker_rejects_unserializable_event(value, error):
+    if isinstance(value, list):
+        value.append(value)
+    broker = EventBroker()
+    with pytest.raises(error):
+        broker.publish("invalid", value=value)
+    subscription = broker.subscribe()
+    with pytest.raises(queue.Empty):
+        subscription.get(timeout=0.01)
+    subscription.close()
+
+
+def test_server_disallows_address_reuse():
+    assert _HTTPServer.allow_reuse_address is False
+
+
+@pytest.mark.parametrize("alive", [False, True])
+def test_stop_lifecycle_without_socket(alive):
+    server = DesktopServer.__new__(DesktopServer)
+    server._stopped = False
+    server._http = Mock()
+    server._thread = Mock()
+    server._thread.is_alive.return_value = alive
+    server.events = Mock()
+    calls = Mock()
+    calls.attach_mock(server.events.close, "close_events")
+    calls.attach_mock(server._http.shutdown, "shutdown")
+    calls.attach_mock(server._thread.join, "join")
+    calls.attach_mock(server._http.server_close, "server_close")
+    server.stop()
+    server.stop()
+    expected = ["close_events", "shutdown", "join", "server_close"] if alive else ["server_close"]
+    assert [call[0] for call in calls.mock_calls] == expected
+
+
+def test_socket_stop_before_start(tmp_path):
+    server = DesktopServer(tmp_path, Host(), Commands(), DesktopFiles(), EventBroker())
+    done = threading.Event()
+
+    def stop():
+        try:
+            server.stop()
+            server.stop()
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=stop, daemon=True)
+    thread.start()
+    assert done.wait(2)
+    thread.join()
+    assert server._http.socket.fileno() == -1
+
+
+def test_socket_stop_twice(live):
+    server = live[0]
+    server.stop()
+    server.stop()
+    assert not server._thread.is_alive()
+    assert server._http.socket.fileno() == -1
 
 
 class Host:
@@ -150,10 +215,11 @@ def test_socket_security_and_static(live):
         assert status == 200 and headers["Content-Type"] == mime
     for path in ("../outside", "%2e%2e/outside", "escape", "missing", "."):
         assert request(path=path)[0] == 404
-    for method in ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "CUSTOM"):
+    for method in ("POST", "PUT", "DELETE", "HEAD", "OPTIONS"):
         for path in ("index.html", "api/events", "asset/missing"):
             assert request(method, path)[0] == 405
     assert request("GET", "api/rpc")[0] == 405
+    assert request("CUSTOM")[0] == 501
     assert request("POST", "api/rpc", b"bad", {"Origin": f"http://{url.netloc}"})[0] == 400
 
 
@@ -208,11 +274,13 @@ def test_socket_engine_lock_and_unsaved(live):
 
             fast = pool.submit(echo)
             assert started.wait(1)
+            with pytest.raises(TimeoutError):
+                fast.result(timeout=0.3)
             assert host.calls == ["enter"]
         finally:
             host.release.set()
-        slow.result(timeout=2)
-        fast.result(timeout=2)
+        assert slow.result(timeout=2) == ({"ok": True, "value": None}, [])
+        assert fast.result(timeout=2) == ({"ok": True, "value": 1}, [])
     assert host.calls == ["enter", "exit", "echo"]
     assert not server.unsaved
 
@@ -239,6 +307,50 @@ def test_socket_events_and_assets(live):
     assert headers["Content-Type"] == "application/octet-stream"
     asset.unlink()
     assert request(path=registered)[0] == 404
+
+
+@pytest.mark.parametrize("case, expected", [
+    ("missing_host", 403), ("duplicate_host", 403),
+    ("encoded_rpc", 405), ("head_rpc", 405),
+])
+def test_socket_raw_requests(live, case, expected):
+    url = live[-1]
+    prefix = url.path.removesuffix("index.html")
+    method = "HEAD" if case == "head_rpc" else "GET"
+    path = prefix + ("api%2Frpc" if case == "encoded_rpc" else "api/rpc")
+    hosts = "" if case == "missing_host" else f"Host: {url.netloc}\r\n"
+    if case == "duplicate_host":
+        hosts *= 2
+    request = f"{method} {path} HTTP/1.0\r\n{hosts}\r\n".encode("ascii")
+    with socket.create_connection((url.hostname, url.port), timeout=3) as client:
+        client.sendall(request)
+        with client.makefile("rb") as response:
+            assert int(response.readline().split()[1]) == expected
+
+
+def test_socket_dead_sse_unsubscribes_with_default_ping(tmp_path):
+    events = EventBroker()
+    server = DesktopServer(tmp_path, Host(), Commands(), DesktopFiles(), events)
+    assert server.ping_interval == 15.0
+    url = urlsplit(server.start())
+    prefix = url.path.removesuffix("index.html")
+    try:
+        with socket.create_connection((url.hostname, url.port), timeout=3) as client:
+            client.sendall(f"GET {prefix}api/events HTTP/1.0\r\nHost: {url.netloc}\r\n\r\n".encode())
+            with client.makefile("rb") as response:
+                assert int(response.readline().split()[1]) == 200
+                while True:
+                    line = response.readline()
+                    assert line, "EOF before SSE headers ended"
+                    if line == b"\r\n":
+                        break
+                assert events.has_subscriber
+        deadline = time.monotonic() + 3
+        while events.has_subscriber and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not events.has_subscriber
+    finally:
+        server.stop()
 
 
 def test_static_path_containment(tmp_path):

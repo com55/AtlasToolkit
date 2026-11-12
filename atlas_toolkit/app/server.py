@@ -6,7 +6,10 @@ import logging
 from pathlib import Path
 import queue
 import secrets
+import select
+import socket
 import threading
+import time
 from urllib.parse import unquote, urlsplit
 
 from atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
@@ -43,6 +46,15 @@ def _static_path(site, path):
 
 class _HTTPServer(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def handle_error(self, request, client_address):
+        _LOG.debug("Desktop request failed for %s", client_address, exc_info=True)
 
 
 class DesktopServer:
@@ -55,15 +67,11 @@ class DesktopServer:
         self.ping_interval = ping_interval
         self._unsaved = False
         self._engine_lock = threading.Lock()
+        self._stopped = False
         self._token = secrets.token_urlsafe(32)
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
-            def __getattr__(self, name):
-                if name.startswith("do_"):
-                    return self.handle_route
-                raise AttributeError(name)
-
             def log_message(self, format, *args):
                 _LOG.debug(format, *args)
 
@@ -73,12 +81,14 @@ class DesktopServer:
                 super().end_headers()
 
             def reply(self, status, body=b"", content_type="text/plain"):
-                self.send_response(status)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                if self.command != "HEAD":
+                try:
+                    self.send_response(status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
                     self.wfile.write(body)
+                except OSError:
+                    pass
 
             def handle_route(self):
                 if self.headers.get_all("Host", []) != [owner._authority]:
@@ -178,18 +188,27 @@ class DesktopServer:
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.end_headers()
+                    last_write = time.monotonic()
                     while True:
                         try:
-                            event = subscription.get(timeout=owner.ping_interval)
+                            event = subscription.get(timeout=min(owner.ping_interval, 1.0))
                         except queue.Empty:
-                            body = b": ping\n\n"
+                            body = None
                         except StopIteration:
                             break
                         else:
                             body = ("data: " + json.dumps(event, ensure_ascii=False,
                                     separators=(",", ":")) + "\n\n").encode("utf-8")
+                        readable, _, _ = select.select([self.connection], [], [], 0)
+                        if readable and self.connection.recv(1, socket.MSG_PEEK) == b"":
+                            break
+                        if body is None:
+                            if time.monotonic() - last_write < owner.ping_interval:
+                                continue
+                            body = b": ping\n\n"
                         self.wfile.write(body)
                         self.wfile.flush()
+                        last_write = time.monotonic()
                 except OSError:
                     pass
                 finally:
@@ -219,7 +238,11 @@ class DesktopServer:
         return f"{self._origin}/s/{self._token}/index.html"
 
     def stop(self):
-        self.events.close()
-        self._http.shutdown()
+        if self._stopped:
+            return
+        self._stopped = True
+        if self._thread.is_alive():
+            self.events.close()
+            self._http.shutdown()
+            self._thread.join()
         self._http.server_close()
-        self._thread.join()

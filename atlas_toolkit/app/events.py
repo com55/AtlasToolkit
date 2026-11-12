@@ -1,5 +1,6 @@
 """Thread-safe desktop events with a bounded initial backlog."""
 from collections import deque
+import json
 import queue
 import threading
 
@@ -50,6 +51,7 @@ class EventBroker:
 
     def publish(self, kind: str, **data):
         event = {"kind": kind, **data}
+        json.dumps(event)
         with self._lock:
             if self._closed:
                 return
