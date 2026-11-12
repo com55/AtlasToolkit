@@ -24,6 +24,8 @@ restart_and_install_update install_update_from_file close_answer
 
 
 class DesktopCommands:
+    RPC_METHODS = RPC_METHODS
+
     def __init__(self, window, files, events, config, updates, argv, is_unsaved, file_dialog):
         self._window = window
         self._files = files

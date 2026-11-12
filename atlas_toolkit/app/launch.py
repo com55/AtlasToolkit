@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import webview
 
-from atlas_toolkit.app.bridge import Api, setup_drop
-from atlas_toolkit.app.paths import is_source_run, resource_path
+from atlas_toolkit.app.desktop import build_desktop, desktop_site
+from atlas_toolkit.app.desktop_commands import DesktopCommands
+from atlas_toolkit.app.paths import is_source_run
 from atlas_toolkit.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
@@ -77,46 +77,27 @@ def configure_logging() -> None:
     )
 
 
-def _allow_qtwebengine_file_module_imports() -> None:
-    """Let QtWebEngine load `www/index.html`'s `<script type="module">` chain
-    over a literal `file://` URI (how `launch.py` always loads it -- see
-    `gui_path` below).
+def setup_drop(window: webview.Window, commands: DesktopCommands) -> None:
+    try:
+        from webview.dom import DOMEventHandler
 
-    Chromium enforces CORS on ES-module fetches even for same-directory
-    relative imports, and `file://` isn't in the CORS-safelisted schemes --
-    so without this, `www/script.js` (and everything under `www/js/`) never
-    loads at all: every `window.*` handler `index.html`'s inline
-    `onclick="..."` attributes call (`openFile`, etc.) stays undefined, and
-    every button throws `ReferenceError` on click. Confirmed via a live
-    Chrome DevTools Protocol session against the real Qt-backend window
-    (2026-09-14): `typeof window.openFile` was `"undefined"` before this
-    fix, `"function"` after.
+        def _drag_over_no_op(_e: Any) -> None:
+            pass
 
-    pywebview's own CEF and EdgeChromium (Windows WebView2) backends already
-    work around exactly this by adding `--allow-file-access-from-files` to
-    their browser args (see `.venv/.../webview/platforms/cef.py` and
-    `edgechromium.py`) -- only the Qt backend (`platforms/qt.py`) is missing
-    it, which is why this only surfaced when pywebview picked Qt (this
-    happens whenever no GTK bindings are available, e.g. `PYWEBVIEW_GUI=qt`
-    or a Linux box without GTK webkit installed).
-
-    Must run before ANY pywebview call touches the Qt backend --
-    `webview.screens[0]` below already triggers backend initialization on
-    non-Windows platforms, so this has to be the first thing `run()` does.
-    `QTWEBENGINE_CHROMIUM_FLAGS` is specific to Qt's bundled Chromium and is
-    simply ignored by every other backend (GTK, CEF, EdgeChromium), so
-    setting it unconditionally here is a no-op everywhere except Qt.
-    """
-    existing = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-    flag = "--allow-file-access-from-files"
-    if flag not in existing.split():
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{existing} {flag}".strip()
+        log.debug("Binding drop events...")
+        doc = window.dom.document
+        doc.events.dragover += DOMEventHandler(
+            _drag_over_no_op, True, True, debounce=500
+        )  # type: ignore[operator]
+        doc.events.drop += DOMEventHandler(commands.on_drop, True, True)  # type: ignore[operator]
+        log.debug("Drop events bound.")
+    except Exception as e:
+        log.error("Failed to setup drop events: %s", e)
 
 
 def run() -> None:
     configure_stdio()
     configure_logging()
-    _allow_qtwebengine_file_module_imports()
 
     clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
@@ -127,7 +108,13 @@ def run() -> None:
     elif webview_debug:
         log.info("pywebview debug mode enabled (--debug).")
 
-    api = Api(pending_update_failure=pending_failure)
+    site = desktop_site()
+    if not (site / "index.html").is_file():
+        if is_source_run():
+            log.error("Desktop site missing; run uv run python scripts/build_web.py --target desktop")
+        else:
+            log.error("Desktop site missing from packaged web resources.")
+        sys.exit(1)
 
     window_width, window_height = 1200, 800
     if sys.platform == "win32":
@@ -141,35 +128,27 @@ def run() -> None:
     center_x = (screen_width - window_width) // 2
     center_y = (screen_height - window_height) // 2
 
-    gui_path = resource_path("www/index.html")
-    window = webview.create_window(
-        f"Atlas Toolkit v{get_current_version()}",
-        url=str(gui_path.absolute().as_uri()),
-        width=window_width,
-        height=window_height,
-        # (1000, 650): 1000px width keeps the window above style.css's
-        # `max-width: 900px` stacked-layout breakpoint. This alone doesn't
-        # stop `orientation: portrait` from matching (that fires whenever
-        # height > width, regardless of absolute size) — the real fix is the
-        # `html.pywebview` CSS-class scoping (index.html + style.css,
-        # unify-js-engine Phase 6); this is just a belt-and-suspenders floor
-        # so the window can't be dragged into an unreasonably cramped size.
-        min_size=(1000, 650),
-        x=center_x,
-        y=center_y,
-        resizable=True,
-        js_api=api,
-        background_color="#2b2b2b",
+    def window_factory(url):
+        return webview.create_window(
+            f"Atlas Toolkit v{get_current_version()}",
+            url=url,
+            width=window_width,
+            height=window_height,
+            min_size=(1000, 650),
+            x=center_x,
+            y=center_y,
+            resizable=True,
+            background_color="#2b2b2b",
+        )
+
+    server, commands, window = build_desktop(
+        site, sys.argv, pending_failure, window_factory, webview.FileDialog,
     )
+    window.events.closing += commands.on_closing
 
-    if window:
-        api.set_window(window)
-        # api.on_closing (not _confirm_discard_modifications directly!) —
-        # see its docstring: evaluate_js can't be called synchronously from
-        # this event without deadlocking pywebview.
-        window.events.closing += api.on_closing
-        window.events.closed += api.on_closed
-    else:
-        sys.exit(1)
+    def on_closed():
+        commands.set_window(None)
+        server.stop()
 
-    webview.start(func=setup_drop, args=(window, api), debug=webview_debug)
+    window.events.closed += on_closed
+    webview.start(func=setup_drop, args=(window, commands), debug=webview_debug)

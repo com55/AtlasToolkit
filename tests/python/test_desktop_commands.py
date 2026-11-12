@@ -4,6 +4,11 @@ from atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
 def test_rpc_boundary():
     assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer'.split())
 
+
+def test_rpc_allowlist_on_class_and_instance(commands):
+    assert DesktopCommands.RPC_METHODS is RPC_METHODS
+    assert commands.RPC_METHODS is RPC_METHODS
+
 import json
 import threading
 from types import SimpleNamespace
