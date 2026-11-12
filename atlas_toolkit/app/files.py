@@ -93,8 +93,12 @@ class DesktopFiles:
             raise ValueError("Output name cannot be a dot segment")
         if any(character in name for character in ("/", "\\", "\0")):
             raise ValueError("Output name must be one path segment")
-        if re.match(r"^[A-Za-z]:", name):
-            raise ValueError("Output name cannot have a drive prefix")
+        if ":" in name:
+            raise ValueError("Output name cannot contain a colon")
+        if name != name.rstrip(". "):
+            raise ValueError("Output name cannot end with a dot or space")
+        if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", name):
+            raise ValueError("Output name cannot be a Windows reserved device name")
         candidate = folder / name
         if candidate.resolve().parent != folder.resolve():
             raise ValueError("Output must stay within the granted folder")
@@ -124,5 +128,6 @@ class DesktopFiles:
                 targets = [path]
             else:
                 targets = [self._folder_target(path, item["name"]) for item in files]
-            for target, item in zip(targets, files):
-                target.write_bytes(bytes(item["data"]))
+        # Large writes must not block asset lookups or drop registration on other threads.
+        for target, item in zip(targets, files):
+            target.write_bytes(bytes(item["data"]))

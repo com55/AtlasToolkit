@@ -88,13 +88,43 @@ def test_folder_writes_and_existing_names(tmp_path):
     assert registry.existing_output_names(grant, ["a.bin", "directory", "missing", None, "", ".", "..", "../escape", "C:x", "x\\y", "x\0"]) == ["a.bin", "directory"]
 
 
-@pytest.mark.parametrize("name", [None, 12, "", ".", "..", "a/b", "a\\b", "a\0b", "C:out", "z:out", "/out"])
+@pytest.mark.parametrize("name", [
+    None, 12, "", ".", "..", "a/b", "a\\b", "a\0b", "C:out.png", "z:out", "/out",
+    "NUL", "nul.png", "COM1", "con.atlas", "LPT9.png", "out:stream", ":stream",
+    "out.png.", "out.png ",
+])
 def test_invalid_names_prevent_all_writes(tmp_path, name):
     registry = DesktopFiles()
     grant = registry.grant_folder(tmp_path)["grant"]
     with pytest.raises(ValueError):
         registry.write_files(grant, [{"name": "valid.bin", "data": b"valid"}, {"name": name, "data": b"bad"}])
     assert list(tmp_path.iterdir()) == []
+    assert registry.existing_output_names(grant, [name]) == []
+
+
+@pytest.mark.parametrize("name", ["CONSOLE.png", "nullable.png", "com10.png", "aux_region.png"])
+def test_valid_windows_name_lookalikes(tmp_path, name):
+    registry = DesktopFiles()
+    grant = registry.grant_folder(tmp_path)["grant"]
+    registry.write_files(grant, [{"name": name, "data": b"png"}])
+    assert (tmp_path / name).read_bytes() == b"png"
+    assert registry.existing_output_names(grant, [name]) == [name]
+
+
+def test_writes_release_registry_lock(tmp_path, monkeypatch):
+    registry = DesktopFiles()
+    grant = registry.grant_folder(tmp_path)["grant"]
+    path_type = type(tmp_path)
+    write_bytes = path_type.write_bytes
+
+    def write_unlocked(path, data):
+        assert registry._lock.acquire(blocking=False)
+        registry._lock.release()
+        return write_bytes(path, data)
+
+    monkeypatch.setattr(path_type, "write_bytes", write_unlocked)
+    registry.write_files(grant, [{"name": "out.png", "data": b"png"}])
+    assert (tmp_path / "out.png").read_bytes() == b"png"
 
 
 def test_symlink_escape(tmp_path):
