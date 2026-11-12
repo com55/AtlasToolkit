@@ -6,7 +6,7 @@ from PIL import UnidentifiedImageError
 
 from atlas_toolkit.api import AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas
 from atlas_toolkit.document import png_names_for_save
-from atlas_toolkit.host import wire
+from atlas_toolkit.host import AppHost, wire
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes, two_pages
 from .test_host_view import loaded
 
@@ -224,6 +224,37 @@ def test_mark_saved_acknowledges_output_only_after_write():
         host.mark_saved()
 
 
+def test_mark_saved_ignores_a_stale_revision():
+    host, _ = loaded()
+    host.enter_edit()
+    host.modify(['a'], page_bytes(4, 3), 'straight')
+    out = host.save_output()
+    host.rename('a', 'renamed')
+    assert host.mark_saved(out['revision'])['hasPending'] is True
+
+
+def test_mark_saved_current_revision_clears_pending():
+    host, _ = loaded()
+    host.enter_edit()
+    host.modify(['a'], page_bytes(4, 3), 'straight')
+    out = host.save_output()
+    assert type(out['revision']) is int
+    assert host.mark_saved(out['revision'])['hasPending'] is False
+
+
+def test_has_pending_tracks_state():
+    host = AppHost()
+    assert host.has_pending() is False
+    text, pages = one_page()
+    host.load('sample.atlas', text, pages, None, None)
+    assert host.has_pending() is False
+    host.enter_edit()
+    host.modify(['a'], page_bytes(4, 3), 'straight')
+    assert host.has_pending() is True
+    host.mark_saved()
+    assert host.has_pending() is False
+
+
 @pytest.mark.parametrize('keys', [['fresh'], ['a', 'fresh']])
 def test_modify_pending_add(keys):
     host, _ = loaded(two_pages)
@@ -270,5 +301,5 @@ def test_save_rejects_unsafe_page_names_without_marking_saved(page):
         host.save_output()
     assert page in str(error.value)
     assert host._state() == before
-    assert host._saved is False
+    assert host.has_pending() is True
     assert host._state()['hasPending'] is True

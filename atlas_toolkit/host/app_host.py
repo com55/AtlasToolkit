@@ -29,7 +29,8 @@ class AppHost:
         self._page_names = []
         self._all_pma = False
         self._packed = None
-        self._saved = False
+        self._revision = 0
+        self._saved_revision = -1
         self._pack_settings = {
             "packer": "shelf",
             "padding": 2,
@@ -140,7 +141,7 @@ class AppHost:
             packed[1][name] is old_pages[name] for name in old_pages
         )
         if packed[0] is not old_text:
-            self._saved = False
+            self._revision += 1
         self._packed = packed
         return {"state": self._state(), "unchanged": True} if unchanged else self._edit_result()
 
@@ -158,6 +159,13 @@ class AppHost:
             raise ValueError("alpha must be 'straight' or 'premultiplied'")
         return alpha if self._all_pma else None
 
+    def has_pending(self) -> bool:
+        return (
+            self._atlas is not None
+            and self._atlas.has_changes
+            and self._revision != self._saved_revision
+        )
+
     def _state(self) -> dict:
         atlas = self._require_atlas()
         views = atlas.region_views()
@@ -172,7 +180,7 @@ class AppHost:
             "regionPages": {view.key: view.page for view in views},
             "modifiedKeys": [view.key for view in views if view.modified],
             "hasChanges": atlas.has_changes,
-            "hasPending": atlas.has_changes and not self._saved,
+            "hasPending": self.has_pending(),
             "allPma": self._all_pma,
             "settings": self._settings(),
             "mesh": {
@@ -192,7 +200,7 @@ class AppHost:
         all_pma = all(atlas.page_is_pma(page) for page in page_names)
         self._atlas = atlas
         self._packed = None
-        self._saved = False
+        self._revision += 1
         self._page_names = page_names
         self._all_pma = all_pma
         self._atlas_name = atlas_name
@@ -213,7 +221,7 @@ class AppHost:
                 atlas.set_skeleton(previous)
                 raise
             if packed[0] is not self._packed[0]:
-                self._saved = False
+                self._revision += 1
             self._packed = packed
         else:
             atlas.set_skeleton(data)
@@ -303,7 +311,7 @@ class AppHost:
             operation(atlas)
             packed = atlas.pack(**self._pack_arguments())
         self._packed = packed
-        self._saved = False
+        self._revision += 1
         return self._edit_result()
 
     def enter_edit(self) -> dict:
@@ -312,13 +320,13 @@ class AppHost:
             atlas.reset()
             packed = atlas.pack(**self._pack_arguments())
         self._packed = packed
-        self._saved = False
+        self._revision += 1
         return self._edit_result()
 
     def exit_edit(self) -> dict:
         self._require_edit().reset()
         self._packed = None
-        self._saved = False
+        self._revision += 1
         return self._state()
 
     def _page(self, index: int) -> tuple[str, Image.Image]:
@@ -391,12 +399,14 @@ class AppHost:
         page_order = self.required_pages(text)
         result = {
             "text": text,
+            "revision": self._revision,
             "pages": [{"name": name, "png": _png(pages[page])}
                       for name, page in zip(names, page_order)],
         }
         return result
 
-    def mark_saved(self) -> dict:
+    def mark_saved(self, revision: int | None = None) -> dict:
         self._require_edit()
-        self._saved = True
+        if revision is None or revision == self._revision:
+            self._saved_revision = self._revision
         return self._state()

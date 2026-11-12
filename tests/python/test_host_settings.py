@@ -140,7 +140,7 @@ def test_alpha_applies_to_later_edits_only():
     host.mark_saved()
     result = host.set_settings({'alpha': 'premultiplied'})
     assert host.page_preview(0) == before
-    assert host._saved is True
+    assert host.has_pending() is False
     assert result['state']['settings']['alpha'] == 'premultiplied'
     host.modify(['a'], page_bytes(3, 2), result['state']['settings']['alpha'])
     assert host.page_preview(0) != before
@@ -159,7 +159,7 @@ def test_failed_setting_restores_everything(monkeypatch):
     with pytest.raises(MemoryError):
         host.set_settings({'padding': 256})
     assert host._state() == before and host._packed is packed
-    assert host.page_preview(0) == preview and host._saved is True
+    assert host.page_preview(0) == preview and host.has_pending() is False
 
 
 def test_late_skeleton_edit_rebuilds_and_failure_restores(mesh, monkeypatch, calls):
@@ -178,7 +178,7 @@ def test_late_skeleton_edit_rebuilds_and_failure_restores(mesh, monkeypatch, cal
         host.set_skeleton('bad.skel', b'bad')
     assert host._state() == state and host._packed is packed
     assert host._skeleton == b'first' and host._atlas._skeleton == b'first'
-    assert host.page_preview(0) == preview and host._saved is True
+    assert host.page_preview(0) == preview and host.has_pending() is False
 
 
 def test_requested_mesh_flag_is_used_when_mesh_is_usable(mesh, calls):
@@ -214,7 +214,7 @@ def test_failed_skeleton_restores_loaded_skeleton(initial, mesh, monkeypatch):
         host.set_skeleton('new.skel', b'new')
     assert host._state() == before and host._packed is packed
     assert host._atlas._skeleton == initial and host._skeleton == initial
-    assert host._saved is True
+    assert host.has_pending() is False
 
 
 def test_settings_repack_updates_output_and_marks_unsaved():
@@ -228,7 +228,7 @@ def test_settings_repack_updates_output_and_marks_unsaved():
     assert result['image'] != before['image']
     assert host.page_preview(0)['image'] == result['image']
     assert result['state']['hasPending'] is True
-    assert host._saved is False
+    assert host.has_pending() is True
 
 
 def test_alpha_only_settings_cache_hit_keeps_saved_output():
@@ -245,7 +245,7 @@ def test_alpha_only_settings_cache_hit_keeps_saved_output():
     assert host.page_preview(0)['image'] == before['image']
     assert result['state']['hasPending'] is False
     assert result['state']['hasChanges'] is True
-    assert host._saved is True
+    assert host.has_pending() is False
 
 
 def test_preferences_can_be_restored_before_load():
@@ -280,7 +280,7 @@ def test_real_overflow_setting_restores_everything():
     with pytest.raises(api.CanvasTooLarge):
         host.set_settings({'padding': 256})
     assert host._state() == before and host._packed is packed
-    assert host.page_preview(0) == preview and host._saved is True
+    assert host.page_preview(0) == preview and host.has_pending() is False
     assert host._atlas._build_cache is cache
     assert host.rename('r1', 'renamed')['state']['settings']['padding'] == 2
 

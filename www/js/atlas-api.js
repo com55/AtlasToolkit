@@ -804,11 +804,11 @@ export const AtlasAPI = {
         const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
-        _state = await callHost('mark_saved', []);
+        _state = await callHost('mark_saved', [output.revision]);
         return typeof folder === 'string' ? `Saved to: ${folder}` : 'Saved to selected folder.';
       }
       await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, await createZip(outputs));
-      _state = await callHost('mark_saved', []);
+      _state = await callHost('mark_saved', [output.revision]);
       return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
     } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
   },
