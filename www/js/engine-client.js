@@ -1,3 +1,5 @@
+import { isDesktop, createDesktopWorker } from './desktop.js';
+
 /** Serialized calls to the Python application host in a module Worker. */
 export class HostError extends Error {
   constructor(type, message) {
@@ -11,12 +13,12 @@ let engine = null;
 let sequence = 0;
 const deathCallbacks = new Set();
 
-function walk(value, bytes) {
+export function walkPayload(value, bytes) {
   const binary = bytes(value);
   if (binary !== undefined) return binary;
-  if (Array.isArray(value)) return value.map((item) => walk(item, bytes));
+  if (Array.isArray(value)) return value.map((item) => walkPayload(item, bytes));
   if (value && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, walk(item, bytes)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, walkPayload(item, bytes)]));
   }
   return value;
 }
@@ -42,7 +44,7 @@ function pump(state) {
   state.running = call;
   try {
     const buffers = [];
-    const args = walk(call.args, (value) => {
+    const args = walkPayload(call.args, (value) => {
       if (!(value instanceof Uint8Array) && !(value instanceof ArrayBuffer)) return undefined;
       let buffer = value;
       if (value instanceof Uint8Array) {
@@ -72,7 +74,7 @@ export function startEngine(onStatus, options = {}) {
   try {
     state.worker = options.createWorker
       ? options.createWorker()
-      : new Worker(new URL('../workers/engine-host-worker.js', import.meta.url), { type: 'module' });
+      : isDesktop() ? createDesktopWorker() : new Worker(new URL('../workers/engine-host-worker.js', import.meta.url), { type: 'module' });
     state.worker.onmessage = ({ data }) => {
       if (engine !== state) return;
       if (data.type === 'status') {
@@ -91,7 +93,7 @@ export function startEngine(onStatus, options = {}) {
         try {
           const result = JSON.parse(data.json);
           if (!result.ok) throw new HostError(result.error.type, result.error.message);
-          const value = walk(result.value, (item) => {
+          const value = walkPayload(result.value, (item) => {
             if (item && Object.getPrototypeOf(item) === Object.prototype
               && Object.keys(item).length === 1 && Object.hasOwn(item, '$buf')) {
               return new Uint8Array(data.buffers[item.$buf]);

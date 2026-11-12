@@ -12,15 +12,9 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="stylesheet" href="style.css" />
     <script>
-      // Desktop layout lock (unify-js-engine Phase 6): must run synchronously,
-      // before CSS is applied for first paint, so the portrait/stacked-mobile
-      // media queries in style.css never flash on for the pywebview shell.
-      // `window.pywebview` itself isn't reliably present this early (injected
-      // asynchronously, races DOMContentLoaded -- see script.js's
-      // _waitForPywebviewReady()), but launch.py always loads this file via a
-      // literal file:// URI, which IS available synchronously from the very
-      // first parsed byte and is never true for the hosted PWA/browser case.
-      if (location.protocol === 'file:') {
+      // Lock desktop layout synchronously before first paint so portrait CSS
+      // never flashes on. The desktop page lives under /s/<token>/.
+      if (location.pathname.startsWith('/s/')) {
         document.documentElement.classList.add('pywebview');
       }
     </script>

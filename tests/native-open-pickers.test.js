@@ -39,6 +39,12 @@ function installWindow({ pickSkel } = {}) {
 }
 
 test('pywebview .skel picker uses the native dialog at the atlas folder', async (t) => {
+  const previousLocation = globalThis.location;
+  globalThis.location = { pathname: '/s/t/index.html' };
+  t.after(() => {
+    if (previousLocation === undefined) delete globalThis.location;
+    else globalThis.location = previousLocation;
+  });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let nativeDir;
   const env = installWindow({
@@ -61,7 +67,13 @@ test('pywebview .skel picker uses the native dialog at the atlas folder', async 
   }
 });
 
-test('pywebview add-region picker uses the native png dialog at the atlas folder', async () => {
+test('pywebview add-region picker uses the native png dialog at the atlas folder', async (t) => {
+  const previousLocation = globalThis.location;
+  globalThis.location = { pathname: '/s/t/index.html' };
+  t.after(() => {
+    if (previousLocation === undefined) delete globalThis.location;
+    else globalThis.location = previousLocation;
+  });
   const calls = [];
   const fileInput = {
     value: '',

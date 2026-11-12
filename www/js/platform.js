@@ -1,3 +1,5 @@
+import { isDesktop } from './desktop.js';
+
 /**
  * platform.js
  * Small facade isolating browser/File-System-Access-API vs. pywebview-native
@@ -13,17 +15,9 @@ function _ext(name) {
   return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
 }
 
-// ─── pywebview native bridge detection ─────────────────────────────────────
-// Detection idiom matches the one already used in www/js/dialogs.js /
-// ui/js/updates.js: pywebview.api exists once the native bridge is ready.
-
-function _isPywebview() {
-  return typeof window !== 'undefined' && !!(window.pywebview && window.pywebview.api);
-}
-
 /** True when running inside the pywebview desktop shell. */
 export function isPywebviewDesktop() {
-  return _isPywebview();
+  return isDesktop();
 }
 
 /**
@@ -34,8 +28,7 @@ export function isPywebviewDesktop() {
  * size/aspect: reads the `pywebview` class set synchronously on `<html>` by
  * an inline script in index.html's `<head>` (before first paint, so the
  * media query below never has a chance to flash on) rather than
- * `isPywebviewDesktop()`/`window.pywebview.api`, which aren't guaranteed
- * ready that early (see script.js's `_waitForPywebviewReady()`).
+ * module-based detection, which runs after this synchronous layout lock.
  */
 export function isPortrait() {
   if (document.documentElement.classList.contains('pywebview')) return false;
@@ -292,7 +285,7 @@ export async function pickAtlasFile() {
  *   2026-08-23). No effect on the browser File System Access API path.
  */
 export async function pickSaveFolder(defaultDir = '') {
-  if (_isPywebview() && window.pywebview.api.pick_save_folder) {
+  if (isPywebviewDesktop() && window.pywebview.api.pick_save_folder) {
     return (await window.pywebview.api.pick_save_folder(defaultDir)) || null;
   }
   if (typeof window.showDirectoryPicker !== 'function') return null;
@@ -335,7 +328,7 @@ export async function existingOutputNames(target, names) {
   if (list.length === 0) return [];
 
   if (typeof target === 'string') {
-    if (_isPywebview() && window.pywebview.api.existing_output_names) {
+    if (isPywebviewDesktop() && window.pywebview.api.existing_output_names) {
       const found = await window.pywebview.api.existing_output_names(target, list);
       return Array.isArray(found) ? found : [];
     }
@@ -466,7 +459,7 @@ async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
  *   (see pickSaveFolder's doc comment for why this exists).
  */
 export async function saveFileWithDialog(filename, blob, { startIn = null, defaultDir = '' } = {}) {
-  if (_isPywebview() && window.pywebview.api.pick_save_file) {
+  if (isPywebviewDesktop() && window.pywebview.api.pick_save_file) {
     const path = await window.pywebview.api.pick_save_file(filename, defaultDir);
     if (!path) return null;
     const finalPath = await _pathAfterPngExtension(path, filename);
@@ -511,7 +504,7 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
 // localStorage.
 
 export async function loadPref(key, defaultValue = null) {
-  if (_isPywebview() && window.pywebview.api.get_pref) {
+  if (isPywebviewDesktop() && window.pywebview.api.get_pref) {
     try {
       const value = await window.pywebview.api.get_pref(key, defaultValue);
       return value === undefined ? defaultValue : value;
@@ -524,7 +517,7 @@ export async function loadPref(key, defaultValue = null) {
 }
 
 export function savePref(key, value) {
-  if (_isPywebview() && window.pywebview.api.set_pref) {
+  if (isPywebviewDesktop() && window.pywebview.api.set_pref) {
     window.pywebview.api.set_pref(key, value);
     return;
   }

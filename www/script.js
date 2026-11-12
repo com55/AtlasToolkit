@@ -11,7 +11,7 @@ import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
-import { base64ToFile, loadFileAsFile, pathToFileUrl } from './js/platform.js';
+import { base64ToFile, loadFileAsFile, pathToFileUrl, isPywebviewDesktop } from './js/platform.js';
 import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
@@ -34,50 +34,17 @@ function applyAppTitle(atlasFilename) {
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
-/**
- * `window.pywebview.api` is injected asynchronously by pywebview — it is
- * NOT guaranteed to exist yet by `DOMContentLoaded` (pywebview's own
- * `before_load` event, which triggers the injection, fires "roughly
- * corresponding to DOMContentLoaded", i.e. no ordering guarantee either
- * way). Calling into it too early (e.g. `get_pref`/`startup_check`) would
- * silently no-op or fall through to the browser-only path. `launch.py`
- * always loads `www/index.html` via a literal `file://` URI (never true for
- * the hosted PWA/browser case), so that's a reliable synchronous signal
- * this is the desktop shell and it's worth waiting for `pywebviewready`.
- */
-function _waitForPywebviewReady() {
-  return new Promise((resolve) => {
-    if (window.pywebview && window.pywebview.api) { resolve(); return; }
-    if (location.protocol !== 'file:') { resolve(); return; }
-    let settled = false;
-    const onReady = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    window.addEventListener('pywebviewready', onReady, { once: true });
-    setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('pywebviewready', onReady);
-      resolve();
-    }, 5000);
-  });
-}
-
 window.addEventListener('DOMContentLoaded', async () => {
   const statusText = document.getElementById('status-text');
   const preparingText = 'Preparing AtlasToolkit engine...';
   statusText.textContent = preparingText;
   startEngine().then(async () => {
-    await _waitForPywebviewReady();
     await AtlasAPI.init_settings_from_prefs();
     if (statusText.textContent === preparingText) statusText.textContent = 'Ready';
   }).catch(error => {
     setEngineStartupError(error);
     if (statusText.textContent === preparingText) statusText.textContent = 'AtlasToolkit failed to start';
   });
-  await _waitForPywebviewReady();
   appVersion = await resolveAppVersion();
   applyAppTitle('');
   initPanelResizer();
@@ -92,11 +59,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   // show on first page load until the user toggles modes at least once
   // (found via adversarial DOM smoke test, 2026-08-31).
   setMode('extract');
-  if (window.pywebview) {
-    await _clearStaleServiceWorkerUnderDesktop();
-  } else {
-    registerServiceWorker();
-  }
+  if (isPywebviewDesktop()) await _clearStaleServiceWorkerUnderDesktop();
+  else registerServiceWorker();
 
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
@@ -141,18 +105,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 /**
- * Desktop shell (Phase 4 of the unify-js-engine plan): `launch.py` always
- * loads `www/index.html` via a literal `file://` URI, and `file://` is
- * never a valid service-worker registration origin (verified directly: the
- * browser itself rejects `register()` with "The URL protocol of the
- * current origin ('file://') is not supported") — so `registerServiceWorker()`'s
- * existing `location.protocol` guard below already prevents registration
- * from ever being attempted here, and there is no PWA-caching bug to guard
- * against (unlike Tauri's old `http://tauri.localhost` setup, which DID
- * satisfy `register()`'s origin requirement and so needed an explicit
- * runtime guard). This is just cheap insurance against a leftover
- * registration from some future platform/config change (e.g. a webview
- * that serves over http(s) instead of file://) — normally a no-op.
+ * Desktop now runs on http and must never register a service worker.
+ * Clear stale registrations and caches before continuing desktop startup.
  */
 async function _clearStaleServiceWorkerUnderDesktop() {
   if (!('serviceWorker' in navigator)) return;
