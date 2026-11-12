@@ -12,7 +12,7 @@ def encode_frame(header: dict, buffers: list[bytes]) -> bytes:
         {**header, "sizes": [len(buffer) for buffer in buffers]},
         separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
-    return struct.pack("<I", len(raw)) + raw + b"".join(buffers)
+    return b"".join((struct.pack("<I", len(raw)), raw, *buffers))
 
 
 def decode_frame(data: bytes) -> tuple[dict, list[bytes]]:
@@ -23,7 +23,7 @@ def decode_frame(data: bytes) -> tuple[dict, list[bytes]]:
     if end > len(data):
         raise ValueError("Truncated header")
     try:
-        header = json.loads(data[4:end].decode("utf-8"))
+        header = json.loads(str(data[4:end], "utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid JSON header") from exc
     if not isinstance(header, dict):
