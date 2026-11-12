@@ -11,6 +11,7 @@ import webbrowser
 from urllib.parse import urlparse
 
 from atlas_toolkit.app import build_info
+from atlas_toolkit.update.controller import get_update_dir
 from atlas_toolkit.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,8 @@ class DesktopCommands:
 
     def startup(self):
         with self._startup_lock:
+            if self._startup_result is not None:
+                return {**self._startup_result, "atlas": None, "atlasError": None}
             if self._startup_result is None:
                 atlas, error = None, None
                 if len(self._argv) > 1 and self._argv[1].lower().endswith(".atlas"):
@@ -94,6 +97,7 @@ class DesktopCommands:
 
     def pick_atlas(self):
         path = self._dialog(self._file_dialog.OPEN, allow_multiple=False,
+                            directory=str(self._files.atlas_dir or ""),
                             file_types=("Atlas Files (*.atlas)", "All files (*.*)"))
         return self._files.atlas_bundle(Path(path)) if path else None
 
@@ -135,19 +139,26 @@ class DesktopCommands:
         return self._files.write_files(grant, files)
 
     def on_drop(self, event):
-        files = event.get("dataTransfer", {}).get("files", [])
-        if not files or not files[0].get("pywebviewFullPath"):
-            return
-        path = Path(files[0]["pywebviewFullPath"])
-        data = dict(x=event.get("clientX", event.get("x")), y=event.get("clientY", event.get("y")))
         try:
-            if str(path).lower().endswith(".atlas"):
-                data.update(type="atlas", bundle=self._files.atlas_bundle(path))
-            else:
-                data.update(type="file", file=self._files.register(path))
-        except (OSError, UnicodeDecodeError) as exc:
-            data.update(type="error", message=str(exc))
-        self._events.publish("drop", **data)
+            files = event.get("dataTransfer", {}).get("files", [])
+            if not files or not files[0].get("pywebviewFullPath"):
+                return
+            path = Path(files[0]["pywebviewFullPath"])
+            x = event.get("clientX")
+            x = event.get("x") if x is None else x
+            y = event.get("clientY")
+            y = event.get("y") if y is None else y
+            data = dict(x=x, y=y)
+            try:
+                if str(path).lower().endswith(".atlas"):
+                    data.update(type="atlas", bundle=self._files.atlas_bundle(path))
+                else:
+                    data.update(type="file", file=self._files.register(path))
+            except (OSError, UnicodeDecodeError) as exc:
+                data.update(type="error", message=str(exc))
+            self._events.publish("drop", **data)
+        except Exception:
+            log.exception("Drop error")
 
     def on_closing(self):
         with self._close_lock:
@@ -159,6 +170,8 @@ class DesktopCommands:
                 self._close_proceed = False
                 self._close_thread = threading.Thread(target=self._check_and_close, daemon=True)
                 self._close_thread.start()
+            elif self._events.has_subscriber:
+                self._events.publish("confirm-close")
         return False
 
     def close_answer(self, proceed):
@@ -169,19 +182,26 @@ class DesktopCommands:
 
     def _check_and_close(self):
         try:
-            self._raise_window(pin=True)
-            if self._events.has_subscriber:
-                self._events.publish("confirm-close")
-                self._close_event.wait()
-                proceed = self._close_proceed
-            else:
-                proceed = self._window is not None and self._window.create_confirmation_dialog(
-                    "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
+            try:
+                self._raise_window(pin=True)
+                proceed = False
+                use_native = not self._events.has_subscriber
+                if not use_native:
+                    self._events.publish("confirm-close")
+                    while not self._close_event.wait(1.0):
+                        if not self._events.has_subscriber:
+                            use_native = not self._close_event.is_set()
+                            break
+                    proceed = self._close_proceed
+                if use_native:
+                    proceed = self._window is not None and self._window.create_confirmation_dialog(
+                        "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
+            finally:
+                self._unpin_window()
             if proceed and self._window is not None:
                 self._closing_confirmed = True
                 self._window.destroy()
         finally:
-            self._unpin_window()
             with self._close_lock:
                 self._close_check_in_progress = False
                 self._close_event = None
@@ -289,9 +309,15 @@ class DesktopCommands:
             log.debug("unpin window failed: %s", e)
 
 
-    def open_update_log(self, log_path: str) -> dict[str, Any]:
-        p = Path(log_path)
-        if not p.exists():
+    def open_update_log(self) -> dict[str, Any]:
+        try:
+            log_path = (self._updates.pending_failure or {}).get("logPath")
+            p = Path(log_path).resolve() if log_path else None
+            valid = (p is not None and p.is_file()
+                     and p.parent == get_update_dir().resolve() and p.suffix.lower() == ".log")
+        except (OSError, RuntimeError, ValueError, TypeError):
+            valid = False
+        if not valid:
             return {"ok": False, "error": "Log file not found."}
         try:
             if sys.platform == "win32":

@@ -189,7 +189,7 @@ def build_relaunch_watcher_ps1(pending_json_path: Path, installer_process_name: 
     return "\r\n".join(lines) + "\r\n"
 
 
-def _shell_execute(file: str, params: str, work_dir: str) -> None:
+def _shell_execute(file: str, params: str, work_dir: str, show: int = 0) -> None:
     """Launch a process via ShellExecute (independent of our process tree)."""
     import ctypes
 
@@ -199,7 +199,7 @@ def _shell_execute(file: str, params: str, work_dir: str) -> None:
         file,
         params,
         work_dir,
-        0,  # SW_HIDE
+        show,  # SW_HIDE by default; SW_SHOWNORMAL for the installer
     )
     if result <= 32:
         raise OSError(f"ShellExecuteW failed with code {result}")
@@ -369,7 +369,11 @@ class UpdateController:
         if not is_running_as_exe():
             return {"ok": False, "error": "Dev mode does not support restart-and-install self-update."}
         target = get_update_dir() / f"{_SETUP_EXE_BASENAME}.exe"
-        shutil.copyfile(path, target)
+        try:
+            if path.resolve() != target.resolve():
+                shutil.copyfile(path, target)
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
         self._installer_path = target
         self._relaunch_args = list(sys.argv[1:])
         self._version = "local file"
@@ -444,6 +448,7 @@ class UpdateController:
                 str(installer_path),
                 _inno_install_params(inno_log_path),
                 str(update_dir),
+                show=1,
             )
 
             threading.Timer(0.25, lambda: os._exit(0)).start()

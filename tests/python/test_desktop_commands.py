@@ -21,8 +21,17 @@ class FakeWindow:
         self.calls = []
         self.titles = []
         self.destroyed = 0
-        self.on_top = False
+        self._on_top = False
         self.confirm = False
+
+    @property
+    def on_top(self):
+        return self._on_top
+
+    @on_top.setter
+    def on_top(self, value):
+        self.calls.append(("on_top", value))
+        self._on_top = value
 
     def create_file_dialog(self, kind, **kwargs):
         self.calls.append((kind, kwargs))
@@ -32,9 +41,11 @@ class FakeWindow:
         self.titles.append(title)
 
     def destroy(self):
+        self.calls.append(("destroy", self.on_top))
         self.destroyed += 1
 
     def create_confirmation_dialog(self, title, message):
+        assert self.on_top is True
         self.calls.append((title, message))
         return self.confirm
 
@@ -80,7 +91,7 @@ def test_startup_once_and_errors(commands, tmp_path):
     commands._update_thread.join(2)
     assert not commands._update_thread.is_alive()
     path.unlink()
-    assert commands.startup() == first
+    assert commands.startup() == {**first, "atlas": None, "atlasError": None}
     assert first["atlas"]["atlas"]["name"] == "test.atlas"
     commands._startup_result = None
     assert commands.startup()["atlasError"]
@@ -106,6 +117,11 @@ def test_closing(commands, subscriber, answer):
     assert not commands._close_thread.is_alive()
     assert window.destroyed == int(answer)
     assert not window.on_top
+    if not subscriber:
+        assert ("Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?") in window.calls
+        assert window.calls[0] == ("on_top", True)
+    if answer:
+        assert ("destroy", False) in window.calls
     commands.close_answer(True)
     if subscriber:
         sub.close()
@@ -172,12 +188,14 @@ def test_delegates_and_os_commands(commands, tmp_path, monkeypatch):
     assert commands.open_url("https://example.org")["ok"]
     assert opened == ["https://example.org"]
     assert not commands.open_url("file:///invalid")["ok"]
-    assert not commands.open_update_log(str(tmp_path / "missing"))["ok"]
-    log = tmp_path / "update.log"
+    assert not commands.open_update_log()["ok"]
+    log = tmp_path / "update.LOG"
     log.write_text("log")
+    monkeypatch.setattr(module, "get_update_dir", lambda: tmp_path)
+    commands._updates.pending_failure = {"logPath": str(log)}
     monkeypatch.setattr(module.sys, "platform", "linux")
     monkeypatch.setattr(module.subprocess, "Popen", lambda args, **kwargs: opened.append(args))
-    assert commands.open_update_log(str(log))["ok"]
+    assert commands.open_update_log()["ok"]
     assert opened[-1] == ["xdg-open", str(log)]
 
 
@@ -274,3 +292,126 @@ def test_startup_notification_once(commands):
     sub = commands._events.subscribe()
     assert next(sub) == {"kind": "update-available", "payload": {"version": "new"}}
     sub.close()
+
+
+def test_reload_after_another_atlas(commands, tmp_path):
+    first = tmp_path / "first.atlas"
+    second = tmp_path / "second.atlas"
+    first.write_text("first.png\n")
+    second.write_text("second.png\n")
+    commands._argv = ["app", str(first)]
+    initial = commands.startup()
+    commands._update_thread.join(2)
+    commands._window.results = [[str(second)]]
+    commands.pick_atlas()
+    assert commands.startup() == {**initial, "atlas": None, "atlasError": None}
+    assert commands._window.calls[-1][1]["directory"] == str(tmp_path)
+
+
+@pytest.mark.parametrize("name", [None, "outside.log", "update.txt", "missing.log", "directory.log", "escape.log"])
+def test_refuse_update_log(commands, tmp_path, monkeypatch, name):
+    from atlas_toolkit.app import desktop_commands as module
+    update_dir = tmp_path / "updates"
+    update_dir.mkdir()
+    outside = tmp_path / "outside.log"
+    outside.write_text("log")
+    (update_dir / "update.txt").write_text("text")
+    (update_dir / "directory.log").mkdir()
+    (update_dir / "escape.log").symlink_to(outside)
+    path = outside if name == "outside.log" else update_dir / (name or "unused")
+    commands._updates.pending_failure = {"logPath": str(path)} if name else None
+    monkeypatch.setattr(module, "get_update_dir", lambda: update_dir)
+    opened = []
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **k: opened.append(a))
+    monkeypatch.setattr(module.os, "startfile", lambda *a: opened.append(a), raising=False)
+    assert commands.open_update_log() == {"ok": False, "error": "Log file not found."}
+    assert opened == []
+
+
+@pytest.mark.parametrize("client,expected", [(None, 5), (0, 0)])
+def test_drop_coordinate_fallback(commands, tmp_path, client, expected):
+    sub = commands._events.subscribe()
+    commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(tmp_path / "a.png")}]},
+                      "clientX": client, "x": 5, "clientY": client, "y": 5})
+    event = sub.get(timeout=2)
+    assert (event["x"], event["y"]) == (expected, expected)
+    sub.close()
+
+
+def test_unexpected_drop_error(commands, tmp_path, monkeypatch, caplog):
+    def fail(path):
+        raise RuntimeError("unexpected drop")
+    monkeypatch.setattr(commands._files, "register", fail)
+    commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(tmp_path / "a.png")}]}})
+    commands.on_drop({"dataTransfer": {"files": [None]}})
+    assert not commands._events._backlog
+    assert "Drop error" in caplog.text
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_close_subscriber_disconnect(commands, answer):
+    commands._is_unsaved = lambda: True
+    commands._window.confirm = answer
+    sub = commands._events.subscribe()
+    assert commands.on_closing() is False
+    assert sub.get(timeout=2)["kind"] == "confirm-close"
+    sub.close()
+    thread = commands._close_thread
+    thread.join(3)
+    try:
+        assert not thread.is_alive()
+        assert commands._window.destroyed == int(answer)
+        assert ("Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?") in commands._window.calls
+    finally:
+        commands.close_answer(False)
+        thread.join(2)
+
+
+def test_close_republish_after_reconnect(commands):
+    commands._is_unsaved = lambda: True
+    sub = commands._events.subscribe()
+    commands.on_closing()
+    assert sub.get(timeout=2)["kind"] == "confirm-close"
+    sub.close()
+    replacement = commands._events.subscribe()
+    try:
+        assert commands.on_closing() is False
+        assert replacement.get(timeout=0.5)["kind"] == "confirm-close"
+    finally:
+        commands.close_answer(False)
+        commands._close_thread.join(2)
+        replacement.close()
+
+
+def test_dialog_arguments(commands, tmp_path):
+    atlas = tmp_path / "a.atlas"
+    atlas.write_text("a.png\n")
+    commands._files.atlas_bundle(atlas)
+    for method, args, filters in [
+        ("pick_atlas", [], ("Atlas Files (*.atlas)", "All files (*.*)")),
+        ("pick_mod_image", [], ("PNG Files (*.png)", "All files (*.*)")),
+        ("pick_skel", [], ("Skeleton Files (*.skel)", "All files (*.*)")),
+        ("pick_page_image", ["a.png"], ("PNG images (*.png)",)),
+    ]:
+        commands._window.results = [None]
+        getattr(commands, method)(*args)
+        assert commands._window.calls[-1] == (commands._file_dialog.OPEN, {
+            "allow_multiple": False, "directory": str(tmp_path), "file_types": filters})
+    commands._window.results = [None]
+    commands.pick_save_file("out.png")
+    assert commands._window.calls[-1] == (commands._file_dialog.SAVE, {
+        "directory": str(tmp_path), "save_filename": "out.png",
+        "file_types": ("PNG image (*.png)", "All files (*.*)")})
+
+
+def test_failed_write_keeps_grant(commands, tmp_path):
+    folder = tmp_path / "missing"
+    grant = commands._files.grant_folder(folder)["grant"]
+    with pytest.raises(OSError):
+        commands.write_files(grant, [{"name": "out", "data": b"content"}])
+    assert commands.existing_output_names(grant, ["out"]) == []
+    folder.mkdir()
+    commands.write_files(grant, [{"name": "out", "data": b"content"}])
+    assert (folder / "out").read_bytes() == b"content"
+    with pytest.raises(PermissionError):
+        commands.existing_output_names(grant, ["out"])
