@@ -17,6 +17,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 from atlas_toolkit.app.config import AppConfig
+from atlas_toolkit.app.files import _atlas_page_filenames
 from atlas_toolkit.update.controller import UpdateController
 from atlas_toolkit.update.updater import get_current_version
 
@@ -32,17 +33,6 @@ def _dialog_first_path(result: Any) -> Optional[str]:
     if isinstance(result, (list, tuple)):
         return str(result[0]) if result else None
     return str(result)
-
-
-def _atlas_page_filenames(atlas_text: str) -> list[str]:
-    """Page PNG lines: no colon, ends with `.png` (case-sensitive)."""
-    names: list[str] = []
-    for raw in atlas_text.splitlines():
-        line = raw.strip()
-        if ":" in line or not line.endswith(".png"):
-            continue
-        names.append(line)
-    return names
 
 
 class Api:
