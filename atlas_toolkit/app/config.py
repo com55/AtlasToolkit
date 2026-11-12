@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ CONFIG_PATH = get_config_dir() / "config.json"
 
 class AppConfig:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._data: dict[str, Any] = self._load()
 
     @staticmethod
@@ -42,8 +44,9 @@ class AppConfig:
         return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
-        self._data[key] = value
-        try:
-            CONFIG_PATH.write_text(json.dumps(self._data), encoding="utf-8")
-        except Exception as e:
-            log.warning("Failed to save config: %s", e)
+        with self._lock:
+            self._data[key] = value
+            try:
+                CONFIG_PATH.write_text(json.dumps(self._data), encoding="utf-8")
+            except Exception as e:
+                log.warning("Failed to save config: %s", e)

@@ -70,6 +70,7 @@ class DesktopFiles:
         with self._lock:
             resolved = path.resolve()
             identifier = secrets.token_urlsafe(16)
+            self._grants.clear()
             self._grants[identifier] = (kind, resolved)
             return {"grant": identifier, "path": str(resolved)}
 
@@ -131,3 +132,5 @@ class DesktopFiles:
         # Large writes must not block asset lookups or drop registration on other threads.
         for target, item in zip(targets, files):
             target.write_bytes(bytes(item["data"]))
+        with self._lock:
+            self._grants.pop(grant, None)

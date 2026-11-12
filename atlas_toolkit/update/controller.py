@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -24,7 +25,7 @@ log = logging.getLogger(__name__)
 
 # Inno closes the running app via Restart Manager; relaunch argv is handled by a watcher script.
 _INNO_SILENT_INSTALL_ARGS = (
-    "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
+    "/SILENT /SUPPRESSMSGBOXES /NORESTART "
     "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
 )
 _SETUP_EXE_BASENAME = "AtlasToolkit-Setup-x64"
@@ -363,6 +364,18 @@ class UpdateController:
                 error=msg,
             )
             return {"ok": False, "error": msg}
+
+    def install_from_file(self, path: Path) -> dict:
+        if not is_running_as_exe():
+            return {"ok": False, "error": "Dev mode does not support restart-and-install self-update."}
+        target = get_update_dir() / f"{_SETUP_EXE_BASENAME}.exe"
+        shutil.copyfile(path, target)
+        self._installer_path = target
+        self._relaunch_args = list(sys.argv[1:])
+        self._version = "local file"
+        self._release_url = ""
+        self._ready = True
+        return self.restart_and_install()
 
     def restart_and_install(self) -> dict[str, Any]:
         if not is_running_as_exe():

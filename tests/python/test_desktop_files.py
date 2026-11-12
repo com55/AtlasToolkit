@@ -85,6 +85,7 @@ def test_folder_writes_and_existing_names(tmp_path):
     assert (tmp_path / "a.bin").read_bytes() == b"a"
     assert (tmp_path / "b.bin").read_bytes() == b"b"
     (tmp_path / "directory").mkdir()
+    grant = registry.grant_folder(tmp_path)["grant"]
     assert registry.existing_output_names(grant, ["a.bin", "directory", "missing", None, "", ".", "..", "../escape", "C:x", "x\\y", "x\0"]) == ["a.bin", "directory"]
 
 
@@ -108,6 +109,7 @@ def test_valid_windows_name_lookalikes(tmp_path, name):
     grant = registry.grant_folder(tmp_path)["grant"]
     registry.write_files(grant, [{"name": name, "data": b"png"}])
     assert (tmp_path / name).read_bytes() == b"png"
+    grant = registry.grant_folder(tmp_path)["grant"]
     assert registry.existing_output_names(grant, [name]) == [name]
 
 
@@ -153,6 +155,7 @@ def test_file_grant(tmp_path):
     assert not path.exists()
     registry.write_files(grant, [{"name": "../ignored", "data": b"result"}])
     assert path.read_bytes() == b"result"
+    grant = registry.grant_file(path)["grant"]
     assert registry.existing_output_names(grant, [path.name, path.name]) == [path.name]
     assert registry.existing_output_names(grant, ["other.bin"]) == []
 
@@ -163,7 +166,8 @@ def test_unknown_grants_and_missing_parent(tmp_path):
         registry.write_files("unknown", [])
     with pytest.raises(PermissionError):
         registry.existing_output_names("unknown", [])
-    for grant in [registry.grant_folder(tmp_path / "missing"), registry.grant_file(tmp_path / "missing" / "file.bin")]:
+    for issue in [lambda: registry.grant_folder(tmp_path / "missing"), lambda: registry.grant_file(tmp_path / "missing" / "file.bin")]:
+        grant = issue()
         with pytest.raises(OSError):
             registry.write_files(grant["grant"], [{"name": "out.bin", "data": b"out"}])
     assert not (tmp_path / "missing").exists()
@@ -179,3 +183,16 @@ def test_concurrent_registration(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as pool:
         keys = list(pool.map(register, range(100)))
     assert len(set(keys)) == 100
+
+
+def test_grants_expire_on_issue_and_successful_write(tmp_path):
+    files = DesktopFiles()
+    first = files.grant_folder(tmp_path)["grant"]
+    second = files.grant_folder(tmp_path)["grant"]
+    with pytest.raises(PermissionError):
+        files.existing_output_names(first, [])
+    (tmp_path / "out.png").write_bytes(b"old")
+    assert files.existing_output_names(second, ["out.png"]) == ["out.png"]
+    files.write_files(second, [{"name": "out.png", "data": b"new"}])
+    with pytest.raises(PermissionError):
+        files.write_files(second, [{"name": "out.png", "data": b"again"}])
