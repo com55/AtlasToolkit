@@ -6,7 +6,8 @@
 
 import { autoConvertAtlas } from './atlas-converter.js';
 import { AtlasProcessor, canvasToPreviewUrl, _loadImage } from './atlas-extracter.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, joinNativePath, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
+import { base64ToFile, pathToFileUrl, loadFileAsFile } from './legacy-native-paths.js';
 import { createZip } from './zip.js';
 import { AtlasSession, AddBatch, RemoveBatch, RenameBatch } from './atlas-session.js';
 import { deriveEffectiveModel } from './effective-region-model.js';

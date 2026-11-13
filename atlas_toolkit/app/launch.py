@@ -151,4 +151,5 @@ def run() -> None:
         server.stop()
 
     window.events.closed += on_closed
-    webview.start(func=setup_drop, args=(window, commands), debug=webview_debug)
+    window.events.loaded += lambda: setup_drop(window, commands)
+    webview.start(debug=webview_debug)

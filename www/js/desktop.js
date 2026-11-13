@@ -5,6 +5,7 @@ import { encodeFrame, decodeFrame } from './rpc-frame.js';
 let clock = () => Date.now();
 let lastAlert = -Infinity;
 let eventSource = null;
+let streamInterrupted = false;
 const handlers = new Map();
 
 export function isDesktop() {
@@ -27,9 +28,13 @@ async function rpc(header, buffers) {
       body: encodeFrame(header, buffers),
       headers: { 'Content-Type': 'application/octet-stream' },
     });
+    if (response.status !== 200 && response.status < 500) {
+      throw new HostError('DesktopRequestRejected', `The app refused the request (HTTP ${response.status}).`);
+    }
     if (response.status !== 200) throw new Error(`App server returned HTTP ${response.status}`);
     return decodeFrame(await response.arrayBuffer());
   } catch (error) {
+    if (error instanceof HostError && error.type === 'DesktopRequestRejected') throw error;
     throw serverError(error);
   }
 }
@@ -66,7 +71,7 @@ export function createDesktopWorker() {
         const result = await rpc({ target: 'engine', method, argsJson }, buffers);
         data = { id, json: result.header.json, buffers: result.buffers };
       } catch (error) {
-        data = { id, json: JSON.stringify({ ok: false, error: { type: 'DesktopServerError', message: error.message } }), buffers: [] };
+        data = { id, json: JSON.stringify({ ok: false, error: { type: error.type, message: error.message } }), buffers: [] };
       }
       if (!terminated) worker.onmessage?.({ data });
     },
@@ -81,9 +86,14 @@ export function createDesktopWorker() {
 export function onDesktopEvent(kind, handler) {
   if (!eventSource) {
     eventSource = new EventSource('api/events');
+    eventSource.onerror = () => {
+      if (!streamInterrupted) console.warn('Desktop event stream interrupted; reconnecting.');
+      streamInterrupted = true;
+    };
     eventSource.onmessage = event => {
       try {
         const data = JSON.parse(event.data);
+        streamInterrupted = false;
         for (const callback of handlers.get(data.kind) || []) {
           try { callback(data); } catch (error) { console.error(error); }
         }
@@ -102,6 +112,7 @@ export function _resetForTests() {
   eventSource?.close();
   eventSource = null;
   handlers.clear();
+  streamInterrupted = false;
   lastAlert = -Infinity;
   clock = () => Date.now();
 }

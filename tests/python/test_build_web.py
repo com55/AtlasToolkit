@@ -10,7 +10,7 @@ from build_web import excluded, import_offenders
 def test_excluded_engine_files():
     names = [
         "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
-        "atlas-converter", "atlas-api-legacy", "core-region-ops",
+        "atlas-converter", "atlas-api-legacy", "legacy-native-paths", "core-region-ops",
         "effective-region-model", "lanczos-resize", "region-mesh-lookup",
         "region-mesh-mask", "repack-nest", "region-name-validation",
         "job-runner", "preview-jobs", "canvas-surface",

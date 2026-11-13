@@ -1,3 +1,4 @@
+import { desktopCall, onDesktopEvent } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
 import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
@@ -10,23 +11,13 @@ import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
-import { copyPreviewImage, savePreviewImageAs, applyNativeSkelDrop } from './js/drop.js';
-import { base64ToFile, loadFileAsFile, pathToFileUrl, isPywebviewDesktop } from './js/platform.js';
+import { copyPreviewImage, savePreviewImageAs, handleDesktopDrop } from './js/drop.js';
+import { fileFromUrl, isPywebviewDesktop } from './js/platform.js';
 import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
 let appVersion = '';
-
-async function resolveAppVersion() {
-  if (window.pywebview && window.pywebview.api && window.pywebview.api.get_current_version) {
-    try {
-      const v = await window.pywebview.api.get_current_version();
-      if (v) return String(v).replace(/^v/i, '').trim();
-    } catch (_) { /* fall through to the stamped PWA meta tag */ }
-  }
-  return versionFromDocument();
-}
 
 function applyAppTitle(atlasFilename) {
   document.title = formatAppTitle(appVersion, atlasFilename);
@@ -35,6 +26,34 @@ function applyAppTitle(atlasFilename) {
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
+  let info = null;
+  if (isPywebviewDesktop()) {
+    const actions = {
+      openAtlasBundle,
+      applyModImage: applyNativeModImageDrop,
+      confirmDiscard: () => showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?'),
+    };
+    onDesktopEvent('drop', e => handleDesktopDrop(e, actions).catch(console.error));
+    let closePromptOpen = false;
+    onDesktopEvent('confirm-close', async () => {
+      if (closePromptOpen) return;
+      closePromptOpen = true;
+      try {
+        const ok = await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?');
+        await desktopCall('close_answer', [ok]);
+      } catch (e) { console.error(e); }
+      finally { closePromptOpen = false; }
+    });
+    onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
+    info = await desktopCall('startup');
+    if (info.updateFailure) window.showUpdateInstallFailed(info.updateFailure);
+    const installButton = document.getElementById('btn-install-update-file');
+    if (info.devBuild) installButton.classList.remove('hidden');
+    installButton.addEventListener('click', async () => {
+      const r = await desktopCall('install_update_from_file');
+      if (!r.ok && !r.cancelled) await showAlert(r.error, 'Install update');
+    });
+  }
   const statusText = document.getElementById('status-text');
   const preparingText = 'Preparing AtlasToolkit engine...';
   statusText.textContent = preparingText;
@@ -45,7 +64,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setEngineStartupError(error);
     if (statusText.textContent === preparingText) statusText.textContent = 'AtlasToolkit failed to start';
   });
-  appVersion = await resolveAppVersion();
+  appVersion = info ? String(info.version).replace(/^v/i, '').trim() : versionFromDocument();
   applyAppTitle('');
   initPanelResizer();
   initAppBar();
@@ -90,18 +109,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // pywebview desktop equivalent of the above: CLI arg / "Open with" file
-  // association. bridge.py's startup_check() reads sys.argv itself and, if
-  // it matches, drives the native atlas-open flow (which calls back into
-  // _resetUiAfterFreshLoad via window.loadAtlasFromNative) — nothing else
-  // to do here but trigger it once on startup.
-  if (window.pywebview && window.pywebview.api && window.pywebview.api.startup_check) {
-    try {
-      await window.pywebview.api.startup_check();
-    } catch (e) {
-      console.error('startup_check error:', e);
-    }
-  }
+  if (info?.atlasError) showToast(info.atlasError, 'error');
+  if (info?.atlas) await openAtlasBundle(info.atlas);
 });
 
 /**
@@ -204,9 +213,9 @@ async function _resetUiAfterFreshLoad() {
   // the JS engine has no equivalent hook, so it's centralized here instead
   // — covers all three open paths: Open button, drag-drop, CLI/file
   // association).
-  if (window.pywebview && window.pywebview.api && window.pywebview.api.set_window_title) {
+  if (isPywebviewDesktop()) {
     try {
-      await window.pywebview.api.set_window_title(AtlasAPI.get_current_atlas_filename());
+      await desktopCall('set_window_title', [AtlasAPI.get_current_atlas_filename()]);
     } catch (_) { /* non-fatal */ }
   }
 }
@@ -235,49 +244,19 @@ async function openFile() {
   }
 }
 
-// ─── Native (pywebview) bridge glue ────────────────────────────────────────
-// pywebview's native CLI-arg/file-association/drag-drop paths hand Python a
-// filesystem path, not a browser File. The .atlas TEXT itself is small
-// (plain text, a few KB) and still crosses as base64. Sibling/mod PNGs do
-// NOT -- bridge.py hands over their plain paths and these reconstruct File
-// objects via fetch(file://...) (see platform.loadFileAsFile's doc comment:
-// base64 through pywebview's evaluate_js bridge measured over 1s for a
-// single ~5MB PNG, this measured under 10ms for the same file, 2026-08-23)
-// and feed them into the same AtlasAPI used by the file-picker/browser-drop
-// paths above. See atlas_toolkit/app/bridge.py.
-
-/** Load an atlas opened via a native path (CLI arg, file association, or
- *  single-file native drag-drop with no in-DOM FileList available).
- *  `atlasDirectory` (added for parity-audit fix, 2026-08-23) is the folder the
- *  .atlas file lives in on disk — threaded through so extract/save dialogs can
- *  default to it, matching the old Python engine. */
-async function loadAtlasFromNative(atlasBase64, atlasFilename, imagePathsMap, atlasDirectory) {
-  if (isBusy()) {
-    noteBusyConflict();
-    return false;
-  }
-  try {
-    const atlasFile = base64ToFile(atlasBase64, atlasFilename, 'text/plain');
-    const imageFileMap = {};
-    for (const [name, imgPath] of Object.entries(imagePathsMap || {})) {
-      try {
-        imageFileMap[name] = await loadFileAsFile(imgPath);
-      } catch (imgErr) {
-        console.warn('loadAtlasFromNative: sibling image unread, will prompt:', imgErr);
-      }
-    }
-    const ok = await AtlasAPI.load_atlas_from_file(atlasFile, imageFileMap, atlasDirectory || '');
-    if (ok === true) await _resetUiAfterFreshLoad();
-    return ok;
-  } catch (e) {
-    console.error('loadAtlasFromNative error:', e);
-    return false;
-  }
+async function openAtlasBundle(bundle, {viaDrop = false} = {}) {
+  if (isBusy()) { noteBusyConflict(); return false; }
+  const ok = await AtlasAPI.load_atlas_bundle(bundle);
+  if (ok === 'cancelled') { showToast('Cancelled', 'info'); return false; }
+  if (!ok) { showToast('Failed to load atlas file.', 'error'); return false; }
+  await _resetUiAfterFreshLoad();
+  if (viaDrop) showToast('Atlas loaded via drag & drop.', 'success');
+  return true;
 }
 
 /** Apply a mod image dropped natively onto the currently-selected regions
  *  in Edit mode (native drag-drop delivers a path, not a browser File). */
-async function applyNativeModImageDrop(imagePath) {
+async function applyNativeModImageDrop(file) {
   if (isBusy()) {
     noteBusyConflict();
     return false;
@@ -294,7 +273,7 @@ async function applyNativeModImageDrop(imagePath) {
   // file:// URL goes straight into Image() — no fetch→File copy, no
   // toDataURL of the dropped PNG (perf fix, 2026-08-23). Preview after
   // merge is a blob: URL from canvas.toBlob(), not a data: URI.
-  const result = await AtlasAPI.process_mod_image(pathToFileUrl(imagePath), keys);
+  const result = await AtlasAPI.process_mod_image(await fileFromUrl(file, 'image/png'), keys);
   if (result) {
     await onModPreviewReceived(result);
     showToast('Mod image loaded via drag & drop.', 'success');
@@ -345,11 +324,3 @@ window.showConfirm         = showConfirm;
 window.showAlert           = showAlert;
 window.showMissingAtlasImages = showMissingAtlasImagesDialog;
 window.showToast           = showToast;
-
-// ─── Expose for the pywebview native bridge (evaluate_js from Python) ─────────
-window.AtlasAPI                  = AtlasAPI;
-window.loadAtlasFromNative       = loadAtlasFromNative;
-window.applyNativeModImageDrop   = applyNativeModImageDrop;
-window.applyNativeSkelDrop       = applyNativeSkelDrop;
-window.isBusy                    = isBusy;
-window.noteBusyConflict          = noteBusyConflict;

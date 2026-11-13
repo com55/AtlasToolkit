@@ -1,7 +1,8 @@
+import { desktopCall } from './desktop.js';
 import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
-import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, base64ToFile, pathToFileUrl, joinNativePath, loadFileAsFile, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
+import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
 import { withBusy, withLock, BUSY_LABEL } from './busy-overlay.js';
 import { PreviewCache, viewPreviewKey } from './preview-cache.js';
@@ -63,13 +64,6 @@ function _isInstalledPWA() {
 function _useFolderPicker() {
   return isPywebviewDesktop()
     || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
-}
-
-/** Directory portion of a native (Windows or POSIX) filesystem path. */
-function _dirnameOf(path) {
-  if (!path) return '';
-  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  return idx >= 0 ? path.slice(0, idx) : '';
 }
 
 /** Base name (no extension) of the loaded atlas, for naming zip downloads. */
@@ -184,11 +178,11 @@ async function _loadAtlasFromFileList(files, options = {}) {
   return _loadAtlasFiles(atlasFile, imageFileMap, '', list);
 }
 
-async function _saveBlobWithDialog(filename, blob, { defaultDir = '' } = {}) {
+async function _saveBlobWithDialog(filename, blob) {
   // platform.js branches browser (File System Access API) vs pywebview
-  // (native save dialog + write_file_bytes); _lastSaveHandle only means
+  // (native save dialog and grant write); _lastSaveHandle only means
   // anything for the former.
-  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle, defaultDir });
+  const result = await platform.saveFileWithDialog(filename, blob, { startIn: _lastSaveHandle });
   if (!result) {
     const e = new Error('Save cancelled');
     e.name = 'AbortError';
@@ -318,7 +312,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
 
     const pages = {};
     for (const [name, source] of Object.entries(finalMap)) {
-      const file = typeof source === 'string' ? await loadFileAsFile(source, 'image/png') : source;
+      const file = source;
       finalMap[name] = file;
       pages[name] = new Uint8Array(await file.arrayBuffer());
     }
@@ -357,46 +351,12 @@ async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
     return { name: skelName, blob: fromList };
   }
 
-  if (!sourceDir) { return null; }
-  try {
-    let skelPath = joinNativePath(sourceDir, skelName);
-    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
-      const atlasPath = joinNativePath(sourceDir, atlasFile.name);
-      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
-      if (resolved) skelPath = resolved;
-      else { return null; }
-    }
-    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
-    if (file && file.size > 0) return { name: skelName, blob: file };
-  } catch (_) {
-    // No sibling on disk — Copy .skel is a no-op; mask state stays unavailable.
-  }
   return null;
 }
 
-
-/** Prefer the skel captured at load; otherwise retry from the atlas folder
- *  at save time (historical Python copied at save, not at open). */
+/** Save the skeleton captured when the atlas was loaded or attached. */
 async function _skelForSave() {
-  const copySkel = await AtlasAPI.get_pref('copySkel', true);
-  if (!copySkel) return null;
-  if (_currentSkel) return _currentSkel;
-  const skelName = siblingSkelFilename(_currentAtlasFilename);
-  if (!skelName || !_currentAtlasDirectory) return null;
-  try {
-    let skelPath = joinNativePath(_currentAtlasDirectory, skelName);
-    if (isPywebviewDesktop() && window.pywebview.api.resolve_sibling_skel) {
-      const atlasPath = joinNativePath(_currentAtlasDirectory, _currentAtlasFilename);
-      const resolved = await window.pywebview.api.resolve_sibling_skel(atlasPath);
-      if (!resolved) return null;
-      skelPath = resolved;
-    }
-    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
-    if (file && file.size > 0) return { name: skelName, blob: file };
-  } catch (_) {
-    // Still no sibling .skel.
-  }
-  return null;
+  return await AtlasAPI.get_pref('copySkel', true) ? _currentSkel : null;
 }
 
 export const AtlasAPI = {
@@ -528,16 +488,10 @@ export const AtlasAPI = {
    *  pywebview uses the native Open dialog at the atlas folder, same as
    *  pick_mod_image / pick_page_image — a plain file input cannot. */
   async pick_skel_file() {
-    if (isPywebviewDesktop() && window.pywebview.api.pick_skel_file) {
-      const path = await window.pywebview.api.pick_skel_file(_currentAtlasDirectory);
-      if (!path) return false;
-      try {
-        const file = await loadFileAsFile(path, 'application/octet-stream');
-        return AtlasAPI.apply_skel_file(file);
-      } catch (e) {
-        console.error('pick_skel_file error:', e);
-        return false;
-      }
+    if (isPywebviewDesktop()) {
+      const file = await desktopCall('pick_skel');
+      if (!file) return false;
+      return AtlasAPI.apply_skel_file(await fileFromUrl(file, 'application/octet-stream'));
     }
     const files = await _pickFiles({ accept: '.skel', multiple: false });
     if (files.length === 0) return false;
@@ -552,51 +506,13 @@ export const AtlasAPI = {
    * every PNG together in a browser `<input type=file>` picker.
    */
   async choose_file() {
-    if (isPywebviewDesktop() && window.pywebview.api.pick_atlas_file) {
-      const picked = await window.pywebview.api.pick_atlas_file();
-      const path = Array.isArray(picked) ? picked[0] : picked;
-      if (!path) return false;
+    if (isPywebviewDesktop()) {
       try {
-        const atlasInfo = await window.pywebview.api.read_file_as_base64(path);
-        const atlasFile = base64ToFile(atlasInfo.base64, atlasInfo.name, 'text/plain');
-        const dir = _dirnameOf(String(path));
-        const imageFileMap = {};
-        // Resolve each atlas page line against the .atlas folder — same rule
-        // as Python session.resolve_page_images (drag/CLI). Do not depend on
-        // list_sibling_page_images's js_api dict (Open was showing missing
-        // even when siblings existed, 2026-08-24). Image() loads file://
-        // directly, same as native mod-image drop.
-        let resolved = {};
-        let resolverUsed = false;
-        if (window.pywebview.api.resolve_sibling_page_images) {
-          resolverUsed = true;
-          const pairs = await window.pywebview.api.resolve_sibling_page_images(path);
-          if (Array.isArray(pairs)) {
-            for (const row of pairs) {
-              if (row && row.name && row.path) resolved[row.name] = row.path;
-            }
-          } else if (pairs && typeof pairs === 'object') {
-            resolved = pairs;
-          }
-        }
-        if (!resolverUsed) {
-          // Older bridge without the exists()-checked resolver: try dirname
-          // + page line. Do not do this after an empty resolver result —
-          // missing files must stay out of the map so the missing-images
-          // dialog still appears.
-          for (const pageName of await _extractRequiredPages(await _readFileAsText(atlasFile))) {
-            resolved[pageName] = joinNativePath(dir, pageName);
-          }
-        }
-        for (const [pageName, imgPath] of Object.entries(resolved)) {
-          if (imgPath) imageFileMap[pageName] = pathToFileUrl(imgPath);
-        }
-        return _loadAtlasFiles(atlasFile, imageFileMap, dir);
+        const bundle = await desktopCall('pick_atlas');
+        return bundle ? AtlasAPI.load_atlas_bundle(bundle) : false;
       } catch (e) {
-        console.error('choose_file (pywebview) error:', e);
-        if (typeof window.showToast === 'function') {
-          window.showToast(`Failed to load atlas file: ${e.message || e}`, 'error');
-        }
+        if (!(e instanceof HostError)) throw e;
+        window.showToast(`Failed to load atlas file: ${e.message}`, 'error');
         return false;
       }
     }
@@ -608,6 +524,17 @@ export const AtlasAPI = {
     return _loadAtlasFromFileList(files, {
       showNoAtlasToast: true,
     });
+  },
+
+  async load_atlas_bundle(bundle) {
+    const atlasFile = await fileFromUrl(bundle.atlas, 'text/plain');
+    const pages = {};
+    await Promise.all(Object.entries(bundle.pages).map(async ([name, file]) => {
+      try { pages[name] = await fileFromUrl(file, 'image/png'); }
+      catch (_) { /* Missing page: let the attachment dialog ask for it. */ }
+    }));
+    const skelFile = bundle.skel ? await fileFromUrl(bundle.skel, 'application/octet-stream') : null;
+    return _loadAtlasFiles(atlasFile, pages, bundle.dir, skelFile ? [skelFile] : []);
   },
 
   /** Load atlas from a mixed file list (used by drag-and-drop). */
@@ -697,13 +624,13 @@ export const AtlasAPI = {
       // extract_files() single-file save flow (a folder picker for one file
       // was a desktop-UX regression, found via parity audit 2026-08-23).
       if (extracted.length === 1 && _useFolderPicker()) {
-        await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob, { defaultDir: _currentAtlasDirectory });
+        await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob);
         return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
       }
 
       // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
       if (_useFolderPicker()) {
-        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
+        const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(
           folder,
@@ -782,10 +709,10 @@ export const AtlasAPI = {
   },
   async select_mod_image(keys) {
     let file;
-    if (isPywebviewDesktop() && window.pywebview.api.pick_mod_image) {
-      const path = await window.pywebview.api.pick_mod_image(_currentAtlasDirectory);
-      if (!path) return null;
-      file = pathToFileUrl(path);
+    if (isPywebviewDesktop()) {
+      const picked = await desktopCall('pick_mod_image');
+      if (!picked) return null;
+      file = await fileFromUrl(picked, 'image/png');
     } else { [file] = await _pickFiles({accept: IMAGE_PICKER_ACCEPT}); }
     return file ? AtlasAPI.process_mod_image(file, keys) : null;
   },
@@ -796,20 +723,23 @@ export const AtlasAPI = {
   async save_modified() {
     try {
       const output = await callHost('save_output', []);
+      if (typeof output.revision !== 'number') throw new Error('save_output returned no revision');
       const outputs = output.pages.map(p => ({name: p.name, data: new Blob([p.png], {type: 'image/png'})}));
       outputs.push({name: _currentAtlasFilename, data: output.text});
       const skel = await _skelForSave();
       if (skel) outputs.push({name: skel.name, data: skel.blob});
       if (_useFolderPicker()) {
-        const folder = await platform.pickSaveFolder(_currentAtlasDirectory);
+        const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';
         await platform.writeFilesToFolder(folder, outputs, _confirmDialog);
         _state = await callHost('mark_saved', [output.revision]);
-        return typeof folder === 'string' ? `Saved to: ${folder}` : 'Saved to selected folder.';
+        return (isPywebviewDesktop() ? `Saved to: ${folder.path}` : 'Saved to selected folder.')
+          + (_state.hasPending ? ' (edits made during the save were not included)' : '');
       }
       await _downloadBlob(`${_extractZipBaseName()}_modified.zip`, await createZip(outputs));
       _state = await callHost('mark_saved', [output.revision]);
-      return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ');
+      return 'Saved as zip: ' + outputs.map(o => o.name).join(' and ')
+        + (_state.hasPending ? ' (edits made during the save were not included)' : '');
     } catch (e) { return e.name === 'AbortError' ? 'Cancelled' : 'Error: ' + e.message; }
   },
   async add_region(file, name, page = null) { return withBusy(BUSY_LABEL, async () => editCall('add', [name, await imageBytes(file), page, _state.settings.alpha])); },
@@ -819,7 +749,6 @@ export const AtlasAPI = {
 export { _loadAtlasFiles };
 
 async function imageBytes(source) {
-  if (typeof source === 'string') source = await loadFileAsFile(source, 'image/png');
   return new Uint8Array(await source.arrayBuffer());
 }
 async function editCall(method, args) {

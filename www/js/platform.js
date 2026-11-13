@@ -1,4 +1,4 @@
-import { isDesktop } from './desktop.js';
+import { isDesktop, desktopCall } from './desktop.js';
 
 /**
  * platform.js
@@ -64,41 +64,6 @@ export function previewZoomOriginY(containerH, topAnchored) {
   return topAnchored ? 0 : containerH / 2;
 }
 
-/**
- * Base64-encode a Blob/string/binary payload — pywebview's `js_api` bridge
- * only accepts JSON-serializable arguments, so file bytes have to cross as
- * base64 rather than as a Blob/ArrayBuffer.
- */
-export async function blobToBase64(data) {
-  const blob = data instanceof Blob
-    ? data
-    : typeof data === 'string'
-      ? new Blob([data], { type: 'text/plain' })
-      : new Blob([data]);
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/** Reconstruct a browser File from base64 bytes handed back by the
- * pywebview bridge (read_file_as_base64 / list_sibling_page_images). Still
- * used for the (small, plain-text) .atlas file itself — see loadFileAsFile
- * below for the image-bytes path, which used to also go through this and
- * was the actual source of the reported slowness. */
-export function base64ToFile(base64, filename, mime) {
-  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  return new File([bytes], filename, { type: mime });
-}
-
-/**
- * Convert a native OS path (Windows or POSIX) to a `file://` URL, percent-
- * encoding each segment (handles spaces, unicode, `+`, `#`, `?`, etc.) while
- * leaving a Windows drive letter ("C:") unencoded, matching how browsers
- * expect it in a file URI.
- */
 /** Join a directory and filename with the separator already used in `dir`. */
 export function joinNativePath(dir, name) {
   const file = String(name || '').replace(/^[\\/]+/, '');
@@ -112,14 +77,6 @@ export function joinNativePath(dir, name) {
 export function nativePathBasename(path) {
   const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : '';
-}
-
-/** Parent directory of a native OS path, or '' when there is none. */
-function nativePathDirname(path) {
-  const raw = String(path || '');
-  const idx = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'));
-  if (idx <= 0) return '';
-  return raw.slice(0, idx);
 }
 
 /**
@@ -194,39 +151,18 @@ export function isSkelFilename(name) {
   return /\.skel$/i.test(String(name || ''));
 }
 
-export function pathToFileUrl(path) {
-  let p = String(path).replace(/\\/g, '/');
-  if (!p.startsWith('/')) p = '/' + p; // Windows: "C:/foo" -> "/C:/foo"
-  const segments = p.split('/').map((seg, i) => (
-    i === 1 && /^[a-zA-Z]:$/.test(seg) ? seg : encodeURIComponent(seg)
-  ));
-  return `file://${segments.join('/')}`;
+/** Fetch a registered desktop asset as a browser File. */
+export async function fileFromUrl(file, mime = 'image/png') {
+  const response = await fetch(file.url);
+  if (!response.ok) throw new Error(`Failed to read file: ${file.name}`);
+  const blob = await response.blob();
+  return new File([blob], file.name, { type: mime });
 }
 
-/**
- * Load a native path into a browser File — pywebview desktop only.
- *
- * Reads the bytes via fetch(file://...) instead of round-tripping through
- * the read_file_as_base64/list_sibling_page_images js_api bridge calls:
- * pywebview's evaluate_js (used both to push data Python->JS and, per its
- * own source, to deliver EVERY js_api call's return value back to JS)
- * base64-encodes the payload, then regex-escapes the WHOLE string TWICE
- * (once in webview/util.py's js_bridge_call, again inside window.py's
- * evaluate_js) and embeds it as a literal in an `eval()`-wrapped script —
- * for a multi-megabyte PNG this measured over 1 SECOND per image (real
- * fixture, 2026-08-23: a 4.9MB PNG). fetch() against a file:// URL is a
- * direct native file read with no bridge/serialization involved at all —
- * the same fixture measured under 10ms. Confirmed working in this exact
- * pywebview/WebView2 runtime (same trick the old Python engine's
- * preview_cache.py already relied on for <img src="file://...">).
- */
-export async function loadFileAsFile(path, mime = 'image/png') {
-  const url = pathToFileUrl(path);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to read local file: ${path}`);
-  const blob = await response.blob();
-  const name = String(path).replace(/\\/g, '/').split('/').pop();
-  return new File([blob], name, { type: mime });
+async function outputBytes(data) {
+  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
+  if (typeof data === 'string') return new TextEncoder().encode(data);
+  return data instanceof Uint8Array ? data : new Uint8Array(data);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -284,10 +220,8 @@ export async function pickAtlasFile() {
  *   folder; the initial JS port never passed one — found via parity audit,
  *   2026-08-23). No effect on the browser File System Access API path.
  */
-export async function pickSaveFolder(defaultDir = '') {
-  if (isPywebviewDesktop() && window.pywebview.api.pick_save_folder) {
-    return (await window.pywebview.api.pick_save_folder(defaultDir)) || null;
-  }
+export async function pickSaveFolder() {
+  if (isPywebviewDesktop()) return await desktopCall('pick_save_folder') || null;
   if (typeof window.showDirectoryPicker !== 'function') return null;
   try {
     return await window.showDirectoryPicker({ mode: 'readwrite', id: 'atlastoolkit-extract-folder' });
@@ -327,12 +261,8 @@ export async function existingOutputNames(target, names) {
   const list = (Array.isArray(names) ? names : []).filter((name) => typeof name === 'string' && name);
   if (list.length === 0) return [];
 
-  if (typeof target === 'string') {
-    if (isPywebviewDesktop() && window.pywebview.api.existing_output_names) {
-      const found = await window.pywebview.api.existing_output_names(target, list);
-      return Array.isArray(found) ? found : [];
-    }
-    return [];
+  if (target && typeof target.grant === 'string') {
+    return desktopCall('existing_output_names', [target.grant, list]);
   }
 
   if (target && typeof target.getFileHandle === 'function') {
@@ -379,12 +309,9 @@ export async function writeFilesToFolder(target, files, confirm) {
     if (!(await confirmOverwrite(existing, confirm))) throw _saveCancelled();
   }
 
-  if (typeof target === 'string') {
-    const sep = target.includes('\\') ? '\\' : '/';
-    for (const item of files) {
-      const base64 = await blobToBase64(item.data);
-      await window.pywebview.api.write_file_bytes(`${target}${sep}${item.name}`, base64);
-    }
+  if (target && typeof target.grant === 'string') {
+    const outputs = await Promise.all(files.map(async ({name, data}) => ({name, data: await outputBytes(data)})));
+    await desktopCall('write_files', [target.grant, outputs]);
     return;
   }
 
@@ -414,25 +341,6 @@ async function _confirmReplace(names) {
   return false;
 }
 
-/**
- * If this PNG save came back without an extension, append `.png`.
- * When that changes the path onto a file that already exists, confirm
- * before replacing it — the save dialog's own overwrite prompt covered
- * the name the user typed, not the name we just adjusted.
- * Returns null when the user declines.
- */
-async function _pathAfterPngExtension(chosenPath, suggestedName) {
-  const finalPath = finalizeSaveFilename(suggestedName, chosenPath);
-  if (finalPath === chosenPath) return finalPath;
-  const dir = nativePathDirname(finalPath);
-  const base = nativePathBasename(finalPath);
-  if (dir && base) {
-    const existing = await existingOutputNames(dir, [base]);
-    if (existing.length > 0 && !(await _confirmReplace(existing))) return null;
-  }
-  return finalPath;
-}
-
 async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
   const finalName = finalizeSaveFilename(suggestedName, fileHandle.name);
   if (finalName === fileHandle.name || typeof fileHandle.move !== 'function') return fileHandle;
@@ -458,13 +366,16 @@ async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
  * @param {string} [opts.defaultDir] pywebview native dialog starting directory
  *   (see pickSaveFolder's doc comment for why this exists).
  */
-export async function saveFileWithDialog(filename, blob, { startIn = null, defaultDir = '' } = {}) {
-  if (isPywebviewDesktop() && window.pywebview.api.pick_save_file) {
-    const path = await window.pywebview.api.pick_save_file(filename, defaultDir);
-    if (!path) return null;
-    const finalPath = await _pathAfterPngExtension(path, filename);
-    if (!finalPath) return null;
-    await window.pywebview.api.write_file_bytes(finalPath, await blobToBase64(blob));
+export async function saveFileWithDialog(filename, blob, { startIn = null } = {}) {
+  if (isPywebviewDesktop()) {
+    const grant = await desktopCall('pick_save_file', [filename]);
+    if (!grant) return null;
+    const name = nativePathBasename(grant.path);
+    if (grant.adjusted) {
+      const existing = await existingOutputNames(grant, [name]);
+      if (existing.length && !(await _confirmReplace(existing))) return null;
+    }
+    await desktopCall('write_files', [grant.grant, [{name, data: await outputBytes(blob)}]]);
     return true;
   }
 
@@ -504,9 +415,9 @@ export async function saveFileWithDialog(filename, blob, { startIn = null, defau
 // localStorage.
 
 export async function loadPref(key, defaultValue = null) {
-  if (isPywebviewDesktop() && window.pywebview.api.get_pref) {
+  if (isPywebviewDesktop()) {
     try {
-      const value = await window.pywebview.api.get_pref(key, defaultValue);
+      const value = await desktopCall('get_pref', [key, defaultValue]);
       return value === undefined ? defaultValue : value;
     } catch (_) { return defaultValue; }
   }
@@ -517,8 +428,8 @@ export async function loadPref(key, defaultValue = null) {
 }
 
 export function savePref(key, value) {
-  if (isPywebviewDesktop() && window.pywebview.api.set_pref) {
-    window.pywebview.api.set_pref(key, value);
+  if (isPywebviewDesktop()) {
+    desktopCall('set_pref', [key, value]).catch(console.error);
     return;
   }
   try { localStorage.setItem(`atlastoolkit-py.${key}`, JSON.stringify(value)); } catch (_) {}

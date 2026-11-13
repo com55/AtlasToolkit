@@ -1,80 +1,18 @@
-import test, { mock } from 'node:test';
+import { fakeDesktopServer } from './helpers/fake-desktop-server.js';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AtlasAPI } from '../www/js/atlas-api-legacy.js';
+import { AtlasAPI } from '../www/js/atlas-api.js';
 import { openAddRegionModal } from '../www/js/dialogs.js';
 
-function installWindow({ pickSkel } = {}) {
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-  const previousFetch = globalThis.fetch;
-  let inputClicks = 0;
-  globalThis.window = {
-    pywebview: {
-      api: {
-        pick_skel_file: pickSkel,
-      },
-    },
-    matchMedia: () => ({ matches: false }),
-  };
-  globalThis.document = {
-    createElement() {
-      inputClicks += 1;
-      return {
-        click() {},
-        addEventListener() {},
-        removeEventListener() {},
-        remove() {},
-      };
-    },
-  };
-  return {
-    inputClicks: () => inputClicks,
-    restore() {
-      globalThis.window = previousWindow;
-      globalThis.document = previousDocument;
-      globalThis.fetch = previousFetch;
-    },
-  };
-}
-
-test('pywebview .skel picker uses the native dialog at the atlas folder', async (t) => {
-  const previousLocation = globalThis.location;
-  globalThis.location = { pathname: '/s/t/index.html' };
-  t.after(() => {
-    if (previousLocation === undefined) delete globalThis.location;
-    else globalThis.location = previousLocation;
-  });
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let nativeDir;
-  const env = installWindow({
-    pickSkel: async (dir) => {
-      nativeDir = dir;
-      return null;
-    },
-  });
-  try {
-    const pending = AtlasAPI.pick_skel_file();
-    await Promise.resolve();
-    t.mock.timers.tick(60_000);
-    const ok = await pending;
-    assert.equal(ok, false);
-    assert.equal(nativeDir, AtlasAPI.get_current_atlas_directory());
-    assert.equal(env.inputClicks(), 0);
-  } finally {
-    env.restore();
-    mock.timers.reset();
-  }
+test('desktop skeleton picker calls pick_skel without directory arguments', async t => {
+  const calls = fakeDesktopServer(t, { pick_skel: () => null });
+  assert.equal(await AtlasAPI.pick_skel_file(), false);
+  assert.deepEqual(calls, [{ target: 'desktop', method: 'pick_skel', args: [] }]);
 });
 
-test('pywebview add-region picker uses the native png dialog at the atlas folder', async (t) => {
-  const previousLocation = globalThis.location;
-  globalThis.location = { pathname: '/s/t/index.html' };
-  t.after(() => {
-    if (previousLocation === undefined) delete globalThis.location;
-    else globalThis.location = previousLocation;
-  });
-  const calls = [];
+test('desktop add-region picker calls pick_mod_image without directory arguments', async (t) => {
+  const calls = fakeDesktopServer(t, { pick_mod_image: () => null });
   const fileInput = {
     value: '',
     files: [],
@@ -103,17 +41,6 @@ test('pywebview add-region picker uses the native png dialog at the atlas folder
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   globalThis.window = {
-    pywebview: {
-      api: {
-        pick_page_image: async (pageName, dir) => {
-          calls.push([pageName, dir]);
-          return null;
-        },
-      },
-    },
-    AtlasAPI: {
-      get_current_atlas_directory: () => 'D:\\atlases',
-    },
     matchMedia: () => ({ matches: false }),
   };
   globalThis.document = {
@@ -124,7 +51,7 @@ test('pywebview add-region picker uses the native png dialog at the atlas folder
     openAddRegionModal({ getEffectiveNames: () => [], onConfirm: async () => {} });
     await dropArea.onclick();
     assert.equal(fileInput.clickCount, 0);
-    assert.deepEqual(calls, [['', 'D:\\atlases']]);
+    assert.deepEqual(calls, [{ target: 'desktop', method: 'pick_mod_image', args: [] }]);
   } finally {
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;

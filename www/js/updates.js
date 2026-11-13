@@ -1,13 +1,6 @@
-/**
- * updates.js
- * Native self-updater UI for the pywebview desktop shell — port of
- * `ui/js/updates.js` (Phase 5 of the unify-js-engine plan). Entirely inert
- * under a real browser/PWA session: these globals are only ever invoked by
- * `bridge.py`'s `evaluate_js()` calls (`_run_update_check`,
- * `on_update_install_failed`), which only fire when running under
- * pywebview. PWA/browser users keep using `dialogs.js`'s separate
- * `showUpdateToast` (service-worker refresh flow) untouched.
- */
+import { desktopCall } from './desktop.js';
+import { isPywebviewDesktop } from './platform.js';
+/** Native updater UI, invoked by desktop startup and update events. */
 import { showToast } from './dialogs.js';
 
 function formatBytes(bytes) {
@@ -31,8 +24,8 @@ async function openExternalUrl(url, invalidMessage = 'Invalid URL.') {
       return;
     }
 
-    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
-      const result = await window.pywebview.api.open_url(parsed.toString());
+    if (isPywebviewDesktop()) {
+      const result = await desktopCall('open_url', [parsed.toString()]);
       if (!result || !result.ok) {
         showToast((result && result.error) || 'Failed to open URL.', 'error');
       }
@@ -108,7 +101,7 @@ window.showUpdateNotification = function (...args) {
 
   async function pollDownloadProgress() {
     try {
-      const progress = await window.pywebview.api.get_update_download_progress();
+      const progress = await desktopCall('get_update_download_progress');
       if (!progress) return;
 
       const status = String(progress.status || 'idle');
@@ -140,7 +133,7 @@ window.showUpdateNotification = function (...args) {
     pollTimer = setInterval(pollDownloadProgress, 350);
 
     try {
-      const result = await window.pywebview.api.download_update();
+      const result = await desktopCall('download_update');
       stopPolling();
 
       if (result && result.ok) {
@@ -173,7 +166,7 @@ window.showUpdateNotification = function (...args) {
     sub.textContent = 'Restarting app to install update...';
 
     try {
-      const result = await window.pywebview.api.restart_and_install_update();
+      const result = await desktopCall('restart_and_install_update');
       if (!result || !result.ok) {
         const message = (result && result.error) || 'Failed to restart for update.';
         showToast(message, 'error');
@@ -255,7 +248,7 @@ window.showUpdateInstallFailed = function (payload) {
   logBtn.addEventListener('click', async () => {
     if (!logPath) return;
     try {
-      const result = await window.pywebview.api.open_update_log(logPath);
+      const result = await desktopCall('open_update_log');
       if (!result || !result.ok) {
         showToast((result && result.error) || 'Failed to open log.', 'error');
       }

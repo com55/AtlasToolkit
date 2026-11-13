@@ -3,9 +3,9 @@ import { state, getSelectedKeys, getSelectedLabels, getSelectedRegions } from '.
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
 import { setMode, onModPreviewReceived, updateMeshCroppingUI } from './modify-mode.js';
 import { previewContainer, previewImg, resetPreview, clearOverlay, updatePreview } from './preview.js';
-import { showToast, showConfirm, isAddRegionDialogOpen } from './dialogs.js';
+import { showToast, showConfirm, isAddRegionDialogOpen, applyMissingImageDrop, applyAddRegionImageDrop } from './dialogs.js';
 import { isBusy, noteBusyConflict } from './busy-overlay.js';
-import { platform, isPywebviewDesktop, loadFileAsFile, isSkelFilename } from './platform.js';
+import { platform, isPywebviewDesktop, fileFromUrl, isSkelFilename } from './platform.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -110,19 +110,43 @@ export async function applyDroppedSkelFile(file) {
 
 /** Native OS drop delivers a path, not a browser File — load bytes then reuse
  *  the same apply path as the in-page drop handler. */
-export async function applyNativeSkelDrop(skelPath) {
+export async function applyNativeSkelDrop(asset) {
   if (isBusy()) {
     noteBusyConflict();
     return false;
   }
   try {
-    const file = await loadFileAsFile(skelPath, 'application/octet-stream');
+    const file = await fileFromUrl(asset, 'application/octet-stream');
     return applyDroppedSkelFile(file);
   } catch (e) {
     console.error(e);
     showToast('Failed to read .skel file.', 'error');
     return false;
   }
+}
+
+/** Route app-process drops in the same priority order as native dialogs. */
+export async function handleDesktopDrop(event, actions) {
+  hideDropOverlay();
+  const {type, file, bundle, x, y, message} = event;
+  const png = type === 'file' && /\.png$/i.test(file.name);
+  if (type === 'error') { showToast(message, 'error'); return; }
+  if (document.body.dataset.missingDialogOpen === 'true') {
+    if (png) await applyMissingImageDrop(file, x, y);
+    return;
+  }
+  if (document.body.dataset.addRegionDialogOpen === 'true') {
+    if (png) await applyAddRegionImageDrop(file);
+    return;
+  }
+  if (isBusy()) { noteBusyConflict(); return; }
+  if (type === 'atlas') {
+    if (AtlasAPI.has_pending_modifications() && !(await actions.confirmDiscard())) return;
+    return actions.openAtlasBundle(bundle, {viaDrop: true});
+  }
+  if (type === 'file' && /\.skel$/i.test(file.name)) return applyNativeSkelDrop(file);
+  if (png) return actions.applyModImage(file);
+  showToast('Unsupported file type.', 'error');
 }
 
 // The missing-images dialog runs its own per-row drag-drop handling while
@@ -225,12 +249,10 @@ export async function savePreviewImageAs() {
     const filename = previewSaveDefaultName(getSelectedLabels());
 
     // platform.js branches browser (File System Access API) vs pywebview
-    // (native save dialog + write_file_bytes) — see D1's revised split.
+    // (native save dialog and grant write) — see D1's revised split.
     const hasNativeDialog = isPywebviewDesktop() || typeof window.showSaveFilePicker === 'function';
     if (hasNativeDialog) {
-      const saved = await platform.saveFileWithDialog(filename, blob, {
-        defaultDir: AtlasAPI.get_current_atlas_directory(),
-      });
+      const saved = await platform.saveFileWithDialog(filename, blob);
       if (saved) { showToast('Image saved.', 'success'); return; }
       showToast('Cancelled', 'info'); // matches old ui/js/extract.js's "Cancelled"
       return;

@@ -1,5 +1,6 @@
+import { desktopCall } from './desktop.js';
 import { HostError } from './engine-client.js';
-import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, loadFileAsFile, matchDroppedPngToPage } from './platform.js';
+import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, matchDroppedPngToPage } from './platform.js';
 import { AtlasAPI } from './atlas-api.js';
 import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
 
@@ -170,12 +171,12 @@ function isMissingDialogOpen() {
     && document.body?.dataset?.missingDialogOpen === 'true';
 }
 
-async function applyMissingImageDrop(path, clientX, clientY) {
-  if (!_missingDialogState || !path || !/\.png$/i.test(path)) return false;
+export async function applyMissingImageDrop(asset, clientX, clientY) {
+  if (!_missingDialogState || !asset || !/\.png$/i.test(asset.name)) return false;
   let row = missingImageRowAt(clientX, clientY);
   if (!row && _missingDialogState.rowByPage) {
     const pageNames = [..._missingDialogState.rowByPage.keys()];
-    const matched = matchDroppedPngToPage(path, pageNames);
+    const matched = matchDroppedPngToPage(asset.name, pageNames);
     if (matched) row = _missingDialogState.rowByPage.get(matched);
     else {
       const empty = pageNames.find((n) => !_missingDialogState.selectedByPage?.[n]);
@@ -186,9 +187,7 @@ async function applyMissingImageDrop(path, clientX, clientY) {
   const pageName = row.dataset.pageName;
   if (!pageName) return false;
   try {
-    // fetch(file://) instead of read_file_as_base64 -- see
-    // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
-    const file = await loadFileAsFile(path);
+    const file = await fileFromUrl(asset);
     _missingDialogState.applySelection(pageName, file);
     return true;
   } catch (e) {
@@ -197,10 +196,6 @@ async function applyMissingImageDrop(path, clientX, clientY) {
   }
 }
 
-if (typeof window !== 'undefined') {
-  window.isMissingDialogOpen = isMissingDialogOpen;
-  window.applyMissingImageDrop = applyMissingImageDrop;
-}
 
 let _addRegionDialogState = null;
 
@@ -209,12 +204,12 @@ export function isAddRegionDialogOpen() {
     && document.body?.dataset?.addRegionDialogOpen === 'true';
 }
 
-async function applyAddRegionImageDrop(path) {
+export async function applyAddRegionImageDrop(asset) {
   const dialogState = _addRegionDialogState;
-  if (!dialogState || !path || !/\.png$/i.test(path)) return false;
+  if (!dialogState || !asset || !/\.png$/i.test(asset.name)) return false;
   const dropGeneration = ++dialogState.dropGeneration;
   try {
-    const file = await loadFileAsFile(path);
+    const file = await fileFromUrl(asset);
     if (_addRegionDialogState !== dialogState || dialogState.dropGeneration !== dropGeneration) return false;
     dialogState.onFileSelected(file);
     return true;
@@ -224,9 +219,6 @@ async function applyAddRegionImageDrop(path) {
   }
 }
 
-if (typeof window !== 'undefined') {
-  window.applyAddRegionImageDrop = applyAddRegionImageDrop;
-}
 
 export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   const modal = document.getElementById('add-region-modal');
@@ -288,12 +280,11 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
     // pywebview: native Open dialog at the atlas folder, same as the missing
     // page image and Modify Selected pickers. A plain file input cannot
     // start in that directory.
-    if (isPywebviewDesktop() && window.pywebview.api.pick_page_image) {
+    if (isPywebviewDesktop()) {
       try {
-        const atlasDir = window.AtlasAPI?.get_current_atlas_directory?.() || '';
-        const path = await window.pywebview.api.pick_page_image('', atlasDir);
-        if (!path) return;
-        onFileSelected(await loadFileAsFile(path));
+        const asset = await desktopCall('pick_mod_image');
+        if (!asset) return;
+        onFileSelected(await fileFromUrl(asset));
       } catch (e) {
         console.error('add-region image picker error:', e);
       }
@@ -304,6 +295,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   dropArea.ondragover = (e) => e.preventDefault();
   dropArea.ondrop = (e) => {
     e.preventDefault();
+    if (isPywebviewDesktop()) return;
     e.stopPropagation();
     const file = e.dataTransfer.files[0];
     if (file) onFileSelected(file);
@@ -422,13 +414,11 @@ export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
         // pywebview: native Open dialog at the atlas's own folder, matching
         // the old Python engine's pick_page_image() call (parity fix,
         // 2026-08-23) — a plain <input type=file> can't set a starting dir.
-        if (isPywebviewDesktop() && window.pywebview.api.pick_page_image) {
+        if (isPywebviewDesktop()) {
           try {
-            const path = await window.pywebview.api.pick_page_image(pageName, atlasDir || '');
-            if (!path) return;
-            // fetch(file://) instead of read_file_as_base64 -- see
-            // platform.loadFileAsFile's doc comment (perf fix, 2026-08-23).
-            applySelection(pageName, await loadFileAsFile(path));
+            const asset = await desktopCall('pick_page_image', [pageName]);
+            if (!asset) return;
+            applySelection(pageName, await fileFromUrl(asset));
           } catch (e) {
             console.error('pick_page_image error:', e);
           }
