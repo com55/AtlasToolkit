@@ -1,33 +1,4 @@
 import test from 'node:test';
-import assert from 'node:assert/strict';
-import { fakeDesktopServer } from './helpers/fake-desktop-server.js';
-import { loadPref, writeFilesToFolder, saveFileWithDialog } from '../www/js/platform.js';
-
-const grant = { grant: 'g', path: 'output/image.png' };
-test('desktop preferences and folder writes use commands and binary buffers', async t => {
-  const calls = fakeDesktopServer(t, { get_pref: () => 2, existing_output_names: () => [], write_files: () => null });
-  assert.equal(await loadPref('k', 1), 2);
-  await writeFilesToFolder(grant, [{ name: 'a.png', data: new Blob(['png']) }], () => true);
-  assert.deepEqual(calls.map(c => c.method), ['get_pref', 'existing_output_names', 'write_files']);
-  assert.deepEqual(calls[0].args, ['k', 1]);
-  assert.deepEqual(calls[2].args, ['g', [{ name: 'a.png', data: new TextEncoder().encode('png') }]]);
-});
-test('declined folder overwrite writes nothing', async t => {
-  const calls = fakeDesktopServer(t, { existing_output_names: () => ['a.png'] });
-  await assert.rejects(writeFilesToFolder(grant, [{ name: 'a.png', data: 'x' }], () => false), { name: 'AbortError' });
-  assert.equal(calls.length, 1);
-});
-for (const accepted of [true, false]) test(`adjusted save asks before writing (${accepted})`, async t => {
-  const previous = globalThis.window;
-  t.after(() => { globalThis.window = previous; });
-  let confirms = 0;
-  globalThis.window = { showConfirm: async () => { confirms++; return accepted; } };
-  const calls = fakeDesktopServer(t, { pick_save_file: () => ({ ...grant, adjusted: true }), existing_output_names: () => ['image.png'], write_files: () => null });
-  assert.equal(await saveFileWithDialog('image.png', new Blob(['x'])), accepted ? true : null);
-  assert.equal(confirms, 1);
-  assert.deepEqual(calls.map(c => c.method), accepted ? ['pick_save_file', 'existing_output_names', 'write_files'] : ['pick_save_file', 'existing_output_names']);
-});
-
 import { before, beforeEach, after, afterEach } from 'node:test';
 import { AtlasAPI } from '../www/js/atlas-api.js';
 import { desktopCall, onDesktopEvent, _resetForTests } from '../www/js/desktop.js';
@@ -35,6 +6,9 @@ import { startEngine, stopEngine, HostError } from '../www/js/engine-client.js';
 import { fileFromUrl, pickSaveFolder, savePref } from '../www/js/platform.js';
 import { withLock, resetBusyForTests, lastBusyMessage, BUSY_WAIT_MESSAGE } from '../www/js/busy-overlay.js';
 import { openAddRegionModal, showMissingAtlasImagesDialog } from '../www/js/dialogs.js';
+import assert from 'node:assert/strict';
+import { fakeDesktopServer } from './helpers/fake-desktop-server.js';
+import { loadPref, writeFilesToFolder, saveFileWithDialog } from '../www/js/platform.js';
 
 // Small event-capable DOM stub, following the existing tests' hand-built DOMs.
 const nodes = new Map(), created = [];
@@ -73,6 +47,32 @@ before(async () => {
 beforeEach(t => { t.mock.timers.enable({apis: ['setTimeout']}); });
 afterEach(() => { stopEngine(); _resetForTests(); resetBusyForTests(); document.body.dataset = {}; nodes.get('modal-overlay')?.classList.add('hidden'); });
 after(() => originals.forEach(([k, d]) => d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k]));
+
+const grant = { grant: 'g', path: 'output/image.png' };
+test('desktop preferences and folder writes use commands and binary buffers', async t => {
+  const calls = fakeDesktopServer(t, { get_pref: () => 2, existing_output_names: () => [], write_files: () => null });
+  assert.equal(await loadPref('k', 1), 2);
+  await writeFilesToFolder(grant, [{ name: 'a.png', data: new Blob(['png']) }], () => true);
+  assert.deepEqual(calls.map(c => c.method), ['get_pref', 'existing_output_names', 'write_files']);
+  assert.deepEqual(calls[0].args, ['k', 1]);
+  assert.deepEqual(calls[2].args, ['g', [{ name: 'a.png', data: new TextEncoder().encode('png') }]]);
+});
+test('declined folder overwrite writes nothing', async t => {
+  const calls = fakeDesktopServer(t, { existing_output_names: () => ['a.png'] });
+  await assert.rejects(writeFilesToFolder(grant, [{ name: 'a.png', data: 'x' }], () => false), { name: 'AbortError' });
+  assert.equal(calls.length, 1);
+});
+for (const accepted of [true, false]) test(`adjusted save asks before writing (${accepted})`, async t => {
+  const previous = globalThis.window;
+  t.after(() => { globalThis.window = previous; });
+  let confirms = 0;
+  globalThis.window = { showConfirm: async () => { confirms++; return accepted; } };
+  const calls = fakeDesktopServer(t, { pick_save_file: () => ({ ...grant, adjusted: true }), existing_output_names: () => ['image.png'], write_files: () => null });
+  assert.equal(await saveFileWithDialog('image.png', new Blob(['x'])), accepted ? true : null);
+  assert.equal(confirms, 1);
+  assert.deepEqual(calls.map(c => c.method), accepted ? ['pick_save_file', 'existing_output_names', 'write_files'] : ['pick_save_file', 'existing_output_names']);
+});
+
 
 const bundle = { atlas: {name: 'hero.atlas', url: 'asset/atlas'}, pages: {'page.png': {name: 'page.png', url: 'asset/page'}}, skel: {name: 'hero.skel', url: 'asset/skel'}, dir: 'source' };
 const assets = {'asset/atlas': 'page.png\nsize: 1,1\n', 'asset/page': 'png', 'asset/skel': 'skel'};
@@ -242,4 +242,24 @@ test('skeleton drop fetches the file and applies skeleton',async t=>{
   await handleDesktopDrop({type:'file',file:bundle.skel},actions);
   assert.equal(selected.name,'hero.skel');assert.equal(await selected.text(),'skel');assert.equal(seen.length,0);
   await document.getElementById('btn-modal-confirm').emit('click');
+});
+
+test('404 atlas rejects at the API and openAtlasBundle toasts without throwing', async t => {
+  fakeDesktopServer(t, {}, {});
+  await assert.rejects(AtlasAPI.load_atlas_bundle(bundle), /Failed to read file/);
+  const { openAtlasBundle } = await import('../www/script.js');
+  t.mock.method(console, 'error', () => {});
+  assert.equal(await openAtlasBundle(bundle), false);
+  assert.equal(document.getElementById('modal-message').innerText, 'Failed to load atlas file.');
+});
+test('404 skeleton still loads atlas without applying skeleton', async t => {
+  let captured;
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  fakeDesktopServer(t, {...engineHandlers, load: (...args) => { captured = args; return {mesh: {}}; }}, {'asset/atlas': assets['asset/atlas'], 'asset/page': 'png'});
+  await boot(t);
+  assert.equal(await AtlasAPI.load_atlas_bundle(bundle), true);
+  assert.equal(captured[3], null);
+  assert.equal(captured[4], null);
+  assert.equal(warnings.length, 1);
 });

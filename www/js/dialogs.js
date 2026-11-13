@@ -153,18 +153,15 @@ function missingImageRowAt(clientX, clientY) {
 
 /**
  * Set while the missing-images dialog is open — lets `applyMissingImageDrop`
- * (called from Python for native OS drops, see bridge.py's on_drop) resolve a
+ * (called by handleDesktopDrop for native drop events) resolve a
  * dropped page image without the dialog needing to expose its whole closure.
  * Mirrors the old Python engine's `ui/js/missing-images.js` `_missingDialogState`.
  */
 let _missingDialogState = null;
 
 /**
- * Called from Python (`bridge.py`'s on_drop) when a PNG is natively dropped
- * while this dialog is open — native OS drops never carry readable bytes
- * client-side (only `pywebviewFullPath` on the Python side), so the row's own
- * browser-side `drop` handler below intentionally no-ops under pywebview and
- * defers here instead (parity fix, 2026-08-23; old app: `applyMissingImageDrop`).
+ * Native drops arrive through SSE with granted asset descriptors. The
+ * browser-side drop handler defers to handleDesktopDrop while on desktop.
  */
 function isMissingDialogOpen() {
   return typeof document !== 'undefined'
@@ -346,7 +343,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
   };
 }
 
-export function showMissingAtlasImagesDialog(missingPages, atlasDir = '') {
+export function showMissingAtlasImagesDialog(missingPages) {
   return new Promise((resolve) => {
     const pages = Array.from(new Set((missingPages || []).filter(Boolean)));
     if (pages.length === 0) { resolve({}); return; }

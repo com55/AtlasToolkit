@@ -45,13 +45,23 @@ window.addEventListener('DOMContentLoaded', async () => {
       finally { closePromptOpen = false; }
     });
     onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
-    info = await desktopCall('startup');
-    if (info.updateFailure) window.showUpdateInstallFailed(info.updateFailure);
     const installButton = document.getElementById('btn-install-update-file');
-    if (info.devBuild) installButton.classList.remove('hidden');
+    try {
+      info = await desktopCall('startup');
+      if (info.updateFailure) window.showUpdateInstallFailed(info.updateFailure);
+      if (info?.devBuild) installButton.classList.remove('hidden');
+    } catch (e) {
+      info = null;
+      console.error(e);
+      showToast(`Startup check failed: ${e.message}`, 'error');
+    }
     installButton.addEventListener('click', async () => {
-      const r = await desktopCall('install_update_from_file');
-      if (!r.ok && !r.cancelled) await showAlert(r.error, 'Install update');
+      try {
+        const r = await desktopCall('install_update_from_file');
+        if (!r.ok && !r.cancelled) await showAlert(r.error || 'Install failed.', 'Install update');
+      } catch (e) {
+        await showAlert(e.message, 'Install update');
+      }
     });
   }
   const statusText = document.getElementById('status-text');
@@ -244,14 +254,20 @@ async function openFile() {
   }
 }
 
-async function openAtlasBundle(bundle, {viaDrop = false} = {}) {
+export async function openAtlasBundle(bundle, {viaDrop = false} = {}) {
   if (isBusy()) { noteBusyConflict(); return false; }
-  const ok = await AtlasAPI.load_atlas_bundle(bundle);
-  if (ok === 'cancelled') { showToast('Cancelled', 'info'); return false; }
-  if (!ok) { showToast('Failed to load atlas file.', 'error'); return false; }
-  await _resetUiAfterFreshLoad();
-  if (viaDrop) showToast('Atlas loaded via drag & drop.', 'success');
-  return true;
+  try {
+    const ok = await AtlasAPI.load_atlas_bundle(bundle);
+    if (ok === 'cancelled') { showToast('Cancelled', 'info'); return false; }
+    if (!ok) { showToast('Failed to load atlas file.', 'error'); return false; }
+    await _resetUiAfterFreshLoad();
+    if (viaDrop) showToast('Atlas loaded via drag & drop.', 'success');
+    return true;
+  } catch (e) {
+    console.error(e);
+    showToast('Failed to load atlas file.', 'error');
+    return false;
+  }
 }
 
 /** Apply a mod image dropped natively onto the currently-selected regions
@@ -270,9 +286,7 @@ async function applyNativeModImageDrop(file) {
     showToast('Select at least one region first.', 'error');
     return false;
   }
-  // file:// URL goes straight into Image() — no fetch→File copy, no
-  // toDataURL of the dropped PNG (perf fix, 2026-08-23). Preview after
-  // merge is a blob: URL from canvas.toBlob(), not a data: URI.
+  // Fetch the granted desktop asset into a File for image processing.
   const result = await AtlasAPI.process_mod_image(await fileFromUrl(file, 'image/png'), keys);
   if (result) {
     await onModPreviewReceived(result);

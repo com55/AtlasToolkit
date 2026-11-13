@@ -178,13 +178,8 @@ dropOverlay.addEventListener('drop', async (e) => {
   if (isAddRegionDialogOpen()) return;
   hideDropOverlay();
 
-  // pywebview: a native OS file drop's browser File objects carry no
-  // readable bytes client-side (only a Python-side-only `pywebviewFullPath`
-  // — see pywebview's DOM guide) — reading them here always fails and would
-  // surface a bogus "no valid atlas file found" error. bridge.py's on_drop
-  // (bound via webview.dom's capture-phase DOMEventHandler, see setup_drop)
-  // owns native drop handling end-to-end, reading real bytes off disk by
-  // path; nothing to do here for that case.
+  // Desktop native drops arrive through desktop_commands.on_drop and SSE
+  // with granted asset descriptors; handleDesktopDrop owns that path.
   if (isPywebviewDesktop()) return;
 
   const files = Array.from(e.dataTransfer.files);

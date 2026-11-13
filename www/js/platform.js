@@ -215,10 +215,6 @@ export async function pickAtlasFile() {
  * Pick a folder to save into. pywebview: native folder dialog (returns a
  * plain path string). Browser: File System Access API (returns a
  * FileSystemDirectoryHandle). Returns null if unsupported or cancelled.
- * @param {string} [defaultDir] Starting directory for the native dialog (old
- *   Python engine always opened extract/save dialogs at the loaded atlas's
- *   folder; the initial JS port never passed one — found via parity audit,
- *   2026-08-23). No effect on the browser File System Access API path.
  */
 export async function pickSaveFolder() {
   if (isPywebviewDesktop()) return await desktopCall('pick_save_folder') || null;
@@ -363,8 +359,6 @@ async function _applyPngExtensionToHandle(fileHandle, suggestedName) {
  * PNG saves whose typed name has no extension are stored as `.png`.
  * @param {object} [opts]
  * @param {*} [opts.startIn] Browser File System Access API resume point.
- * @param {string} [opts.defaultDir] pywebview native dialog starting directory
- *   (see pickSaveFolder's doc comment for why this exists).
  */
 export async function saveFileWithDialog(filename, blob, { startIn = null } = {}) {
   if (isPywebviewDesktop()) {

@@ -284,7 +284,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
       let selectedByPage = null;
 
       if (typeof window !== 'undefined' && typeof window.showMissingAtlasImages === 'function') {
-        selectedByPage = await window.showMissingAtlasImages(missingPages, sourceDir);
+        selectedByPage = await window.showMissingAtlasImages(missingPages);
       } else {
         const proceed = await _confirmDialog(
           `Missing image files for atlas pages:\n${missingPages.map(pageName => `- ${pageName}`).join('\n')}`,
@@ -499,11 +499,9 @@ export const AtlasAPI = {
   },
 
   /**
-   * Open a file picker that accepts .atlas and image files. Under pywebview,
-   * use the native single-file Open dialog + list_sibling_page_images() to
-   * auto-resolve sibling PNGs from disk (matching the old Python-engine
-   * desktop UX) instead of requiring the user to multi-select the atlas +
-   * every PNG together in a browser `<input type=file>` picker.
+   * Open an atlas and its images. Desktop pick_atlas returns a bundle of
+   * granted asset descriptors, including sibling PNGs resolved on the server.
+   * Browser users select the atlas and images together.
    */
   async choose_file() {
     if (isPywebviewDesktop()) {
@@ -533,7 +531,11 @@ export const AtlasAPI = {
       try { pages[name] = await fileFromUrl(file, 'image/png'); }
       catch (_) { /* Missing page: let the attachment dialog ask for it. */ }
     }));
-    const skelFile = bundle.skel ? await fileFromUrl(bundle.skel, 'application/octet-stream') : null;
+    let skelFile = null;
+    if (bundle.skel) {
+      try { skelFile = await fileFromUrl(bundle.skel, 'application/octet-stream'); }
+      catch (e) { console.warn('Failed to load skeleton file; loading atlas without it.', e); }
+    }
     return _loadAtlasFiles(atlasFile, pages, bundle.dir, skelFile ? [skelFile] : []);
   },
 
