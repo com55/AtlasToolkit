@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Desktop assembly contracts, independent of the optional GUI package."""
 import json
 from types import SimpleNamespace

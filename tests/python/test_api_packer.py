@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """SpineAtlas.build/save(packer=..., packer_options=...) (spec 2026-10-22 §2, §7.2)."""
 import importlib.util
 from pathlib import Path

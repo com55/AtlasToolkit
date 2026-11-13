@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Create a reusable progress ring, sized in pixels. */
 export function createProgressRing(size) {
   const element = document.createElement('span');

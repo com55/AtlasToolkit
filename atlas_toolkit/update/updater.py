@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Update and download helpers for AtlasToolkit releases on GitHub."""
 from __future__ import annotations
 

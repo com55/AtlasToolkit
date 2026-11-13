@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Assemble the HTTP desktop runtime without importing the GUI package."""
 from pathlib import Path
 from typing import Any

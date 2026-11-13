@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Multi-page pma coverage (spec 2026-10-26 §5.8) and the mixed warning (§3.8)."""
 import numpy as np
 import pytest

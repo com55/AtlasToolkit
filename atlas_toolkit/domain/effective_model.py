@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Pure fold of pristine region metadata + an ordered structural/pixel batch
 list into the "effective" model every consumer (packer, sidebar list,
 modified-highlight) reads instead of the pristine atlas alone -- port of

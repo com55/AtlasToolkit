@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Serve www/ with the app version injected into index.html.
 
 Reads version from pyproject.toml (same source as the desktop title).

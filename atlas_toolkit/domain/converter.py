@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """LibGDX-atlas -> Spine-atlas text conversion -- port of
 www/js/atlas-converter.js. That JS file is itself a port of a real prior
 Python original (atlas_toolkit/atlas/converter.py on

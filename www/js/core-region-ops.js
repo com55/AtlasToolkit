@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * core-region-ops.js — single source of truth for atlas region rotation /
  * offset / rounding math.

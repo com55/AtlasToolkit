@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Window / tab title. Desktop native title uses the same formula via
  * bridge.set_window_title (version from pyproject.toml / VERSION).

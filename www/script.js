@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { desktopCall, onDesktopEvent } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
 import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';

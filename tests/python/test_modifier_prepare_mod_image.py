@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Tests for AtlasModifier.prepare_mod_image: geometric parity (padded size,
 paste position, flags) against the real www/js/atlas-modifier.js (plain
 Node, via conftest.py's run_modifier_oracle fixture), plus pinned pixel

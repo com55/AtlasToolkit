@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 const CACHE_NAME = __CACHE_NAME__;
 const APP_BASE_URL = new URL('./', self.location.href);
 const APP_SHELL_URL = new URL('index.html', APP_BASE_URL).href;

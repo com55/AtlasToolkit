@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { isDesktop, desktopCall, createDesktopWorker, onDesktopEvent, _resetForTests, _setClock } from '../www/js/desktop.js';

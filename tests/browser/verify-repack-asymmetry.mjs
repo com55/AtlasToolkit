@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * End-to-end proof of the offsets-reset-on-merge vs preserved-on-repack
  * asymmetry (Task 4b, Deliverable 2), driving the REAL AtlasSession +

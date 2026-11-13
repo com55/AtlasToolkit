@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """SpineAtlas: open/load, data accessors, extraction and file export."""
 import ntpath
 import posixpath

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Token-scoped loopback HTTP transport for the desktop host."""
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

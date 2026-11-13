@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """pack_pending's Python-only switches reach the packer (spec 2026-10-22 §4)."""
 import importlib.util
 from pathlib import Path

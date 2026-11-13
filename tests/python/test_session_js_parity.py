@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Python parity against the committed real-Chromium Stage 7 oracle."""
 import io
 import json

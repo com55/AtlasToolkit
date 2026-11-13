@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Deferred repack: same output as immediate mode for the same calls; pack_pending never publishes."""
 import io
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Parity tests for AtlasModifier's two repack entry points against the
 real www/js/atlas-modifier.js (plain Node, via run_packing_oracle), plus
 pinned no-Node cases covering multi-page scoping, the rescale-then-repack

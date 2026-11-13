@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Generate the two REQUIRED checked-in synthetic fixtures for Task 5
 (Deliverable 1 — see task-5-brief.md).
 

@@ -97,6 +97,9 @@ jobs:
           include-data-dir: dist/desktop=web
           include-data-files: |
             VERSION=VERSION
+            LICENSE=LICENSE
+            NOTICE=NOTICE
+            THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md
           include-package-data: webview
           include-package: atlas_toolkit
           nofollow-import-to: |

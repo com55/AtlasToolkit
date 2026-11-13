@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """domain/bleed.py: Spine's packer Bleed (libGDX ColorBleedEffect semantics)."""
 import numpy as np
 import pytest

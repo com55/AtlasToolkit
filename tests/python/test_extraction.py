@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Processor geometry, ownership and state against literal pixel expectations."""
 import copy
 import io

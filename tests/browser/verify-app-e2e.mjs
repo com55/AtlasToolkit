@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * App-level (AtlasAPI) end-to-end smoke test: drives the exact code path the
  * UI calls (load_atlas_from_file -> enter_modify_mode -> process_mod_image)

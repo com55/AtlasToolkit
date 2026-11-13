@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Extended Python reference-oracle ground truth for Task 5 (Phase F partial).
 
 PINNED ORACLE COMMIT: 9655e3c — a historical snapshot of the retired Python

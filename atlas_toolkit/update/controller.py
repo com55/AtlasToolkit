@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Self-update download and silent install orchestration."""
 
 from __future__ import annotations

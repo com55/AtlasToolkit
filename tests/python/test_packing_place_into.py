@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """nest_place_into: nest's first-fit on a canvas seeded with live pixels (spec 2026-10-31 §5.2)."""
 import numpy as np
 import pytest

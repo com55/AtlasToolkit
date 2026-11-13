@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { before, beforeEach, after, afterEach } from 'node:test';
 import { AtlasAPI } from '../www/js/atlas-api.js';

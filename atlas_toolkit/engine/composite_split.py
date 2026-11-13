@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Cut a replace_composite image back into one piece per region: the
 inverse of extract_composite(force_resize=True). Spec
 2026-10-13-composite-split §3.2-3.4.

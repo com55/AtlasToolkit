@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Canvas constructor that works on the main thread and in a preview Worker.
  * The main thread keeps HTMLCanvasElement. A Worker has no document, so it

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * repack-nest.js — the "Nest Regions" packer: a growing, largest-first
  * bin-packer over one shared occupied-pixel-grid mask, adapted from Jake

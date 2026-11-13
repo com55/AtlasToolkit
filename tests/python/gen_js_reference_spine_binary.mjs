@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper for spine_binary -- runs the real vendored
  * www/js/vendor/spine-skeleton-binary/index.js (plain Node, no DOM) against

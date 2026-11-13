@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Browser verification for region-mesh-mask.js's rasterizeMeshMask().
  *

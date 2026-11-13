@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """SpineAtlas.build/save: one pack, fresh objects, app-identical output, mesh across builds."""
 import io
 

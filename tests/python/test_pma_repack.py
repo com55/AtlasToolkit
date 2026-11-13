@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Modifier-level pma plumbing (spec 2026-10-26 §3.3, §5.2a, §5.3, §5.5)."""
 import numpy as np
 import pytest

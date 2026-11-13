@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Registered desktop inputs and dialog-scoped write grants."""
 
 from concurrent.futures import ThreadPoolExecutor

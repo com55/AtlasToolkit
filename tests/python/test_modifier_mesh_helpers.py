@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Parity tests for engine/modifier.py's pure mesh/identity helpers against
 the real www/js/atlas-modifier.js (plain Node, via conftest.py's
 run_modifier_oracle fixture). Inputs mined from

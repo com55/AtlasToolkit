@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Persistent user preferences for AtlasToolkit."""
 
 from __future__ import annotations

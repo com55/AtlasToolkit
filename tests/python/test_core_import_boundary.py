@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Core modules must not depend on desktop UI or network packages."""
 import ast
 from importlib.util import resolve_name

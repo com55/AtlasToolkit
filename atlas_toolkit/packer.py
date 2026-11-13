@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Pack modes for SpineAtlas.build / save.
 
 A pack mode is what the caller chooses; the algorithm behind it is internal

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 # tests/python/test_packing_footprint_mesh.py
 import json
 from pathlib import Path

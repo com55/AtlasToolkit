@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Ownership facade and failure cleanup for the Stage 7 session slice."""
 from __future__ import annotations
 

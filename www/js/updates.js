@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { desktopCall } from './desktop.js';
 import { isPywebviewDesktop } from './platform.js';
 /** Native updater UI, invoked by desktop startup and update events. */

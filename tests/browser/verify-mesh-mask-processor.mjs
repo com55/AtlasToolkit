@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Browser verification for the mesh-mask wiring added to
  * AtlasProcessor.extractRegion() in atlas-extracter.js.

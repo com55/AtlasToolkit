@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 from atlas_toolkit.domain.region_ops import (
     round_half_even,
     round_up_to_multiple,

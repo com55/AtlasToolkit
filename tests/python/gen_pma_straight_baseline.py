@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Straight-page outputs pinned at 54b9ace for the pma mesh-aware work
 (spec 2026-10-26 §5.8): the straight page of a mixed multi-page atlas, a
 mixed force_resize composite, and the straight piece of a mixed

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Added regions with mesh data: cut to the hull, hull footprint, kept in allowed (spec 2026-10-31 §4)."""
 import numpy as np
 import pytest

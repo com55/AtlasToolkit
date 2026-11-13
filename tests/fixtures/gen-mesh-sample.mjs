@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Generates tests/fixtures/mesh-sample.json: three synthetic Spine-style
 // meshes (uvs + triangles) used by tests/browser/verify-mesh-mask-acceptance.mjs.
 // Each mesh is a concave, star-shaped outline fanned from an interior point,

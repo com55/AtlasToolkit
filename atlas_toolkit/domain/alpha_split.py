@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Exact sharing of a semi-transparent pixel between stacked layers.
 
 A composite pixel (c, A) that several mesh hulls cover is stored in every

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """PillowRasterBackend's mesh-mask cache: geometry-keyed, budgeted, and a
 hit is indistinguishable from a miss."""
 import numpy as np

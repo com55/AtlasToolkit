@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Real desktop transport, native-dialog harness, and page integration. */
 import fs from 'node:fs';
 import os from 'node:os';

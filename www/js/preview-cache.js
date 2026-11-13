@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * LRU cache of preview blob: URLs. JobRunner must not import this module.
  */

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { loadPyodide } from '../pyodide/pyodide.mjs';
 import { makeTransferCaller } from './engine-transfer.js';
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """domain/alpha_split.py: exact semi-transparent alpha sharing across stacked layers."""
 import numpy as np
 from PIL import Image

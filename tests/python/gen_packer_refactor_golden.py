@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Golden outputs for the build(packer=...) refactor.
 
 Packs at the session layer -- the same setters + pack_pending the

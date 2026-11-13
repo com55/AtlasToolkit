@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Private raster ownership facade used by :mod:`engine.session`."""
 from __future__ import annotations
 

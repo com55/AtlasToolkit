@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Public reads used by the Python app host; synthetic atlas and mesh data."""
 from dataclasses import FrozenInstanceError
 

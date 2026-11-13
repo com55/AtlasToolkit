@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { desktopCall } from './desktop.js';
 import { HostError } from './engine-client.js';
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, matchDroppedPngToPage } from './platform.js';

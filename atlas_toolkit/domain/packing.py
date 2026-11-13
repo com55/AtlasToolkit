@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """domain/packing.py -- pure bin-packing decision math (architecture spec
 §1/§2): port of www/js/atlas-modifier.js's _shelfPack and all of
 www/js/repack-nest.js's packing geometry, plus footprintForCanonical's

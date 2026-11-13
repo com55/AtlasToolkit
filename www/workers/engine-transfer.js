@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Moves call buffers between JavaScript and the Python heap by address.
 //
 // Pyodide's own buffer helpers (PyProxy.getBuffer, JsProxy.to_bytes) pass

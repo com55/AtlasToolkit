@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Socket-free fixture generation contract for the desktop browser harness."""
 from pathlib import Path
 import subprocess

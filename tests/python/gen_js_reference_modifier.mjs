@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper for atlas_toolkit/engine/modifier.py -- runs
  * the real www/js/atlas-modifier.js in plain Node (no browser) against a

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """resolve_packer: the one place pack settings are validated (spec 2026-10-22 §2-3)."""
 import ast
 from pathlib import Path

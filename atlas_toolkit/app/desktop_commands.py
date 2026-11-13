@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Native desktop commands exposed through the local RPC server."""
 
 from pathlib import Path

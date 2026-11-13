@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Engine call buffers must cross between JavaScript and Python after the
 // Pyodide heap has grown past 2 GiB, where Pyodide's own getBuffer/to_bytes
 // fail on signed 32-bit pointers (www/workers/engine-transfer.js). Runs the

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """build(split_composite=True): replace_composite is the inverse of
 extract_composite(force_resize=True) inside the mesh hulls (spec 2026-10-13).
 All meshes are axis-aligned rectangles whose edges land on whole pixels, so

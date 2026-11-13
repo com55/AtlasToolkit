@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Build the web site (Pyodide) or the desktop site (no bundler required)."""
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ PYODIDE_VERSION = "314.0.7"
 PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
 PARSER_URL = "https://github.com/com55/skel-mesh-parser.git"
 PARSER_TAG = "py-v0.3.0"
+NOTICE_FILES = ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
 EXCLUDED = {
     f"js/{name}.js" for name in (
         "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
@@ -152,6 +155,10 @@ def _copy_shell(out: Path, skip: frozenset[str]) -> None:
         target = out / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    # Licenses travel with every built site (Apache-2.0 §4, MPL-2.0 for Pyodide).
+    for name in NOTICE_FILES:
+        if (ROOT / name).is_file():
+            shutil.copy2(ROOT / name, out / name)
 
 
 def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Busy overlay + re-entrant lock. Paint (withBusy) is separate from the
  * mutex (withLock): confirm stays at z-index 4500 during a silent lock.

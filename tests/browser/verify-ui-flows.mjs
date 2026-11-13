@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Scripted UI-flow verification driving the REAL index.html DOM (not the
  * AtlasAPI harness that verify-app-e2e.mjs uses).

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """View Mode hull overlay: geometry helpers and layout, against the real
 www/js exports (plain-Node oracle) and against actual extraction sizes."""
 import io

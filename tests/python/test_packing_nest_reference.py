@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """The numpy nest packer must place exactly where a plain per-pixel one does.
 
 domain/packing.py's rotate/dilate/first-fit/stamp are vectorized (integral

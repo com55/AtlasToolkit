@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """shelf_pack padding: pixels between items, none at the edges (spec 2026-10-22 §4.2)."""
 import random
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """SpineAtlas surfaces the packers' canvas limit as CanvasTooLarge and
 leaves the atlas exactly as it was."""
 import pytest

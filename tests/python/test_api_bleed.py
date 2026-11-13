@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """build/pack(packer_options=PackerOptions(bleed=True)): Spine's packer Bleed
 on every page the pack writes that is not pma."""
 import numpy as np

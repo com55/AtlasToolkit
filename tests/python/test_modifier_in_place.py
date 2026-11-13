@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AtlasModifier.place_in_place: keep a page's layout when its edits fit (spec 2026-11-05)."""
 import numpy as np
 import pytest

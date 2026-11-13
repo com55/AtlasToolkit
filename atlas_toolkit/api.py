@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Public library API: SpineAtlas, a PIL-in/PIL-out atlas object.
 
 Edits are recorded on a deferred AtlasSession and packed once by build();

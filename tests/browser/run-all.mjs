@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Runs every browser test file in sequence via node's own child_process,
 // not shell chaining -- sidesteps two problems shell separators have:
 //

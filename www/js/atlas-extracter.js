@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * atlas-extracter.js
  * Port of atlas_extracter.py using Canvas API.

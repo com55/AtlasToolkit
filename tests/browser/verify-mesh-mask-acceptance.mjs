@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Task 7 acceptance checks (design spec's Testing section, items 3-4) using
  * the committed tests/fixtures/mesh-sample.json -- synthetic, concave

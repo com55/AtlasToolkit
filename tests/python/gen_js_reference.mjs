@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper -- runs the real www/js/atlas-document.js
  * (via plain Node, no browser needed: this module has no DOM dependency)

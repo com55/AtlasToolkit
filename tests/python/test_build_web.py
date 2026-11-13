@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Offline checks for the web build's file selection and import traversal."""
 from pathlib import Path
 import sys
@@ -319,3 +321,18 @@ def test_desktop_rejects_unsafe_output(tmp_path, monkeypatch, output):
         build_web.main()
     assert error.value.code == 2
     assert (out / 'keep.txt').read_text() == 'keep'
+
+
+def test_built_sites_carry_the_license_files(tmp_path, monkeypatch):
+    """Both targets copy the shell through _copy_shell, so one check covers them."""
+    root = tmp_path / "root"
+    (root / "www").mkdir(parents=True)
+    (root / "www" / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    for name in build_web.NOTICE_FILES:
+        (root / name).write_text(f"{name} text", encoding="utf-8")
+    monkeypatch.setattr(build_web, "ROOT", root)
+    out = tmp_path / "out"
+    out.mkdir()
+    build_web._copy_shell(out, frozenset())
+    for name in build_web.NOTICE_FILES:
+        assert (out / name).read_text(encoding="utf-8") == f"{name} text"

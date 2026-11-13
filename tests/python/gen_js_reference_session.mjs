@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Real Chromium oracle for Stage 7 extraction and masked-repack parity.
 // Run with: node tests/python/gen_js_reference_session.mjs
 import http from 'node:http';

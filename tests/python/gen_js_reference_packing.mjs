@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper for atlas_toolkit/domain/packing.py and the
  * repack half of atlas_toolkit/engine/modifier.py -- runs the real

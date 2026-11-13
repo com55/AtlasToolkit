@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 from atlas_toolkit.domain.converter import (
     is_old_format,
     convert_atlas_to_new_format,

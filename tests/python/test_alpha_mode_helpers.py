@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AlphaMode parsing and the premultiply/unpremultiply helpers (spec 2026-10-28 §3.1-3.2)."""
 import numpy as np
 import pytest

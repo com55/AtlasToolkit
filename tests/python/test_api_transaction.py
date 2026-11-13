@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Edit rollback, raster lifetime and pack access contracts."""
 import pytest
 from PIL import Image

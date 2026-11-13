@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AtlasSession with in-memory (PIL) pages: same results as the PNG paths, no PNG work."""
 import io
 

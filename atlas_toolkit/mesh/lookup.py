@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Narrows a parsed skeleton's full attachment map down to just the
 Mesh-type entries this feature can mask with -- port of
 www/js/region-mesh-lookup.js's buildMeshLookup. Region/BoundingBox/

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """alpha_mode on the SpineAtlas edit and extract methods (spec 2026-10-28-alpha-mode)."""
 import pickle
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Regenerate PIL ground-truth fixtures for the rotation verification.
 
 Execs the historical Python region_ops.py at pinned SHA 9655e3c (crop_and_rotate /

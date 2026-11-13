@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Load and export hardening (backlog sweep 2026-10-31): a page file listed
 twice, oversized crops, the skeleton parsed once per lineage, and
 the package's lazy exports."""

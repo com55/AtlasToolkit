@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Deferred remove of an added key undoes the add (spec 2026-10-31 §3.1, R8)."""
 from PIL import Image
 

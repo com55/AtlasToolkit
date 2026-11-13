@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Stamp the PWA index.html with the version from pyproject.toml.
 
 Single source of truth stays pyproject.toml (exe builds already copy it

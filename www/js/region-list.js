@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
 import { updatePreview, updateModifyPreview, setViewPreviewPointerHeld } from './preview.js';

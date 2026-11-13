@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * atlas-session.js
  * In-memory atlas modify-mode session: pristine-rebuild + ordered mod-batch

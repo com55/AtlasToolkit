@@ -197,7 +197,9 @@ built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is u
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Releases up to and including 0.4.x were published under the MIT License and stay available under those terms.
 
 ## Disclaimer
 

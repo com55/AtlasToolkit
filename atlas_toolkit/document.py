@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AtlasDocument -- single seam for Spine atlas parse -> model -> canonical
 serialize. Line-for-line port of www/js/atlas-document.js on the `dev`
 branch (the migration oracle for this port). That JS file's own doc

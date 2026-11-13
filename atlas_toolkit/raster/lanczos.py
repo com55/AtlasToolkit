@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Separable Lanczos-3 resize for straight RGBA (lanczos_resize_rgba, port of
 www/js/lanczos-resize.js's CPU path lanczosResizeRGBA) and for premultiplied
 RGBA (lanczos_resize_premultiplied, spec 2026-10-26 §3.1). Used by Forced

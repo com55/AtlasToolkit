@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """The domain/ -> engine/ import ban (architecture spec §1, promoted to a
 package-level rule in rev 6) enforced mechanically rather than by reviewer
 attention. domain/packing.py is the module the rule exists for -- it needs

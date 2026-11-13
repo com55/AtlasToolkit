@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // Builds minimal, from-scratch (not real Spine export) synthetic .skel-format
 // binary fixtures for the 3.8 and 4.2 wire formats, using the REAL vendored
 // JS parser (www/js/vendor/spine-skeleton-binary) to self-verify each one

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Thread-safe desktop events with a bounded initial backlog."""
 from collections import deque
 import json

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // tests/effective-region-model.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';

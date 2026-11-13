@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """_find_first_fit against a brute-force reference: the first (row-major
 origin, then rotation) whose exact overlap test passes. The banded search
 must give exactly that answer at every band height."""

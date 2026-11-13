@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Deferred multi-page builds: each touched page is packed on its own;
 untouched pages stay pristine (spec 2026-10-21 §3.1, §3.7)."""
 import numpy as np

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Pristine extraction and processor options; page images are borrowed."""
 from __future__ import annotations
 

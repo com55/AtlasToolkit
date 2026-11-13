@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 export function base64ToFile(base64, filename, mime) {
   const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
   return new File([bytes], filename, { type: mime });

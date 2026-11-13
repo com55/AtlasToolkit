@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Parity tests for engine/modifier.py's page-size reconciliation and
 AtlasModifier's page-scoped construction against the real
 www/js/atlas-modifier.js (plain Node, via conftest.py's

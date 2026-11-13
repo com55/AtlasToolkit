@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 # tests/python/test_raster_composite_destination_in.py
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 

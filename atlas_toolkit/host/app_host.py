@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """State and View Mode operations driven by the application client."""
 from io import BytesIO
 

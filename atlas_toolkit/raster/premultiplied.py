@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Premultiplied-alpha arithmetic shared by the backend paste, the pma
 preview stack and the pma composite split (spec 2026-10-26 §3.9). The one
 implementation of `src + under * (1 - src_a/255)`. Float64, unrounded:

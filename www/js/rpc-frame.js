@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Encode a length-prefixed JSON header followed by raw buffers. */
 export function encodeFrame(header, buffers) {
   if (Object.hasOwn(header, 'sizes')) throw new Error('sizes is reserved');

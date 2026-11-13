@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """pma pages with mesh features through the public API (spec 2026-10-26
 §5.1-§5.4, §4 force-resize replacement, Review Focus 1-3, 5)."""
 import numpy as np

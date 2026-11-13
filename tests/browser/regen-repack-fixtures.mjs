@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Regenerates the repack-related fixtures in ground_truth_ops.json from the
  * JS engine's OWN output, instead of the pinned Python oracle. Repack packing

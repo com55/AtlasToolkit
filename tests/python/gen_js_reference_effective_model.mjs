@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper for domain/effective_model.py -- runs the
  * real www/js/effective-region-model.js (plain Node, no DOM) against a JSON

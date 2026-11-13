@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Shared fixtures for the pma tests (spec 2026-10-26-pma-mesh-aware).
 Not a test module: import it as tests.python.pma_cases."""
 from __future__ import annotations

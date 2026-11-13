@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Straight outputs stay byte-identical to 54b9ace (spec 2026-10-26 §1 goal
 4, §5.8). The fixture was generated at 54b9ace; never regenerate it from
 this branch."""

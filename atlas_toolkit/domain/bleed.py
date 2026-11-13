@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Spine's texture packer "Bleed": give transparent pixels next to an image
 the image's colour, so linear texture filtering at a region's edge does not
 blend in the black of (0, 0, 0, 0). For straight-alpha pages only.

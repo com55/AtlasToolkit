@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """SpineAtlas.build() patches pages whose only edits are adds and renames (spec 2026-10-31)."""
 import time
 

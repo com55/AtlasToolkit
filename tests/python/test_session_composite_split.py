@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Session wiring for composite split (spec 2026-10-13 §3.1, §3.5)."""
 from PIL import Image
 

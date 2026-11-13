@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Help popover for option toggles (hover delay / long-press). */
 
 import { isTouchDevice, isPywebviewDesktop } from './platform.js';

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { desktopCall } from './desktop.js';
 import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';

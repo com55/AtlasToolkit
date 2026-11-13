@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Encode a host RGBA raster as a browser-owned preview URL. */
 export async function rasterToUrl({width, height, rgba}) {
   const canvas = document.createElement('canvas');

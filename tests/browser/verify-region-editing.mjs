@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Browser-driven tests for the Advanced Region Editing feature. This file is
  * created by Task 4 (packer integration) and extended by later tasks.

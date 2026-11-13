@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 // tests/python/gen_js_reference_mesh_mask.mjs
 //
 // Generates the committed JS-oracle fixture for Stage 6's

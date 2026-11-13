@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AtlasToolkit — Spine atlas extract, modify, and repack."""
 
 from __future__ import annotations

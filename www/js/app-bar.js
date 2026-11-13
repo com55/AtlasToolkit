@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * app-bar.js
  * Wires the full-width app-bar: the persistent View/Edit mode toggle and the

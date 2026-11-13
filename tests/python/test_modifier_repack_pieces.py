@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """repack(piece_sprites=...): pieces replace a region's
 sprite and offsets without being re-extracted (spec 2026-10-13 §3.5)."""
 import io

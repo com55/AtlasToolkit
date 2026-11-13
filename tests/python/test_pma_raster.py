@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Premultiplied raster primitives (spec 2026-10-26 §3.1, §3.9, §4, §5.9)."""
 import numpy as np
 import pytest

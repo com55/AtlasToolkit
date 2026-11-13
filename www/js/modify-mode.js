@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { HostError } from './engine-client.js';
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions, getSelectedKeys, getSelectedLabels } from './state.js';

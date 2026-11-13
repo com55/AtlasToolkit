@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Parity tests for domain/packing.py's shelf_pack against the real
 www/js/atlas-modifier.js _shelfPack (plain Node, via conftest.py's
 run_packing_oracle fixture), plus pinned no-Node cases."""

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Cross-language parity helper for the View Mode preview helpers in
  * atlas_toolkit/engine/extraction.py and domain/region_ops.py -- runs the

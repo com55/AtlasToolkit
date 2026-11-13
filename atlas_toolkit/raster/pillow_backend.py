@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """PillowRasterBackend -- the only concrete RasterBackend Phase 3 ships.
 
 Implements atlas_toolkit.raster.base.RasterBackend's full surface,

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Tests for engine/modifier.py's repack helpers: JS key ordering, dedup
 hashing, raw-sprite extraction, and the pack-rotation seam. Parity against
 the real JS runs through conftest.py's run_packing_oracle fixture."""

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * View Mode preview jobs. Each cache key has at most one in-flight job.
  * A different key starts its own Worker immediately and does not wait.

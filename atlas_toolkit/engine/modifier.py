@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """engine/modifier.py -- port of www/js/atlas-modifier.js's
 production-live surface (architecture spec §1/§2, Phase 3 "modifier"
 stage).

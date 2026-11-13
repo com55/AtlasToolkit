@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """The packer refactor's golden outputs (spec 2026-10-22 §7.1)."""
 import importlib.util
 import json

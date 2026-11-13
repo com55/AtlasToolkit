@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Alpha space of a caller's image for SpineAtlas edits and extracts
 (spec 2026-10-28-alpha-mode). None means the page's own space."""
 

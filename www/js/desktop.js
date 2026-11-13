@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Local app-process HTTP transport. */
 import { HostError, walkPayload } from './engine-client.js';
 import { encodeFrame, decodeFrame } from './rpc-frame.js';

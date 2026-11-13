@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * atlas-modifier.js
  * Port of atlas_modifier.py using Canvas API.

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """RasterBackend -- the pixel-execution seam for the Python-canonical port.
 
 Port of the abstract contract defined in the architecture spec

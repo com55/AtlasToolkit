@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { encodeFrame, decodeFrame } from '../../www/js/rpc-frame.js';
 import { walkPayload } from '../../www/js/engine-client.js';
 

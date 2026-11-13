@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * options-row.js
  * When #options-row's groups do not fit on one 35px line, wrap whole <li>

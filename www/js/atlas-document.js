@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * AtlasDocument — single seam for Spine atlas parse -> model -> canonical
  * serialize.

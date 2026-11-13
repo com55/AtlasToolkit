@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """engine/composite_split.py: scaled rects and mesh-owned pieces (spec 2026-10-13 §3.2-3.4)."""
 import numpy as np
 from PIL import Image

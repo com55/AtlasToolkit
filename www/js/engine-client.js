@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 import { isDesktop, createDesktopWorker } from './desktop.js';
 
 /** Serialized calls to the Python application host in a module Worker. */

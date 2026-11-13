@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /** Real-browser verification of the locally built Python engine. */
 import http from 'node:http';
 import fs from 'node:fs';

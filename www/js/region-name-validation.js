@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Region-name validation per docs/superpowers/specs/2026-09-01-advanced-
  * region-editing-design.md §2.4. Canonicalizes (trims) once up front so the

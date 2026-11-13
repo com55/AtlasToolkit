@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * One View Mode preview. The main thread does not wait for this to finish
  * before starting another selection's worker.

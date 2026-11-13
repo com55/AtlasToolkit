@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Exact pma composite split (spec 2026-10-26 §3.5, §5.6-§5.7)."""
 import numpy as np
 import pytest

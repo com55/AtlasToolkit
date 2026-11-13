@@ -1,0 +1,13 @@
+AtlasToolkit
+Copyright 2026 com55
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Releases up to and including 0.4.x were published under the MIT License;
+those releases remain available under the terms they were published with.
+
+Third-party components bundled with the desktop and web builds are listed,
+with their licenses, in THIRD_PARTY_NOTICES.md.
+
+AtlasToolkit is not affiliated with, endorsed by, or associated with
+Esoteric Software or the Spine runtimes.

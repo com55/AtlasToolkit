@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Synthetic-divergence contract test for the region-identity (key vs.
  * label) refactor. Nothing in production behavior creates a real

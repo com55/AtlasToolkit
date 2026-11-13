@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 com55
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Browser verification for the mesh-masked repack feature (Tasks 1-6 of the
  * mesh-masked-repack-source plan), exercised end-to-end through the real

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Small synthetic, position-coded pages for the app host tests."""
 from io import BytesIO
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """Desktop application entry — window creation and pywebview startup."""
 
 from __future__ import annotations

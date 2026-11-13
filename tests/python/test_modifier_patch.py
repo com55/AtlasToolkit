@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """AtlasModifier.patch: place adds into a page's free space (spec 2026-10-31 §5)."""
 import numpy as np
 import pytest

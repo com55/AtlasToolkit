@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 com55
+# SPDX-License-Identifier: Apache-2.0
 """MAX_CANVAS: both packers stay inside it or raise CanvasTooLargeError
 before allocating, and every layout that already fits is unchanged."""
 import numpy as np
