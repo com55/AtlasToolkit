@@ -20,7 +20,8 @@ def site(tmp_path):
 
 
 @pytest.fixture
-def assembled(site):
+def assembled(site, tmp_path, monkeypatch):
+    monkeypatch.setattr("atlas_toolkit.app.config.CONFIG_PATH", tmp_path / "config.json")
     urls = []
     window = Mock()
     window.create_confirmation_dialog.return_value = False

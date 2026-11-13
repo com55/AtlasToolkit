@@ -37,6 +37,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PARKED = ['verify-ui-flows.mjs', 'verify-region-editing.mjs', 'verify-region-identity.mjs'];
 const SUITES = [
   'verify-python-app.mjs',
+  'verify-desktop-app.mjs',
   'verify-engine-transfer.mjs',
   'verify-ops.mjs',
   'verify-ui-flows.mjs',
