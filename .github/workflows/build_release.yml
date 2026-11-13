@@ -49,16 +49,6 @@ jobs:
       - name: Install Dependencies
         run: uv export --no-hashes --extra app -o requirements.txt && pip install -r requirements.txt
 
-      - name: Pull vendor dependencies
-        shell: bash
-        env:
-          VENDOR_SOURCE_REPO: ${{ secrets.VENDOR_SOURCE_REPO }}
-          VENDOR_SOURCE_TAG: ${{ secrets.VENDOR_SOURCE_TAG }}
-        run: |
-          git clone --quiet --depth 1 --branch "$VENDOR_SOURCE_TAG" "$VENDOR_SOURCE_REPO" "$RUNNER_TEMP/vendor-src"
-          mkdir -p www/js/vendor/spine-skeleton-binary
-          cp "$RUNNER_TEMP"/vendor-src/src/*.js www/js/vendor/spine-skeleton-binary/
-
       - name: Get version for build
         id: build_version
         shell: powershell
@@ -82,6 +72,18 @@ jobs:
           $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
           echo "Building version: $version"
 
+      - name: Build desktop site
+        shell: bash
+        run: python scripts/build_web.py --target desktop --out dist/desktop
+
+      - name: Mark development build
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          grep -qx 'DEV_BUILD = False' atlas_toolkit/app/build_info.py || exit 1
+          sed -i 's/^DEV_BUILD = False$/DEV_BUILD = True/' atlas_toolkit/app/build_info.py
+          cat atlas_toolkit/app/build_info.py
+
       - name: Build with Nuitka (standalone / onedir) 🏗️
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -90,7 +92,7 @@ jobs:
           mode: standalone
           windows-console-mode: ${{ env.CONSOLE_MODE }}
           windows-icon-from-ico: www/icon.ico
-          include-data-dir: www=www
+          include-data-dir: dist/desktop=web
           include-data-files: |
             VERSION=VERSION
           include-package-data: webview

@@ -58,8 +58,9 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Name: "associate"; Description: "Associate .atlas files with {#MyAppName}"; GroupDescription: "File associations:"
 
 [InstallDelete]
-; 0.3.x shipped the UI in {app}\ui; the unified app serves www\ instead.
+; Remove legacy UI folders; the desktop app now serves {app}\web.
 Type: filesandordirs; Name: "{app}\ui"
+Type: filesandordirs; Name: "{app}\www"
 
 [Files]
 Source: "dist\main.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

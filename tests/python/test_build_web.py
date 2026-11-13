@@ -267,3 +267,55 @@ def test_main_strict_default(tmp_path, monkeypatch, flags, expected):
     monkeypatch.setattr(build_web, 'assemble_site', lambda *args: None)
     monkeypatch.setattr(build_web, 'import_offenders', lambda site: ['missing.js'])
     assert build_web.main() == expected
+
+
+@pytest.mark.parametrize('flags, expected', [([], 1), (['--no-strict'], 0)])
+def test_desktop_build(tmp_path, monkeypatch, flags, expected):
+    source = tmp_path / 'www'
+    files = {
+        'index.html': '<title>Atlas Toolkit</title>',
+        'script.js': "import './js/desktop.js';",
+        'js/desktop.js': "import './missing.js';",
+        'sw.js': 'worker',
+        'workers/engine-host-worker.js': 'worker',
+        'workers/engine-transfer.js': 'transfer',
+        'js/atlas-document.js': 'engine',
+        'js/vendor/old.js': 'engine',
+    }
+    for name, content in files.items():
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    (tmp_path / 'pyproject.toml').write_text('version = "1.2.3"')
+    monkeypatch.setattr(build_web, 'ROOT', tmp_path)
+    monkeypatch.setattr(sys, 'argv', ['build_web.py', '--target', 'desktop', *flags])
+
+    def forbidden(*args):
+        raise AssertionError('Desktop build attempted dependency acquisition')
+
+    monkeypatch.setattr(build_web, 'download_runtime', forbidden)
+    monkeypatch.setattr(build_web, 'build_project_wheels', forbidden)
+    for _ in range(2):
+        assert build_web.main() == expected
+    out = tmp_path / 'dist/desktop'
+    assert sorted(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()) == [
+        'desktop-build.json', 'index.html', 'js/desktop.js', 'script.js',
+    ]
+    assert not (out / 'pyodide').exists()
+    assert not (out / 'wheels').exists()
+    assert json.loads((out / 'desktop-build.json').read_text()) == {'target': 'desktop'}
+    assert '<title>Atlas Toolkit v1.2.3</title>' in (out / 'index.html').read_text()
+    assert 'name="app-version" content="1.2.3"' in (out / 'index.html').read_text()
+
+
+@pytest.mark.parametrize('output', ['www', 'www/nested', 'dist/.cache', 'dist/.cache/nested', 'valuable'])
+def test_desktop_rejects_unsafe_output(tmp_path, monkeypatch, output):
+    out = tmp_path / output
+    out.mkdir(parents=True)
+    (out / 'keep.txt').write_text('keep')
+    monkeypatch.setattr(build_web, 'ROOT', tmp_path)
+    monkeypatch.setattr(sys, 'argv', ['build_web.py', '--target', 'desktop', '--out', output])
+    with pytest.raises(SystemExit) as error:
+        build_web.main()
+    assert error.value.code == 2
+    assert (out / 'keep.txt').read_text() == 'keep'

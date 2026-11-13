@@ -124,7 +124,8 @@ def prepare_output(out: Path) -> None:
     """Remove only a directory marked as an earlier site build."""
     if not out.exists() or (out.is_dir() and not any(out.iterdir())):
         return
-    if (out / "wheels/manifest.json").is_file():
+    if ((out / "wheels/manifest.json").is_file()
+            or (out / "desktop-build.json").is_file()):
         shutil.rmtree(out)
         return
     raise ValueError(f"{out} does not look like a build output")
@@ -170,12 +171,33 @@ def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> No
     )
 
 
+def assemble_desktop(out: Path) -> None:
+    """Copy and stamp the desktop shell without browser engine dependencies."""
+    for source in (ROOT / "www").rglob("*"):
+        relative = source.relative_to(ROOT / "www")
+        name = relative.as_posix()
+        if (not source.is_file() or excluded(name)
+                or name in {"sw.js", "workers/engine-host-worker.js",
+                            "workers/engine-transfer.js"}):
+            continue
+        target = out / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    index = out / "index.html"
+    index.write_text(stamp_index_html(index.read_text(encoding="utf-8"), load_version(ROOT)),
+                     encoding="utf-8")
+    (out / "desktop-build.json").write_text(
+        json.dumps({"target": "desktop"}) + "\n", encoding="utf-8",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=Path("dist/web"))
+    parser.add_argument("--target", choices=("web", "desktop"), default="web")
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
-    out = (ROOT / args.out).resolve()
+    out = (ROOT / (args.out or Path("dist") / args.target)).resolve()
     cache = ROOT / "dist/.cache"
     # Assembly replaces its output directory; never let it erase its inputs.
     if any(path.is_relative_to(out) or out.is_relative_to(path)
@@ -185,9 +207,12 @@ def main() -> int:
         prepare_output(out)
     except ValueError as error:
         parser.error(str(error))
-    runtime = download_runtime(cache / "pyodide" / PYODIDE_VERSION)
-    wheels = build_project_wheels(cache)
-    assemble_site(out, runtime, wheels)
+    if args.target == "desktop":
+        assemble_desktop(out)
+    else:
+        runtime = download_runtime(cache / "pyodide" / PYODIDE_VERSION)
+        wheels = build_project_wheels(cache)
+        assemble_site(out, runtime, wheels)
     offenders = import_offenders(out)
     if offenders:
         print("Missing relative imports:")
