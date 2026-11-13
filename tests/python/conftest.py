@@ -6,6 +6,17 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def isolate_config_path(tmp_path, monkeypatch):
+    """Keep every test away from the developer's real preferences."""
+    try:
+        from atlas_toolkit.app import config
+    except ImportError:
+        return
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.json")
+
+
 HERE = Path(__file__).parent
 
 

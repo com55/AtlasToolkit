@@ -52,7 +52,8 @@ const scratch = path.join(ROOT, '.workspaces');
 fs.mkdirSync(scratch, {recursive:true});
 const temp = fs.mkdtempSync(path.join(scratch, 'desktop-browser-'));
 const fixtures = path.join(temp, 'fixtures');
-const generated = spawnSync('.venv/bin/python', ['scripts/serve_desktop_dev.py', '--make-fixture', fixtures], {cwd:ROOT, encoding:'utf8'});
+const python = process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python';
+const generated = spawnSync(python, ['scripts/serve_desktop_dev.py', '--no-update-check', '--make-fixture', fixtures], {cwd:ROOT, encoding:'utf8'});
 assert.equal(generated.status, 0, generated.stderr);
 let browser;
 let failed = false;
@@ -74,13 +75,13 @@ async function scenario(label, atlas, check, extra = []) {
   };
   try {
     const config = path.join(temp, 'config-' + serial++);
-    child = spawn('.venv/bin/python', ['scripts/serve_desktop_dev.py', '--config', config,
+    child = spawn(python, ['scripts/serve_desktop_dev.py', '--no-update-check', '--config', config,
       ...(atlas ? ['--atlas', path.join(fixtures, atlas)] : []), ...extra], {cwd:ROOT, stdio:['pipe','pipe','pipe']});
     child.on('error', error => {stderr += error.message; exited = true;});
     child.on('exit', () => {exited = true;});
     child.stderr.on('data', data => {stderr += data;});
     createInterface({input:child.stdout}).on('line', line => lines.push(line));
-    const url = (await nextLine(line => line.startsWith('URL '))).slice(4);
+    const url = (await nextLine(line => line.startsWith('URL '), 60000)).slice(4);
     const command = async (text, expected = 'ok') => {
       child.stdin.write(text + '\n');
       return nextLine(line => expected === null || line === expected);
@@ -92,6 +93,13 @@ async function scenario(label, atlas, check, extra = []) {
       requests.push(request.url());
       if (new URL(request.url()).pathname.endsWith('/api/rpc')) {
         frames.push(decodeFrame(request.postDataBuffer()).header);
+      }
+    });
+    const startupResponses = [];
+    page.on('response', response => {
+      if (new URL(response.url()).pathname.endsWith('/api/rpc') &&
+          decodeFrame(response.request().postDataBuffer()).header.method === 'startup') {
+        startupResponses.push(response.body().then(body => JSON.parse(decodeFrame(body).header.json)));
       }
     });
     await page.goto(url);
@@ -127,7 +135,7 @@ async function scenario(label, atlas, check, extra = []) {
       await page.locator('#btn-save-mod').waitFor({state:'visible'});
       assert.equal(await command('unsaved', null), 'true');
     };
-    await check({page, command, regions, ready, open, edit, idle, requests, frames, url, lines, nextLine});
+    await check({page, command, regions, ready, open, edit, idle, requests, frames, startupResponses, url, lines, nextLine});
     console.log('PASS ' + label);
   } catch (error) {
     failed = true;
@@ -160,7 +168,7 @@ try {
     const files = fs.readdirSync(folder);
     assert(files.includes('one.atlas')); assert(files.some(name => name.endsWith('.png')));
     const text = fs.readFileSync(path.join(folder, 'one.atlas'), 'utf8');
-    const parsed = spawnSync('.venv/bin/python', ['-c', 'import sys; from atlas_toolkit.document import AtlasDocument; d = AtlasDocument.parse(sys.stdin.read()); assert d.pages',], {cwd:ROOT,input:text,encoding:'utf8'});
+    const parsed = spawnSync(python, ['-c', 'import sys; from atlas_toolkit.document import AtlasDocument; d = AtlasDocument.parse(sys.stdin.read()); assert d.pages',], {cwd:ROOT,input:text,encoding:'utf8'});
     assert.equal(parsed.status, 0, parsed.stderr);
     assert.equal(await command('unsaved', null), 'false');
     const saved = frames.filter(frame => frame.method === 'mark_saved'); assert(saved.length);
@@ -175,32 +183,52 @@ try {
     await command('dialog-cancel'); await page.locator('#btn-save-mod').click();
     await page.locator('.toast.info').filter({hasText:'Cancelled'}).waitFor();
     assert.deepEqual(snapshot(), before);
+    assert(await page.locator('#modal-overlay').isHidden());
     assert.equal(await command('unsaved', null), 'true');
   });
   await scenario('5 missing-images drop', 'missing/missing.atlas', async ({page,command}) => {
-    const row = page.locator('.missing-images-row').filter({hasText:'missing.png'});
+    const missing = page.locator('.missing-images-row[data-page-name="missing.png"]');
+    const row = page.locator('.missing-images-row[data-page-name="other.png"]');
     await row.waitFor(); const box = await row.boundingBox(); assert(box);
     await command(`drop ${path.join(fixtures,'missing-src/missing.png')} ${box.x+box.width/2} ${box.y+box.height/2}`);
-    await page.locator('.missing-images-row.selected').waitFor();
+    await row.locator('.missing-images-status').filter({hasText:'missing.png'}).waitFor();
+    assert(await row.evaluate(el => el.classList.contains('selected')));
+    assert(!await missing.evaluate(el => el.classList.contains('selected')));
     assert.match(await row.locator('.missing-images-status').textContent(), /missing\.png/);
+    await command('drop ' + path.join(fixtures,'missing-src/missing.png'));
+    await missing.locator('.missing-images-status').filter({hasText:'missing.png'}).waitFor();
+    assert(await missing.evaluate(el => el.classList.contains('selected')));
   });
   await scenario('6 unsaved close Cancel and Confirm', 'one/one.atlas', async ({page,regions,edit,command,lines,nextLine}) => {
     await regions(['a','b']); await edit();
     assert.equal(await command('close', null), 'vetoed');
+    const cancelled = page.waitForResponse(response =>
+      response.url().endsWith('/api/rpc') &&
+      decodeFrame(response.request().postDataBuffer()).header.method === 'close_answer');
     await page.locator('#btn-modal-cancel').click();
+    await cancelled;
     await page.locator('#modal-overlay').waitFor({state:'hidden'});
     assert(!lines.includes('destroyed'));
     assert.equal(await command('close', null), 'vetoed');
     await page.locator('#btn-modal-confirm').click();
     await nextLine(line => line === 'destroyed');
   });
-  await scenario('7 reload after Open', 'one/one.atlas', async ({page,regions,open,ready}) => {
+  await scenario('7 reload after Open', 'one/one.atlas', async ({page,regions,open,ready,startupResponses}) => {
     await regions(['a','b']); await open('two/two.atlas'); await regions(['c']);
-    await page.reload(); await ready(); await regions([]);
+    await Promise.all(startupResponses);
+    const previous = startupResponses.length;
+    const startup = page.waitForResponse(response => response.url().endsWith('/api/rpc') &&
+      decodeFrame(response.request().postDataBuffer()).header.method === 'startup');
+    await page.reload();
+    await startup;
+    assert.equal(startupResponses.length, previous + 1);
+    const reply = await startupResponses[previous];
+    assert.equal(reply.ok, true);
+    assert.equal(reply.value.atlas, null);
+    await ready(); await regions([]);
     await open('one/one.atlas'); await regions(['a','b']);
   });
-  await scenario('8 foreign origin and wrong token', null, async ({page,ready,url}) => {
-    await ready();
+  await scenario('8 foreign origin and wrong token', null, async ({page,url}) => {
     const rpc = new URL('api/rpc',url);
     const foreign = await page.request.post(rpc.href,{headers:{Origin:'http://evil.test'},data:Buffer.from([0])});
     assert.equal(foreign.status(),403);
@@ -208,10 +236,10 @@ try {
     const response = await page.request.post(wrong.href,{headers:{Origin:rpc.origin},data:Buffer.from([0])});
     assert.equal(response.status(),404);
   });
-  await scenario('9 failing startup remains usable', null, async ({page,ready}) => {
+  await scenario('9 failing startup remains usable', null, async ({page,ready,open,regions}) => {
     await page.locator('#modal-overlay').filter({has:page.locator('#modal-message').filter({hasText:'Startup check failed'})}).waitFor({state:'visible',timeout:120000});
     await page.locator('#btn-modal-confirm').click();
-    await ready(); assert(await page.locator('.btn-open').isEnabled());
+    await ready(); await open('one/one.atlas'); await regions(['a','b']);
   }, ['--fail-startup']);
 } finally {
   await browser?.close();

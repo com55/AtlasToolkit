@@ -162,11 +162,14 @@ def test_config_threads(tmp_path, monkeypatch):
         for key in range(20):
             prefs.set(f"{worker}-{key}", key)
     threads = [threading.Thread(target=write, args=(worker,)) for worker in range(8)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(5)
-        assert not thread.is_alive()
+    started = []
+    try:
+        for thread in threads:
+            thread.start()
+            started.append(thread)
+    finally:
+        for thread in started:
+            thread.join()
     assert len(json.loads(config.CONFIG_PATH.read_text())) == 160
 
 
@@ -420,3 +423,15 @@ def test_failed_write_keeps_grant(commands, tmp_path):
     assert (folder / "out").read_bytes() == b"content"
     with pytest.raises(PermissionError):
         commands.existing_output_names(grant, ["out"])
+
+
+def test_missing_fixture_has_two_missing_pages(tmp_path):
+    from scripts.serve_desktop_dev import make_fixture
+    from atlas_toolkit.document import AtlasDocument
+
+    make_fixture(tmp_path)
+    document = AtlasDocument.parse((tmp_path / "missing/missing.atlas").read_text())
+    assert [page.filename for page in document.pages] == ["missing.png", "other.png"]
+    assert not (tmp_path / "missing/missing.png").exists()
+    assert not (tmp_path / "missing/other.png").exists()
+    assert (tmp_path / "missing-src/missing.png").is_file()
