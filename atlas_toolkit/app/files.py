@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import secrets
 import threading
@@ -17,6 +17,21 @@ def _atlas_page_filenames(atlas_text: str) -> list[str]:
             continue
         names.append(line)
     return names
+
+
+def _page_candidate(atlas_dir: Path, name: str) -> Path | None:
+    """Reject unsafe page names before any filesystem lookup."""
+    if not name or "\0" in name or ":" in name or name.startswith(("/", "\\")):
+        return None
+    for pure_path in (PureWindowsPath(name), PurePosixPath(name)):
+        if pure_path.is_absolute() or pure_path.drive or pure_path.anchor:
+            return None
+    if ".." in re.split(r"[/\\]", name):
+        return None
+    candidate = atlas_dir / name
+    if not candidate.resolve().is_relative_to(atlas_dir.resolve()):
+        return None
+    return candidate
 
 
 class DesktopFiles:
@@ -55,8 +70,8 @@ class DesktopFiles:
             atlas = self._register(path)
             pages = {}
             for name in _atlas_page_filenames(text):
-                candidate = path.parent / name
-                if candidate.is_file():
+                candidate = _page_candidate(path.parent, name)
+                if candidate is not None and candidate.is_file():
                     pages[name] = self._register(candidate)
             skel = path.with_suffix(".skel")
             return {

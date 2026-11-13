@@ -1,6 +1,7 @@
 """Registered desktop inputs and dialog-scoped write grants."""
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,76 @@ def test_page_parser():
     assert _atlas_page_filenames(" a.png\nmissing.png\nA.PNG\nkey: x.png\nregion\n") == [
         "a.png", "missing.png"
     ]
+
+
+@pytest.mark.parametrize("name", [
+    "", "x\0.png", r"\\host\share\x.png", "//host/share/x.png",
+    r"C:\x.png", "C:x.png", "/abs/x.png", "../x.png",
+    "a/../../x.png", r"a\..\..\x.png", r"\x.png",
+])
+def test_page_candidate_rejects_before_filesystem(tmp_path, monkeypatch, name):
+    from atlas_toolkit.app.files import _page_candidate
+
+    calls = []
+
+    def record(path, *args, **kwargs):
+        calls.append(path)
+        return path
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "resolve", record)
+        patch.setattr(Path, "is_file", record)
+        assert _page_candidate(tmp_path, name) is None
+    assert calls == []
+
+
+def test_bundle_rejected_pages_never_reach_filesystem(tmp_path, monkeypatch):
+    names = [r"\\host\share\x.png", "//host/share/x.png", r"C:\x.png",
+             "C:x.png", "/abs/x.png", "../x.png", "a/../../x.png",
+             r"a\..\..\x.png"]
+    atlas = tmp_path / "sample.atlas"
+    atlas.write_text("\n".join(names), encoding="utf-8")
+    calls = []
+    resolve = Path.resolve
+
+    def record_resolve(path, *args, **kwargs):
+        calls.append(path)
+        # Never perform an actual lookup of an untrusted name, even on failure.
+        return resolve(path, *args, **kwargs) if path == atlas else path
+
+    def record_is_file(path):
+        calls.append(path)
+        return False
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "resolve", record_resolve)
+        patch.setattr(Path, "is_file", record_is_file)
+        assert DesktopFiles().atlas_bundle(atlas)["pages"] == {}
+    rejected = {tmp_path / name for name in names}
+    assert not rejected.intersection(calls)
+
+
+def test_bundle_page_symlink_escape(tmp_path):
+    folder = tmp_path / "atlas"
+    folder.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"png")
+    (folder / "page.png").symlink_to(outside)
+    atlas = folder / "sample.atlas"
+    atlas.write_text("page.png\n", encoding="utf-8")
+    assert DesktopFiles().atlas_bundle(atlas)["pages"] == {}
+
+
+def test_bundle_page_subfolder(tmp_path):
+    (tmp_path / "images").mkdir()
+    page = tmp_path / "images" / "page.png"
+    page.write_bytes(b"png")
+    atlas = tmp_path / "sample.atlas"
+    atlas.write_text("images/page.png\n", encoding="utf-8")
+    registry = DesktopFiles()
+    bundle = registry.atlas_bundle(atlas)
+    assert set(bundle["pages"]) == {"images/page.png"}
+    assert registry.lookup(asset_id(bundle["pages"]["images/page.png"])) == page.resolve()
 
 
 def test_bundle_and_registration_lifetime(tmp_path):
