@@ -112,7 +112,7 @@ test('choose_file cancellation, bundle and HostError use pick_atlas', async t =>
   let picked = null;
   const calls = fakeDesktopServer(t, {...engineHandlers, pick_atlas: () => {if (picked instanceof Error) throw picked; return picked;}}, assets);
   await boot(t);
-  assert.equal(await AtlasAPI.choose_file(),false);
+  assert.equal(await AtlasAPI.choose_file(),'cancelled');
   picked = bundle; assert.equal(await AtlasAPI.choose_file(),true);
   let toast;
   t.mock.method(window,'showToast', (...args) => {toast=args;});
@@ -242,6 +242,20 @@ test('skeleton drop fetches the file and applies skeleton',async t=>{
   await handleDesktopDrop({type:'file',file:bundle.skel},actions);
   assert.equal(selected.name,'hero.skel');assert.equal(await selected.text(),'skel');assert.equal(seen.length,0);
   await document.getElementById('btn-modal-confirm').emit('click');
+});
+
+test('confirm-close rejects closing while a modal is open without showing a confirm', async t => {
+  const calls = fakeDesktopServer(t, { close_answer: () => null });
+  const { handleConfirmClose } = await import('../www/script.js');
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal-message').innerText = 'Existing alert';
+  document.getElementById('modal-title').innerText = 'Existing title';
+  t.mock.method(document.getElementById('btn-modal-confirm'), 'addEventListener', () => assert.fail('showConfirm must not bind listeners'));
+  await handleConfirmClose();
+  assert.deepEqual(calls.map(c => [c.method, c.args]), [['close_answer', [false]]]);
+  assert.equal(document.getElementById('modal-message').innerText, 'Existing alert');
+  assert.equal(document.getElementById('modal-title').innerText, 'Existing title');
+  assert.equal(document.getElementById('modal-overlay').classList.contains('hidden'), false);
 });
 
 test('404 atlas rejects at the API and openAtlasBundle toasts without throwing', async t => {

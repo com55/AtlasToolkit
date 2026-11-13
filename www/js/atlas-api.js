@@ -507,7 +507,7 @@ export const AtlasAPI = {
     if (isPywebviewDesktop()) {
       try {
         const bundle = await desktopCall('pick_atlas');
-        return bundle ? AtlasAPI.load_atlas_bundle(bundle) : false;
+        return bundle ? AtlasAPI.load_atlas_bundle(bundle) : 'cancelled';
       } catch (e) {
         if (!(e instanceof HostError)) throw e;
         window.showToast(`Failed to load atlas file: ${e.message}`, 'error');

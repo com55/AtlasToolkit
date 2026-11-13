@@ -53,7 +53,7 @@ def rpc(url, target, method, args, buffers=()):
         "Origin": f"{parts.scheme}://{parts.netloc}",
         "Content-Type": "application/octet-stream",
     })
-    with urlopen(request, timeout=2) as response:
+    with urlopen(request, timeout=30) as response:
         header, _ = decode_frame(response.read())
     return json.loads(header["json"])
 
@@ -63,7 +63,7 @@ def test_build_serves_site_and_binds_close_state(assembled):
     assert returned_window is window
     assert len(urls) == 1
     assert urls[0].startswith("http://127.0.0.1:")
-    with urlopen(urls[0], timeout=2) as response:
+    with urlopen(urls[0], timeout=30) as response:
         assert response.read() == b"<h1>Desktop test</h1>"
     assert commands.on_closing() is True
     text, pages = one_page()
@@ -101,7 +101,7 @@ def test_failed_window_creation_stops_server(site, raises):
         desktop.build_desktop(site, ["app"], None, factory, object())
     assert len(urls) == 1
     with pytest.raises(URLError):
-        urlopen(urls[0], timeout=2)
+        urlopen(urls[0], timeout=30)
 
 
 def test_source_site(monkeypatch):

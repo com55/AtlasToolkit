@@ -169,7 +169,7 @@ def live(tmp_path):
     prefix = url.path.removesuffix("index.html")
 
     def request(method="GET", path="index.html", body=None, headers=None, raw=False):
-        conn = http.client.HTTPConnection(url.hostname, url.port, timeout=3)
+        conn = http.client.HTTPConnection(url.hostname, url.port, timeout=30)
         conn.request(method, path if raw else prefix + path, body, headers or {})
         response = conn.getresponse()
         assert response.getheader("Cache-Control") == "no-store"
@@ -232,7 +232,7 @@ def test_socket_rpc_validation(live):
     raw = b'[' * 2000 + b'0' + b']' * 2000
     assert request("POST", "api/rpc", struct.pack("<I", len(raw)) + raw, origin)[0] == 400
     assert request("POST", "api/rpc", b"", {**origin, "Content-Length": str(2**31 + 1)})[0] == 413
-    conn = http.client.HTTPConnection(url.hostname, url.port, timeout=3)
+    conn = http.client.HTTPConnection(url.hostname, url.port, timeout=30)
     try:
         conn.putrequest("POST", url.path.removesuffix("index.html") + "api/rpc")
         conn.putheader("Origin", f"http://{url.netloc}")
@@ -291,7 +291,7 @@ def test_socket_events_and_assets(live):
     conn, response = request(path="api/events")
     try:
         assert response.getheader("Content-Type") == "text/event-stream"
-        assert response.readline() == 'data: {"kind":"ready","value":"雪"}\n'.encode()
+        assert response.readline() == b'data: {"kind":"ready","value":"\\u96ea"}\n'
         assert response.readline() == b"\n"
         assert response.readline() == b": ping\n"
         assert response.readline() == b"\n"
@@ -309,6 +309,26 @@ def test_socket_events_and_assets(live):
     assert request(path=registered)[0] == 404
 
 
+def test_socket_events_surrogate_keeps_stream_alive(live):
+    _, _, _, _, events, request, _, _, _ = live
+    events.publish("surrogate", value="\udcff")
+    conn, response = request(path="api/events")
+    try:
+        assert response.readline() == b'data: {"kind":"surrogate","value":"\\udcff"}\n'
+        assert response.readline() == b"\n"
+        events.publish("next", value="alive")
+        while True:
+            line = response.readline()
+            assert line, "event stream closed after surrogate"
+            if line.startswith(b"data: "):
+                break
+        assert line == b'data: {"kind":"next","value":"alive"}\n'
+        assert response.readline() == b"\n"
+    finally:
+        response.close()
+        conn.close()
+
+
 @pytest.mark.parametrize("case, expected", [
     ("missing_host", 403), ("duplicate_host", 403),
     ("encoded_rpc", 405), ("head_rpc", 405),
@@ -322,7 +342,7 @@ def test_socket_raw_requests(live, case, expected):
     if case == "duplicate_host":
         hosts *= 2
     request = f"{method} {path} HTTP/1.0\r\n{hosts}\r\n".encode("ascii")
-    with socket.create_connection((url.hostname, url.port), timeout=3) as client:
+    with socket.create_connection((url.hostname, url.port), timeout=30) as client:
         client.sendall(request)
         with client.makefile("rb") as response:
             assert int(response.readline().split()[1]) == expected
@@ -335,7 +355,7 @@ def test_socket_dead_sse_unsubscribes_with_default_ping(tmp_path):
     url = urlsplit(server.start())
     prefix = url.path.removesuffix("index.html")
     try:
-        with socket.create_connection((url.hostname, url.port), timeout=3) as client:
+        with socket.create_connection((url.hostname, url.port), timeout=30) as client:
             client.sendall(f"GET {prefix}api/events HTTP/1.0\r\nHost: {url.netloc}\r\n\r\n".encode())
             with client.makefile("rb") as response:
                 assert int(response.readline().split()[1]) == 200

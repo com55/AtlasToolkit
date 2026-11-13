@@ -13,11 +13,26 @@ import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButton
 import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, handleDesktopDrop } from './js/drop.js';
 import { fileFromUrl, isPywebviewDesktop } from './js/platform.js';
-import { isBusy, noteBusyConflict } from './js/busy-overlay.js';
+import { isBusy, noteBusyConflict, isModalOverlayOpen } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
 
 let appVersion = '';
+let closePromptOpen = false;
+
+export async function handleConfirmClose() {
+  if (closePromptOpen) return;
+  if (isModalOverlayOpen()) {
+    await desktopCall('close_answer', [false]);
+    return;
+  }
+  closePromptOpen = true;
+  try {
+    const ok = await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?');
+    await desktopCall('close_answer', [ok]);
+  } catch (e) { console.error(e); }
+  finally { closePromptOpen = false; }
+}
 
 function applyAppTitle(atlasFilename) {
   document.title = formatAppTitle(appVersion, atlasFilename);
@@ -34,16 +49,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       confirmDiscard: () => showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?'),
     };
     onDesktopEvent('drop', e => handleDesktopDrop(e, actions).catch(console.error));
-    let closePromptOpen = false;
-    onDesktopEvent('confirm-close', async () => {
-      if (closePromptOpen) return;
-      closePromptOpen = true;
-      try {
-        const ok = await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?');
-        await desktopCall('close_answer', [ok]);
-      } catch (e) { console.error(e); }
-      finally { closePromptOpen = false; }
-    });
+    onDesktopEvent('confirm-close', handleConfirmClose);
     onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
     const installButton = document.getElementById('btn-install-update-file');
     try {

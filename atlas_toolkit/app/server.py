@@ -197,7 +197,7 @@ class DesktopServer:
                         except StopIteration:
                             break
                         else:
-                            body = ("data: " + json.dumps(event, ensure_ascii=False,
+                            body = ("data: " + json.dumps(event, ensure_ascii=True,
                                     separators=(",", ":")) + "\n\n").encode("utf-8")
                         readable, _, _ = select.select([self.connection], [], [], 0)
                         if readable and self.connection.recv(1, socket.MSG_PEEK) == b"":
