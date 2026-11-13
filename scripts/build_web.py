@@ -1,4 +1,4 @@
-"""Assemble the self-hosted Pyodide website (no bundler required)."""
+"""Build the web site (Pyodide) or the desktop site (no bundler required)."""
 from __future__ import annotations
 
 import argparse
@@ -143,15 +143,20 @@ def generate_sw(site: Path, template: str) -> str:
             .replace("__CORE_ASSETS__", json.dumps(sorted([".", *paths]), indent=2)))
 
 
-def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:
-    """Copy dependencies, stamp the shell, then generate the offline worker."""
+def _copy_shell(out: Path, skip: frozenset[str]) -> None:
+    """Copy shell files except retired engine files and target-specific skips."""
     for source in (ROOT / "www").rglob("*"):
         relative = source.relative_to(ROOT / "www")
-        if not source.is_file() or excluded(relative.as_posix()) or relative.as_posix() == "sw.js":
+        if not source.is_file() or excluded(relative.as_posix()) or relative.as_posix() in skip:
             continue
         target = out / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+
+
+def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:
+    """Copy dependencies, stamp the shell, then generate the offline worker."""
+    _copy_shell(out, frozenset({"sw.js"}))
     for directory, paths in (("pyodide", runtime), ("wheels", wheels.values())):
         destination = out / directory
         destination.mkdir(parents=True, exist_ok=True)
@@ -173,16 +178,8 @@ def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> No
 
 def assemble_desktop(out: Path) -> None:
     """Copy and stamp the desktop shell without browser engine dependencies."""
-    for source in (ROOT / "www").rglob("*"):
-        relative = source.relative_to(ROOT / "www")
-        name = relative.as_posix()
-        if (not source.is_file() or excluded(name)
-                or name in {"sw.js", "workers/engine-host-worker.js",
-                            "workers/engine-transfer.js"}):
-            continue
-        target = out / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+    _copy_shell(out, frozenset({"sw.js", "workers/engine-host-worker.js",
+                               "workers/engine-transfer.js"}))
     index = out / "index.html"
     index.write_text(stamp_index_html(index.read_text(encoding="utf-8"), load_version(ROOT)),
                      encoding="utf-8")

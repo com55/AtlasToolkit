@@ -80,9 +80,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
-          grep -qx 'DEV_BUILD = False' atlas_toolkit/app/build_info.py || exit 1
-          sed -i 's/^DEV_BUILD = False$/DEV_BUILD = True/' atlas_toolkit/app/build_info.py
-          cat atlas_toolkit/app/build_info.py
+          f=atlas_toolkit/app/build_info.py
+          grep -q '^DEV_BUILD = False[[:space:]]*$' "$f" || { echo "DEV_BUILD = False line not found in $f"; exit 1; }
+          sed -i 's/^DEV_BUILD = False\([[:space:]]*\)$/DEV_BUILD = True\1/' "$f"
+          grep -q '^DEV_BUILD = True[[:space:]]*$' "$f" || { echo "rewrite did not land"; exit 1; }
+          cat "$f"
 
       - name: Build with Nuitka (standalone / onedir) 🏗️
         uses: Nuitka/Nuitka-Action@main
