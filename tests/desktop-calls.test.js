@@ -279,3 +279,38 @@ test('404 skeleton still loads atlas without applying skeleton', async t => {
   assert.equal(captured[4], null);
   assert.equal(warnings.length, 1);
 });
+
+test('multi-region extract overwrite confirmation is outside busy', async t => {
+  fakeDesktopServer(t, {...engineHandlers, load: () => ({mesh: {}, settings: {alpha: 'straight'}}),
+    extract: () => ['a', 'b'].map(name => ({filename: name + '.png', png: new Uint8Array([1])})),
+    pick_save_folder: () => grant, existing_output_names: () => ['a.png'], write_files: () => null,
+  }, assets);
+  const { isBusy } = await import('../www/js/busy-overlay.js');
+  let confirmed = false;
+  window.showConfirm = async () => { confirmed = true; assert.equal(isBusy(), false); return true; };
+  t.after(() => { delete window.showConfirm; });
+  await boot(t);
+  await AtlasAPI.load_atlas_bundle(bundle);
+  t.mock.timers.reset();
+  await AtlasAPI.extract_files([{key: 'a'}, {key: 'b'}]);
+  assert.equal(confirmed, true);
+});
+
+for (const mode of ['extract', 'modify']) test(`skeleton drop preserves preview in ${mode} mode`, async t => {
+  const { state } = await import('../www/js/state.js');
+  const { applyDroppedSkelFile } = await import('../www/js/drop.js');
+  const oldMode = state.currentMode;
+  t.after(() => { state.currentMode = oldMode; });
+  state.currentMode = mode;
+  document.getElementById('btn-pick-skel').parentElement = node();
+  document.getElementById('region-overlay').getContext = () => ({setTransform() {}, clearRect() {}});
+  state.selectedIndices.clear();
+  t.mock.method(AtlasAPI, 'get_current_atlas_filename', () => 'hero.atlas');
+  t.mock.method(AtlasAPI, 'apply_skel_file', async () => {
+    document.getElementById('status-text').innerText = 'Edit preview';
+    return true;
+  });
+  t.mock.timers.reset();
+  await applyDroppedSkelFile(new File(['skel'], 'hero.skel'));
+  assert.equal(document.getElementById('status-text').innerText, mode === 'modify' ? 'Edit preview' : 'No selection');
+});

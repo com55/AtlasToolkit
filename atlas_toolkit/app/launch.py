@@ -11,9 +11,9 @@ from typing import Any, Optional
 import webview
 
 from atlas_toolkit.app.desktop import build_desktop, desktop_site
-from atlas_toolkit.app.desktop_commands import DesktopCommands
+from atlas_toolkit.app import build_info
+from atlas_toolkit.app.desktop_commands import DesktopCommands, window_title
 from atlas_toolkit.app.paths import is_source_run
-from atlas_toolkit.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
 
@@ -104,9 +104,9 @@ def run() -> None:
     clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
 
-    webview_debug = debug_requested and is_source_run()
+    webview_debug = debug_requested and (is_source_run() or build_info.DEV_BUILD)
     if debug_requested and not webview_debug:
-        log.info("--debug is only available when running from source; ignored.")
+        log.info("--debug is only available when running from source or a development build; ignored.")
     elif webview_debug:
         log.info("pywebview debug mode enabled (--debug).")
 
@@ -132,7 +132,7 @@ def run() -> None:
 
     def window_factory(url):
         return webview.create_window(
-            f"Atlas Toolkit v{get_current_version()}",
+            window_title(),
             url=url,
             width=window_width,
             height=window_height,

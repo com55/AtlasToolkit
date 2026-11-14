@@ -105,7 +105,7 @@ export async function applyDroppedSkelFile(file) {
     return false;
   }
   updateMeshCroppingUI();
-  await updatePreview(getSelectedRegions());
+  if (state.currentMode !== 'modify') await updatePreview(getSelectedRegions());
   showToast(`Loaded ${file.name}.`, 'success');
   return true;
 }

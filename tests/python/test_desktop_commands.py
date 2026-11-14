@@ -44,6 +44,15 @@ class FakeWindow:
         self.calls.append((kind, kwargs))
         return self.results.pop(0)
 
+    def restore(self):
+        self.calls.append(("restore",))
+
+    def hide(self):
+        self.calls.append(("hide",))
+
+    def show(self):
+        self.calls.append(("show",))
+
     def set_title(self, title):
         self.titles.append(title)
 
@@ -126,7 +135,7 @@ def test_closing(commands, subscriber, answer):
     assert not window.on_top
     if not subscriber:
         assert ("Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?") in window.calls
-        assert window.calls[0] == ("on_top", True)
+        assert window.calls[:3] == [("restore",), ("show",), ("on_top", True)]
     if answer:
         assert ("destroy", False) in window.calls
     commands.close_answer(True)
@@ -287,7 +296,7 @@ def test_installer_dialog_and_forwarded_path(commands, tmp_path, monkeypatch):
     assert received == [path]
     assert commands._window.calls == [(commands._file_dialog.OPEN, {
         "allow_multiple": False, "file_types": ("Installer (*.exe)",),
-    })]
+    }), ("hide",)]
 
 
 def test_startup_notification_once(commands):
@@ -437,3 +446,73 @@ def test_missing_fixture_has_two_missing_pages(tmp_path):
     assert not (tmp_path / "missing/missing.png").exists()
     assert not (tmp_path / "missing/other.png").exists()
     assert (tmp_path / "missing-src/missing.png").is_file()
+
+def test_close_raises_synchronously_before_worker(commands, monkeypatch):
+    commands._is_unsaved = lambda: True
+    starts = []
+    def start(thread):
+        assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
+        starts.append(thread)
+    monkeypatch.setattr(threading.Thread, "start", start)
+    assert commands.on_closing() is False
+    assert len(starts) == 1
+    assert commands.on_closing() is False
+    assert len(starts) == 1
+    assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
+
+
+@pytest.mark.parametrize("dev", [False, True])
+def test_build_window_title(commands, monkeypatch, dev):
+    from atlas_toolkit.app import desktop_commands as module
+    monkeypatch.setattr(build_info, "DEV_BUILD", dev)
+    monkeypatch.setattr(module, "get_current_version", lambda: "1.2.3")
+    base = "AtlasToolkit (build test)" if dev else "Atlas Toolkit v1.2.3"
+    assert module.window_title() == base
+    commands.set_window_title("hero.atlas")
+    commands.set_window_title("")
+    assert commands._window.titles == [base + " - hero.atlas", base]
+
+
+@pytest.mark.parametrize("from_file", [False, True])
+@pytest.mark.parametrize("result", [{"ok": True}, {"ok": False}, {"cancelled": True}])
+def test_installer_window_visibility(commands, monkeypatch, from_file, result):
+    monkeypatch.setattr(build_info, "DEV_BUILD", True)
+    def install(*args):
+        assert commands._window.calls[-1] == ("hide",)
+        return result
+    commands._updates.restart_and_install = install
+    commands._updates.install_from_file = install
+    commands._window.results = [["setup.exe"]]
+    actual = commands.install_update_from_file() if from_file else commands.restart_and_install_update()
+    assert actual == result
+    assert commands._window.calls[-1] == (("hide",) if result.get("ok") is True else ("show",))
+
+
+@pytest.mark.parametrize("dev", [False, True])
+def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev):
+    from unittest.mock import MagicMock
+    from atlas_toolkit.app import launch
+    monkeypatch.setattr(build_info, "DEV_BUILD", dev)
+    monkeypatch.setattr(launch, "configure_stdio", lambda: None)
+    monkeypatch.setattr(launch, "configure_logging", lambda: None)
+    monkeypatch.setattr(launch, "is_source_run", lambda: False)
+    monkeypatch.setattr(launch.sys, "argv", ["app", "--debug"])
+    monkeypatch.setattr(launch.sys, "platform", "linux")
+    (tmp_path / "index.html").write_text("test")
+    monkeypatch.setattr(launch, "desktop_site", lambda: tmp_path)
+    monkeypatch.setattr(launch.webview, "screens", [SimpleNamespace(width=1920, height=1080)])
+    titles, debug = [], []
+    window = MagicMock()
+    def create_window(title, **kwargs):
+        titles.append(title)
+        return window
+    def assemble(site, argv, failure, factory, dialog):
+        assert factory("http://localhost/test") is window
+        return MagicMock(), MagicMock(), window
+    monkeypatch.setattr(launch.webview, "create_window", create_window)
+    monkeypatch.setattr(launch, "build_desktop", assemble)
+    monkeypatch.setattr(launch.webview, "start", lambda **kwargs: debug.append(kwargs["debug"]))
+    launch.run()
+    from atlas_toolkit.app.desktop_commands import window_title
+    assert titles == [window_title()]
+    assert debug == [dev]

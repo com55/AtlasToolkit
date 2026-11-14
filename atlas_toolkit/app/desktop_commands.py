@@ -25,6 +25,10 @@ restart_and_install_update install_update_from_file close_answer
 """.split())
 
 
+def window_title():
+    return "AtlasToolkit (build test)" if build_info.DEV_BUILD else f"Atlas Toolkit v{get_current_version()}"
+
+
 class DesktopCommands:
     RPC_METHODS = RPC_METHODS
 
@@ -82,7 +86,7 @@ class DesktopCommands:
 
     def set_window_title(self, atlas_filename):
         if self._window is not None:
-            title = f"Atlas Toolkit v{get_current_version()}"
+            title = window_title()
             self._window.set_title(f"{title} - {atlas_filename}" if atlas_filename else title)
 
     def _dialog(self, kind, **kwargs):
@@ -172,6 +176,7 @@ class DesktopCommands:
                 self._close_check_in_progress = True
                 self._close_event = threading.Event()
                 self._close_proceed = False
+                self._raise_window(pin=True)
                 self._close_thread = threading.Thread(target=self._check_and_close, daemon=True)
                 self._close_thread.start()
             elif self._events.has_subscriber:
@@ -187,7 +192,6 @@ class DesktopCommands:
     def _check_and_close(self):
         try:
             try:
-                self._raise_window(pin=True)
                 proceed = False
                 use_native = not self._events.has_subscriber
                 if not use_native:
@@ -217,7 +221,11 @@ class DesktopCommands:
         return self._updates.download()
 
     def restart_and_install_update(self):
-        return self._updates.restart_and_install()
+        self._set_update_window_visible(False)
+        result = self._updates.restart_and_install()
+        if result.get("ok") is not True:
+            self._set_update_window_visible(True)
+        return result
 
     def install_update_from_file(self):
         if not build_info.DEV_BUILD:
@@ -225,7 +233,21 @@ class DesktopCommands:
         path = self._dialog(self._file_dialog.OPEN, allow_multiple=False, file_types=("Installer (*.exe)",))
         if not path:
             return {"ok": False, "cancelled": True}
-        return self._updates.install_from_file(Path(path))
+        self._set_update_window_visible(False)
+        result = self._updates.install_from_file(Path(path))
+        if result.get("ok") is not True:
+            self._set_update_window_visible(True)
+        return result
+
+    def _set_update_window_visible(self, visible):
+        if self._window is not None:
+            try:
+                if visible:
+                    self._window.show()
+                else:
+                    self._window.hide()
+            except Exception:
+                pass
 
     def _native_hwnd(self) -> int | None:
         window = self._window

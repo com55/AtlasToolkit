@@ -615,8 +615,9 @@ export const AtlasAPI = {
     const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
-    const run = async () => {
-    const results = await callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
+    // Keep pickers and overwrite confirmation outside the busy overlay.
+    const extract = () => callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
+    const results = targets.length > 1 ? await withBusy(BUSY_LABEL, extract) : await extract();
     const extracted = results.map(({filename, png}) => ({filename, blob: new Blob([png], {type: 'image/png'})}));
     const count = extracted.length;
 
@@ -651,18 +652,15 @@ export const AtlasAPI = {
       }
 
       // Browser tab, multiple images: bundle into a zip.
-      const zipBlob = await createZip(
+      const zipBlob = await withBusy(BUSY_LABEL, () => createZip(
         extracted.map(item => ({ name: item.filename, data: item.blob })),
-      );
+      ));
       await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
       return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
     } catch (e) {
       if (e && e.name === 'AbortError') return 'Cancelled';
       throw e;
     }
-    };
-    if (targets.length > 1) return withBusy(BUSY_LABEL, run);
-    return run();
   },
 
 
