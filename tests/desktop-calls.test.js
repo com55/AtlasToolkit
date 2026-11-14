@@ -314,3 +314,53 @@ for (const mode of ['extract', 'modify']) test(`skeleton drop preserves preview 
   await applyDroppedSkelFile(new File(['skel'], 'hero.skel'));
   assert.equal(document.getElementById('status-text').innerText, mode === 'modify' ? 'Edit preview' : 'No selection');
 });
+
+test('desktop logging preserves console and sends once; failures stay quiet', async t => {
+  const { installDesktopLogging, logStage } = await import('../www/js/desktop.js');
+  const printed = [];
+  t.mock.method(console, 'error', (...args) => printed.push(args));
+  const calls = fakeDesktopServer(t, { log: () => { throw new Error('failed log'); } });
+  installDesktopLogging();
+  console.error('page failure');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(printed, [['page failure']]);
+  assert.deepEqual(calls.map(c => [c.method, c.args]), [['log', ['error', 'page failure']]]);
+  logStage('engine ready');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls[1].args, ['info', 'startup: engine ready']);
+  assert.equal(calls.length, 2);
+  _resetForTests();
+});
+
+test('desktop warnings and uncaught page errors reach Python', async t => {
+  const { installDesktopLogging } = await import('../www/js/desktop.js');
+  const events = new Map();
+  t.mock.method(window, 'addEventListener', (name, fn) => events.set(name, fn));
+  t.mock.method(console, 'warn', () => {});
+  const calls = fakeDesktopServer(t, { log: () => null });
+  installDesktopLogging();
+  installDesktopLogging();
+  console.warn('warning');
+  events.get('error')({message: 'uncaught'});
+  events.get('unhandledrejection')({reason: new Error('rejected')});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0].args, ['warn', 'warning']);
+  assert.deepEqual(calls[1].args, ['error', 'uncaught']);
+  assert.match(calls[2].args[1], /rejected/);
+  _resetForTests();
+});
+
+for (const modifier of ['ctrlKey', 'metaKey']) test(`log folder shortcut handles ${modifier} on desktop only`, async t => {
+  const calls = fakeDesktopServer(t, { open_log_folder: () => ({ok: true}) });
+  const { handleLogFolderShortcut } = await import('../www/script.js');
+  let prevented = 0;
+  const event = {key: 'L', shiftKey: true, [modifier]: true, preventDefault() { prevented++; }};
+  await handleLogFolderShortcut(event);
+  assert.deepEqual(calls.map(c => c.method), ['open_log_folder']);
+  assert.equal(prevented, 1);
+  location.pathname = '/index.html';
+  await handleLogFolderShortcut(event);
+  assert.equal(calls.length, 1);
+  assert.equal(prevented, 1);
+});

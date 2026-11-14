@@ -4,7 +4,7 @@ from atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
-    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer'.split())
+    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder'.split())
 
 
 def test_rpc_allowlist_on_class_and_instance(commands):
@@ -494,7 +494,8 @@ def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev
     from atlas_toolkit.app import launch
     monkeypatch.setattr(build_info, "DEV_BUILD", dev)
     monkeypatch.setattr(launch, "configure_stdio", lambda: None)
-    monkeypatch.setattr(launch, "configure_logging", lambda: None)
+    monkeypatch.setattr(launch, "start_session_log", lambda **kwargs: None)
+    monkeypatch.setattr(launch, "install_excepthooks", lambda: None)
     monkeypatch.setattr(launch, "is_source_run", lambda: False)
     monkeypatch.setattr(launch.sys, "argv", ["app", "--debug"])
     monkeypatch.setattr(launch.sys, "platform", "linux")
@@ -516,3 +517,41 @@ def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev
     from atlas_toolkit.app.desktop_commands import window_title
     assert titles == [window_title()]
     assert debug == [dev]
+
+
+def test_page_logging(commands, caplog):
+    import logging
+    commands._clock = lambda: 0
+    commands._page_log_start = 0
+    with caplog.at_level(logging.INFO, logger="atlastoolkit.page"):
+        for level in ("error", "warn", "other"):
+            commands.log(level, "x" * 4100)
+        assert [r.levelno for r in caplog.records] == [40, 30, 20]
+        assert all(len(r.message) == 4000 for r in caplog.records)
+        for _ in range(250):
+            commands.log("info", "page")
+        assert len(caplog.records) == 201
+        assert caplog.records[-1].message == "page log rate limit reached"
+        commands._clock = lambda: 60
+        commands.log("info", "next minute")
+        assert caplog.records[-1].message == "next minute"
+
+
+@pytest.mark.parametrize("platform,opener", [("win32", None), ("darwin", "open"), ("linux", "xdg-open")])
+def test_open_log_folder(commands, monkeypatch, tmp_path, platform, opener):
+    from atlas_toolkit.app import desktop_commands as module
+    monkeypatch.setattr(module, "log_dir", lambda: tmp_path)
+    monkeypatch.setattr(module.sys, "platform", platform)
+    calls = []
+    monkeypatch.setattr(module.os, "startfile", lambda path: calls.append(path), raising=False)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    assert commands.open_log_folder() == {"ok": True}
+    assert calls == [str(tmp_path) if opener is None else [opener, str(tmp_path)]]
+
+
+def test_open_log_folder_failure(commands, monkeypatch):
+    from atlas_toolkit.app import desktop_commands as module
+    def fail():
+        raise OSError('unavailable')
+    monkeypatch.setattr(module, 'log_dir', fail)
+    assert commands.open_log_folder() == {'ok': False, 'error': 'unavailable'}

@@ -9,10 +9,12 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from urllib.parse import urlparse
 
 from atlas_toolkit.app import build_info
+from atlas_toolkit.app.logs import log_dir
 from atlas_toolkit.update.controller import get_update_dir
 from atlas_toolkit.update.updater import get_current_version
 
@@ -21,7 +23,7 @@ RPC_METHODS = frozenset("""
 startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
-restart_and_install_update install_update_from_file close_answer
+restart_and_install_update install_update_from_file close_answer log open_log_folder
 """.split())
 
 
@@ -32,7 +34,11 @@ def window_title():
 class DesktopCommands:
     RPC_METHODS = RPC_METHODS
 
-    def __init__(self, window, files, events, config, updates, argv, is_unsaved, file_dialog):
+    def __init__(self, window, files, events, config, updates, argv, is_unsaved, file_dialog, *, clock=time.monotonic):
+        self._clock = clock
+        self._page_log_lock = threading.Lock()
+        self._page_log_start = clock()
+        self._page_log_count = 0
         self._window = window
         self._files = files
         self._events = events
@@ -48,6 +54,33 @@ class DesktopCommands:
         self._close_check_in_progress = False
         self._close_event = None
         self._close_proceed = False
+
+    def log(self, level: str, message: str):
+        page = logging.getLogger("atlastoolkit.page")
+        with self._page_log_lock:
+            now = self._clock()
+            if now - self._page_log_start >= 60:
+                self._page_log_start = now
+                self._page_log_count = 0
+            self._page_log_count += 1
+            if self._page_log_count > 200:
+                if self._page_log_count == 201:
+                    page.warning("page log rate limit reached")
+                return
+            page.log({"error": logging.ERROR, "warn": logging.WARNING}.get(level, logging.INFO), message[:4000])
+
+    def open_log_folder(self):
+        try:
+            path = str(log_dir())
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path], close_fds=True)
+            else:
+                subprocess.Popen(["xdg-open", path], close_fds=True)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def set_window(self, window):
         self._window = window

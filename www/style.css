@@ -789,6 +789,10 @@ img#preview-img {
   line-height: 1.3;
 }
 
+#btn-open-log-folder {
+  margin-left: 8px;
+}
+
 #btn-install-update-file {
   margin-left: auto;
 }

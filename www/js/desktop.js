@@ -23,7 +23,7 @@ function serverError(error) {
   return new HostError('DesktopServerError', error.message || String(error));
 }
 
-async function rpc(header, buffers) {
+async function rpc(header, buffers, quiet = false) {
   try {
     const response = await fetch('api/rpc', {
       method: 'POST',
@@ -37,7 +37,7 @@ async function rpc(header, buffers) {
     return decodeFrame(await response.arrayBuffer());
   } catch (error) {
     if (error instanceof HostError && error.type === 'DesktopRequestRejected') throw error;
-    throw serverError(error);
+    throw quiet ? error : serverError(error);
   }
 }
 
@@ -49,7 +49,7 @@ export async function desktopCall(method, args = [], opts = {}) {
     buffers.push(value);
     return { $buf: index };
   });
-  const { header, buffers: resultBuffers } = await rpc({ target: 'desktop', method, argsJson: JSON.stringify(walkedArgs) }, buffers);
+  const { header, buffers: resultBuffers } = await rpc({ target: 'desktop', method, argsJson: JSON.stringify(walkedArgs) }, buffers, method === 'log');
   const result = JSON.parse(header.json);
   if (!result.ok) throw new HostError(result.error.type, result.error.message);
   return walkPayload(result.value, item => {
@@ -111,10 +111,44 @@ export function onDesktopEvent(kind, handler) {
 export function _setClock(fn) { clock = fn; }
 
 export function _resetForTests() {
+  loggingCleanup?.();
+  loggingCleanup = null;
   eventSource?.close();
   eventSource = null;
   handlers.clear();
   streamInterrupted = false;
   lastAlert = -Infinity;
   clock = () => Date.now();
+}
+
+let loggingCleanup = null;
+function sendPageLog(level, text) {
+  try { void desktopCall('log', [level, text]).catch(() => {}); } catch {}
+}
+function logText(value) {
+  try { return value instanceof Error ? (value.stack || value.message) : String(value); }
+  catch { return '[unprintable]'; }
+}
+export function logStage(text) {
+  if (isDesktop()) sendPageLog('info', 'startup: ' + text);
+}
+export function installDesktopLogging() {
+  if (!isDesktop() || loggingCleanup) return;
+  const originalError = console.error, originalWarn = console.warn;
+  const onError = event => sendPageLog('error', logText(event.error || event.message));
+  const onRejection = event => sendPageLog('error', logText(event.reason));
+  window.addEventListener('error', onError);
+  window.addEventListener('unhandledrejection', onRejection);
+  for (const [method, original] of [['error', originalError], ['warn', originalWarn]]) {
+    console[method] = (...args) => {
+      try { original.apply(console, args); } finally {
+        sendPageLog(method, args.map(logText).join(' '));
+      }
+    };
+  }
+  loggingCleanup = () => {
+    console.error = originalError; console.warn = originalWarn;
+    window.removeEventListener('error', onError);
+    window.removeEventListener('unhandledrejection', onRejection);
+  };
 }

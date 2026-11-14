@@ -14,6 +14,7 @@ from atlas_toolkit.app.desktop import build_desktop, desktop_site
 from atlas_toolkit.app import build_info
 from atlas_toolkit.app.desktop_commands import DesktopCommands, window_title
 from atlas_toolkit.app.paths import is_source_run
+from atlas_toolkit.app.logs import start_session_log, install_excepthooks
 
 log = logging.getLogger(__name__)
 
@@ -71,14 +72,6 @@ def configure_stdio() -> None:
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
 
-def configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(levelname)s: %(message)s",
-        stream=sys.stdout,
-    )
-
-
 def setup_drop(window: webview.Window, commands: DesktopCommands) -> None:
     try:
         from webview.dom import DOMEventHandler
@@ -99,12 +92,13 @@ def setup_drop(window: webview.Window, commands: DesktopCommands) -> None:
 
 def run() -> None:
     configure_stdio()
-    configure_logging()
 
     clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
 
     webview_debug = debug_requested and (is_source_run() or build_info.DEV_BUILD)
+    start_session_log(debug=webview_debug or build_info.DEV_BUILD)
+    install_excepthooks()
     if debug_requested and not webview_debug:
         log.info("--debug is only available when running from source or a development build; ignored.")
     elif webview_debug:

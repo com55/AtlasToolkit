@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
-import { desktopCall, onDesktopEvent } from './js/desktop.js';
+import { desktopCall, onDesktopEvent, installDesktopLogging, logStage } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
 import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
@@ -40,11 +40,26 @@ function applyAppTitle(atlasFilename) {
   document.title = formatAppTitle(appVersion, atlasFilename);
 }
 
+export async function handleLogFolderShortcut(event) {
+  if (!isPywebviewDesktop() || !event.shiftKey || !(event.ctrlKey || event.metaKey)
+      || event.key.toLowerCase() !== 'l') return;
+  event.preventDefault();
+  try {
+    const result = await desktopCall('open_log_folder');
+    if (!result.ok) await showAlert(result.error, 'Open log folder');
+  } catch (error) {
+    await showAlert(error.message || String(error), 'Open log folder');
+  }
+}
+
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
   let info = null;
   if (isPywebviewDesktop()) {
+    document.addEventListener('keydown', handleLogFolderShortcut);
+    installDesktopLogging();
+    logStage('DOMContentLoaded');
     const actions = {
       openAtlasBundle,
       applyModImage: applyNativeModImageDrop,
@@ -54,12 +69,28 @@ window.addEventListener('DOMContentLoaded', async () => {
     onDesktopEvent('confirm-close', handleConfirmClose);
     onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
     const installButton = document.getElementById('btn-install-update-file');
+    const logButton = document.createElement('button');
+    logButton.className = 'hidden';
+    logButton.id = 'btn-open-log-folder';
+    logButton.textContent = 'Open log folder';
+    installButton.after(logButton);
+    logButton.addEventListener('click', async () => {
+      try {
+        const result = await desktopCall('open_log_folder');
+        if (!result.ok) await showAlert(result.error, 'Open log folder');
+      } catch (error) { await showAlert(error.message, 'Open log folder'); }
+    });
     try {
       info = await desktopCall('startup');
+      logStage('startup returned');
       if (info.updateFailure) window.showUpdateInstallFailed(info.updateFailure);
-      if (info?.devBuild) installButton.classList.remove('hidden');
+      if (info?.devBuild) {
+        installButton.classList.remove('hidden');
+        logButton.classList.remove('hidden');
+      }
     } catch (e) {
       info = null;
+      logStage('startup failed');
       console.error(e);
       showToast(`Startup check failed: ${e.message}`, 'error');
     }
@@ -76,7 +107,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   const preparingText = 'Preparing AtlasToolkit engine...';
   statusText.textContent = preparingText;
   startEngine().then(async () => {
+    logStage('engine ready');
     await AtlasAPI.init_settings_from_prefs();
+    logStage('settings applied/Ready');
     if (statusText.textContent === preparingText) statusText.textContent = 'Ready';
   }).catch(error => {
     setEngineStartupError(error);
@@ -128,7 +161,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (info?.atlasError) showToast(info.atlasError, 'error');
-  if (info?.atlas) await openAtlasBundle(info.atlas);
+  if (info?.atlas) {
+    logStage('CLI atlas loading');
+    const loaded = await openAtlasBundle(info.atlas);
+    logStage(loaded ? 'CLI atlas loaded' : 'CLI atlas load failed');
+  }
 });
 
 /**
