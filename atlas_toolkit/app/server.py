@@ -47,6 +47,7 @@ def _static_path(site, path):
 
 
 class _HTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128
     daemon_threads = True
     allow_reuse_address = False
 
@@ -60,7 +61,8 @@ class _HTTPServer(ThreadingHTTPServer):
 
 
 class DesktopServer:
-    def __init__(self, site: Path, host, commands, files, events, ping_interval=15.0):
+    def __init__(self, site: Path, host, commands, files, events, ping_interval=15.0,
+                 connection_timeout=10.0):
         self.site = site.resolve()
         self.host = host
         self.commands = commands
@@ -74,8 +76,35 @@ class DesktopServer:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            timeout = connection_timeout
+
+            def handle_one_request(self):
+                self.connection.settimeout(self.timeout)
+                super().handle_one_request()
+
+            def setup(self):
+                super().setup()
+                _LOG.debug("connection opened %s", self.client_address[1])
+
+            def parse_request(self):
+                # The stdlib has read the request line, but not the headers yet.
+                words = self.raw_requestline.decode("iso-8859-1").split()
+                if len(words) >= 2:
+                    _LOG.debug("request %s %s", words[0].replace(owner._token, "<token>"),
+                               words[1].replace(owner._token, "<token>"))
+                parsed = super().parse_request()
+                if parsed:
+                    # Only request-line/header reads have a deadline. Large RPC
+                    # uploads and long-lived SSE responses must remain blocking.
+                    self.connection.settimeout(None)
+                return parsed
+
             def log_message(self, format, *args):
-                _LOG.debug(format, *args)
+                if format == "Request timed out: %r" and not getattr(self, "raw_requestline", b""):
+                    _LOG.debug("connection idle timeout")
+                else:
+                    _LOG.debug((format % args).replace(owner._token, "<token>"))
 
             def end_headers(self):
                 self.send_header("Cache-Control", "no-store")
@@ -85,6 +114,8 @@ class DesktopServer:
             def reply(self, status, body=b"", content_type="text/plain"):
                 try:
                     self.send_response(status)
+                    if self.close_connection:
+                        self.send_header("Connection", "close")
                     self.send_header("Content-Type", content_type)
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
@@ -93,6 +124,10 @@ class DesktopServer:
                     pass
 
             def handle_route(self):
+                # Early rejections must never reuse a connection with unread bytes.
+                self._request_close_connection = self.close_connection
+                self.close_connection = True
+
                 if self.headers.get_all("Host", []) != [owner._authority]:
                     self.reply(403)
                     return
@@ -103,13 +138,16 @@ class DesktopServer:
                     self.reply(404)
                     return
                 path = unquote(parts[3])
-                if path == "api/rpc":
+                if path in ("api/rpc", "api/boot-error"):
                     if self.command != "POST":
                         self.reply(405)
                     elif self.headers.get_all("Origin", []) != [owner._origin]:
                         self.reply(403)
                     else:
-                        self.rpc()
+                        if path == "api/boot-error":
+                            self.boot_error()
+                        else:
+                            self.rpc()
                     return
                 if self.command != "GET":
                     self.reply(405)
@@ -126,6 +164,7 @@ class DesktopServer:
                     except OSError:
                         self.reply(404)
                     else:
+                        self.close_connection = self._request_close_connection
                         self.reply(200, body, "application/octet-stream")
                     return
                 candidate = _static_path(owner.site, path)
@@ -137,25 +176,48 @@ class DesktopServer:
                 except OSError:
                     self.reply(404)
                 else:
+                    self.close_connection = self._request_close_connection
                     self.reply(200, body, _TYPES.get(candidate.suffix, "application/octet-stream"))
 
-            def rpc(self):
-                length = self.headers.get("Content-Length")
-                if length is None:
+            def read_body(self, limit):
+                if self.headers.get("Transfer-Encoding") is not None:
+                    self.reply(400)
+                    return None
+                lengths = self.headers.get_all("Content-Length", [])
+                if not lengths:
                     self.reply(411)
-                    return
+                    return None
                 try:
-                    length = int(length)
-                    if length < 0:
+                    if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal():
                         raise ValueError
+                    length = int(lengths[0])
                 except ValueError:
                     self.reply(400)
-                    return
-                if length > 2 * 1024**3:
+                    return None
+                if length > limit:
                     self.reply(413)
+                    return None
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    self.reply(400)
+                    return None
+                self.close_connection = self._request_close_connection
+                return body
+
+            def boot_error(self):
+                body = self.read_body(4096)
+                if body is None:
+                    return
+                text = body.decode("utf-8", errors="replace").replace(owner._token, "<token>")
+                _LOG.warning("boot error from page: %s", text)
+                self.reply(204)
+
+            def rpc(self):
+                body = self.read_body(2 * 1024**3)
+                if body is None:
                     return
                 try:
-                    header, buffers = decode_frame(self.rfile.read(length))
+                    header, buffers = decode_frame(body)
                     if not isinstance(header, dict) or not all(
                         isinstance(header.get(key), str) for key in ("target", "method", "argsJson")
                     ):
@@ -188,6 +250,8 @@ class DesktopServer:
                 subscription = owner.events.subscribe()
                 try:
                     self.send_response(200)
+                    self.close_connection = True
+                    self.send_header("Connection", "close")
                     self.send_header("Content-Type", "text/event-stream")
                     self.end_headers()
                     last_write = time.monotonic()

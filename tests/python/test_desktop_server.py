@@ -293,6 +293,7 @@ def test_socket_events_and_assets(live):
     conn, response = request(path="api/events")
     try:
         assert response.getheader("Content-Type") == "text/event-stream"
+        assert response.getheader("Connection") == "close"
         assert response.readline() == b'data: {"kind":"ready","value":"\\u96ea"}\n'
         assert response.readline() == b"\n"
         assert response.readline() == b": ping\n"
@@ -388,3 +389,145 @@ def test_static_path_containment(tmp_path):
     assert _static_path(site, "") == index
     for path in ("../outside", str(outside), "link", ".", "missing", "\x00"):
         assert _static_path(site, path) is None
+
+
+@pytest.fixture
+def short_timeout_live(live):
+    live[0]._http.RequestHandlerClass.timeout = 0.2
+    return live
+
+
+@pytest.mark.parametrize("partial", [b"", b"GET / HTTP/1.0\r\nHost:"])
+def test_socket_idle_and_partial_headers_timeout(short_timeout_live, caplog, partial):
+    server, *_, url = short_timeout_live
+    caplog.set_level("DEBUG", logger="atlas_toolkit.app.server")
+    started = time.monotonic()
+    with socket.create_connection((url.hostname, url.port), timeout=2) as client:
+        if partial:
+            client.sendall(partial)
+        assert client.recv(1) == b""
+    assert time.monotonic() - started < 2
+    assert "connection opened " in caplog.text
+    if not partial:
+        deadline = time.monotonic() + 1
+        while "connection idle timeout" not in caplog.text and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert "connection idle timeout" in caplog.text
+    assert server._token not in caplog.text
+
+
+def test_socket_quiet_sse_survives_connection_timeout(short_timeout_live):
+    server, _, _, _, events, request, _, _, _ = short_timeout_live
+    server.ping_interval = 15
+    conn, response = request(path="api/events")
+    try:
+        time.sleep(0.6)
+        events.publish("after-idle", value="alive")
+        assert response.readline() == b'data: {"kind":"after-idle","value":"alive"}\n'
+        assert response.readline() == b"\n"
+    finally:
+        response.close()
+        conn.close()
+
+
+def test_socket_slow_rpc_body_survives_connection_timeout(short_timeout_live, caplog):
+    server, *_, url = short_timeout_live
+    caplog.set_level("DEBUG", logger="atlas_toolkit.app.server")
+    body = encode_frame({"target": "desktop", "method": "ping", "argsJson": "[]"}, [])
+    conn = http.client.HTTPConnection(url.hostname, url.port, timeout=3)
+    try:
+        conn.putrequest("POST", url.path.removesuffix("index.html") + "api/rpc")
+        conn.putheader("Origin", f"http://{url.netloc}")
+        conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders()
+        time.sleep(0.6)
+        conn.send(body)
+        response = conn.getresponse()
+        assert response.status == 200
+        header, buffers = decode_frame(response.read())
+        assert json.loads(header["json"]) == {"ok": True, "value": "pong"}
+        assert buffers == []
+        assert "request POST /s/<token>/api/rpc" in caplog.text
+        assert server._token not in caplog.text
+    finally:
+        conn.close()
+
+
+def test_connection_timeout_defaults_to_ten_seconds(live):
+    assert live[0]._http.RequestHandlerClass.timeout == 10.0
+
+
+def test_server_startup_backlog():
+    assert _HTTPServer.request_queue_size == 128
+
+
+def test_socket_startup_burst(live):
+    url = live[-1]
+    barrier = threading.Barrier(60)
+
+    def get():
+        barrier.wait(timeout=10)
+        with socket.create_connection((url.hostname, url.port), timeout=10) as client:
+            client.sendall(f"GET {url.path} HTTP/1.1\r\nHost: {url.netloc}\r\nConnection: close\r\n\r\n".encode())
+            response = http.client.HTTPResponse(client)
+            response.begin()
+            assert response.status == 200
+            assert response.read() == b"<html>test</html>"
+            response.close()
+
+    with ThreadPoolExecutor(60) as pool:
+        results = [pool.submit(get) for _ in range(60)]
+        for result in results:
+            result.result(timeout=15)
+
+
+def test_socket_keep_alive_two_gets(short_timeout_live):
+    url = short_timeout_live[-1]
+    with socket.create_connection((url.hostname, url.port), timeout=2) as client:
+        for _ in range(2):
+            client.sendall(f"GET {url.path} HTTP/1.1\r\nHost: {url.netloc}\r\n\r\n".encode())
+            response = http.client.HTTPResponse(client)
+            response.begin()
+            assert response.version == 11
+            assert response.status == 200
+            assert response.read() == b"<html>test</html>"
+            response.close()
+        assert client.recv(1) == b""  # Idle keep-alive still has a deadline.
+
+
+@pytest.mark.parametrize("path, headers, expected", [
+    ("api/rpc", "Content-Length: 4\r\n", 403),
+    ("api/boot-error", "Content-Length: 4\r\n", 403),
+    ("missing", "Content-Length: 4\r\n", 405),
+    ("api/rpc", "Origin: {origin}\r\n", 411),
+    ("api/rpc", "Origin: {origin}\r\nContent-Length: bad\r\n", 400),
+    ("api/rpc", "Origin: {origin}\r\nContent-Length: 2147483649\r\n", 413),
+])
+def test_socket_early_rejection_closes(live, path, headers, expected):
+    url = live[-1]
+    prefix = url.path.removesuffix("index.html")
+    headers = headers.format(origin=f"http://{url.netloc}")
+    with socket.create_connection((url.hostname, url.port), timeout=2) as client:
+        client.sendall((f"POST {prefix}{path} HTTP/1.1\r\nHost: {url.netloc}\r\n" +
+                        headers + "\r\nBODY" +
+                        f"GET {url.path} HTTP/1.1\r\nHost: {url.netloc}\r\n\r\n").encode())
+        response = http.client.HTTPResponse(client)
+        response.begin()
+        assert response.status == expected
+        assert response.getheader("Connection") == "close"
+        response.read()
+        response.close()
+        assert client.recv(1) == b""
+
+
+def test_socket_boot_error(live, caplog):
+    server, *_, url = live
+    request = live[5]
+    origin = {"Origin": f"http://{url.netloc}"}
+    assert request("POST", "api/boot-error", b"failed import")[0] == 403
+    assert request("POST", "api/boot-error", b"x" * 4097, origin)[0] == 413
+    body = f"failed import /s/{server._token}/script.js".encode()
+    status, headers, data = request("POST", "api/boot-error", body, origin)
+    assert status == 204 and data == b"" and headers["Content-Length"] == "0"
+    assert "boot error from page: failed import /s/<token>/script.js" in caplog.text
+    assert server._token not in caplog.text

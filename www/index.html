@@ -12,6 +12,21 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="stylesheet" href="style.css" />
     <script>
+      if (location.pathname.startsWith('/s/')) {
+        let sent = 0;
+        const redact = text => String(text || '').replace(/\/s\/[^/\s?#]+/g, '/s/<token>');
+        window.addEventListener('error', event => {
+          const target = event.target;
+          if (sent >= 5 || !(['SCRIPT', 'LINK'].includes(target?.tagName) ||
+              /failed.*import|import.*failed|failed to fetch.*module|loading.*module/i.test(event.message || ''))) return;
+          sent++;
+          try {
+            navigator.sendBeacon('api/boot-error', redact(
+              (event.message || 'Resource load failed') + ' ' + (target?.src || target?.href || '')
+            ).slice(0, 1000));
+          } catch (_) {}
+        }, true);
+      }
       // Lock desktop layout synchronously before first paint so portrait CSS
       // never flashes on. The desktop page lives under /s/<token>/.
       if (location.pathname.startsWith('/s/')) {
