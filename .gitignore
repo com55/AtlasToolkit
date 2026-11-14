@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Node build tooling (esbuild for the web/desktop bundle)
+node_modules/
+
 # Editor
 .vscode
 .claude

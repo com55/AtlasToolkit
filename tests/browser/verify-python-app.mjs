@@ -23,7 +23,7 @@ async function waitInPage(page, asyncPredicate, timeout = 60000, arg = null) {
 }
 
 async function waitForEdit(page) {
-  await waitInPage(page, async () => document.body.classList.contains('mode-modify') && !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(page, async () => document.body.classList.contains('mode-modify') && !(await window.__appModule('busy-overlay')).isBusy());
 }
 
 async function loadChromium() {
@@ -111,7 +111,13 @@ try {
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
+  const installAppModuleHelper = () => {
+    window.__appModule = name => window.__atlasModules
+      ? Promise.resolve(window.__atlasModules[name])
+      : import('/js/' + name + '.js');
+  };
   const context = await browser.newContext({ serviceWorkers: 'block' });
+  await context.addInitScript(installAppModuleHelper);
   const page = await context.newPage();
   const localOnly = (route) => {
     if (new URL(route.request().url()).host !== new URL(origin).host) {
@@ -173,6 +179,14 @@ try {
   console.log('PASS Python RegionNotFound becomes a HostError');
   await checkWithin('stopEngine', () => page.evaluate(() => window.engine.stopEngine()));
 
+  // Wait for startup so absence cannot pass merely because the script is still loading.
+  const noHooks = await context.newPage();
+  await noHooks.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await noHooks.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000, polling:500});
+  if (!await noHooks.evaluate(() => window.__atlasModules === undefined)) throw new Error('App modules exposed without test-hooks');
+  await noHooks.close();
+  console.log('PASS app modules are private without test-hooks');
+
   // Exercise the shipped page as well as the transport harness above.
   const app = await context.newPage();
   const pageErrors = [];
@@ -183,13 +197,13 @@ try {
     await workerGate;
     await route.continue();
   });
-  await app.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await app.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
   await app.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling: 500});
   if (!await app.locator('.btn-open').isEnabled()) throw new Error('Open disabled before engine ready');
   if (await app.locator('#region-list').count() !== 1) throw new Error('Region list missing before engine ready');
   if (await app.locator('#status-text').textContent() !== 'Preparing AtlasToolkit engine...') throw new Error('Preparing status missing before ready');
   await app.evaluate(async () => {
-    const {AtlasAPI} = await import('/js/atlas-api.js');
+    const {AtlasAPI} = await window.__appModule('atlas-api');
     await AtlasAPI.set_forced_resizing(false);
     window.testAPI = AtlasAPI;
     window.testAtlas = 'p.png\nsize: 12,12\npma: false\na\n bounds: 0,0,10,2\n\nq.png\nsize: 12,12\npma: false\nb\n bounds: 0,0,4,6\n';
@@ -205,8 +219,8 @@ try {
     window.pendingStartupLoad = (async () => {
       const ok = await AtlasAPI.load_from_files([new File([window.testAtlas], 'synthetic.atlas'), ...window.testPages]);
       if (!ok || AtlasAPI.get_region_names().length !== 2 || !AtlasAPI.is_multi_page()) throw new Error('Two-page app load failed');
-      const {loadRegions} = await import('/js/region-list.js');
-      const {updateMeshCroppingUI} = await import('/js/modify-mode.js');
+      const {loadRegions} = await window.__appModule('region-list');
+      const {updateMeshCroppingUI} = await window.__appModule('modify-mode');
       await loadRegions(); updateMeshCroppingUI();
     })();
     window.startupLoadDone = false;
@@ -232,9 +246,9 @@ try {
   if (!nonBlank) throw new Error('App preview is blank');
   // Drive the same selection state used by pointer selection, then render.
   await app.evaluate(async () => {
-    const {state, getSelectedRegions} = await import('/js/state.js');
+    const {state, getSelectedRegions} = await window.__appModule('state');
     state.selectedIndices = new Set([0,1]);
-    const {updatePreview} = await import('/js/preview.js');
+    const {updatePreview} = await window.__appModule('preview');
     await updatePreview(getSelectedRegions());
   });
   await app.waitForFunction(() => {
@@ -243,8 +257,8 @@ try {
   }, null, {polling: 500});
   await app.evaluate(async () => {
     await window.testAPI.set_forced_resizing(true);
-    const {getSelectedRegions} = await import('/js/state.js');
-    const {updatePreview} = await import('/js/preview.js');
+    const {getSelectedRegions} = await window.__appModule('state');
+    const {updatePreview} = await window.__appModule('preview');
     await updatePreview(getSelectedRegions());
   });
   await app.waitForFunction(() => {
@@ -311,8 +325,8 @@ try {
   await app.locator('#page-next').click();
   await app.waitForFunction(() => document.getElementById('page-indicator').textContent.includes('2 / 2'), null, {polling:500});
   await app.evaluate(async () => {
-    const {state} = await import('/js/state.js');
-    const {onModPreviewReceived, refreshStructuralUi} = await import('/js/modify-mode.js');
+    const {state} = await window.__appModule('state');
+    const {onModPreviewReceived, refreshStructuralUi} = await window.__appModule('modify-mode');
     const api = window.testAPI;
     const png = async (w,h) => {
       const c = new OffscreenCanvas(w,h); const ctx = c.getContext('2d');
@@ -320,7 +334,7 @@ try {
       return new File([await c.convertToBlob({type:'image/png'})], 'mod.png', {type:'image/png'});
     };
     window.makeMod = png;
-    const {isBusy} = await import('/js/busy-overlay.js');
+    const {isBusy} = await window.__appModule('busy-overlay');
     const modifying = api.process_mod_image(await png(4,6), ['b']);
     if (!isBusy()) throw new Error('Modify is running without a busy lock');
     const modified = await modifying;
@@ -349,7 +363,7 @@ try {
     bitmap.close();
   });
   await app.evaluate(async () => {
-    const {copyPreviewImage} = await import('/js/drop.js');
+    const {copyPreviewImage} = await window.__appModule('drop');
     const original = navigator.clipboard.write;
     let copied;
     navigator.clipboard.write = async items => { copied = await items[0].getType('image/png'); };
@@ -361,7 +375,7 @@ try {
     } finally { navigator.clipboard.write = original; }
   });
   const imageDownload = app.waitForEvent('download');
-  await app.evaluate(async () => (await import('/js/drop.js')).savePreviewImageAs());
+  await app.evaluate(async () => (await window.__appModule('drop')).savePreviewImageAs());
   const imageSaved = await imageDownload;
   const imageBytes = fs.readFileSync(await imageSaved.path());
   const expectedImage = await app.evaluate(async () => [...new Uint8Array(await (await window.testAPI.save_page_image()).arrayBuffer())]);
@@ -382,7 +396,7 @@ try {
   await app.waitForFunction(() => !window.testAPI.has_pending_modifications(), null, {polling:500});
   await app.waitForFunction(() => document.querySelectorAll('.region-item').length === 2, null, {polling:500});
   await app.evaluate(async () => {
-    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
     await onModPreviewReceived(await window.testAPI.rename_region('a','saved'));
   });
   await app.evaluate(async () => {
@@ -404,7 +418,7 @@ try {
   const savedZip = fs.readFileSync(await saved.path());
   if (!savedZip.includes(Buffer.from('synthetic.atlas')) || !savedZip.includes(Buffer.from('.png'))) throw new Error('Save ZIP missing atlas or PNG');
   await app.evaluate(async () => {
-    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
     const result = await window.testAPI.set_settings({alpha:'premultiplied'});
     await onModPreviewReceived(result);
     if (result.state.hasPending) throw new Error('Cache-hit setting marked saved output pending');
@@ -433,21 +447,21 @@ try {
 
   if (pageErrors.length) throw new Error('App page errors: ' + pageErrors.join('; '));
   console.log('PASS real app DuplicateRegionName alert');
-  await app.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
+  await app.evaluate(async () => (await window.__appModule('engine-client')).stopEngine());
 
   const recovery = await context.newPage();
   await recovery.goto(origin + '/index.html?test-hooks', {waitUntil:'domcontentloaded'});
   await recovery.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await recovery.evaluate(async () => {
-    const {AtlasAPI} = await import('/js/atlas-api.js');
+    const {AtlasAPI} = await window.__appModule('atlas-api');
     const c = new OffscreenCanvas(4,4);
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#40a060';
     ctx.fillRect(0,0,4,4);
     const png = new File([await c.convertToBlob({type:'image/png'})], 'p.png');
     await AtlasAPI.load_from_files([new File(['p.png\nsize: 4,4\na\n bounds: 0,0,4,4\n'], 'recovery.atlas'), png]);
-    await (await import('/js/region-list.js')).loadRegions();
-    await (await import('/js/modify-mode.js')).enterEditMode();
+    await (await window.__appModule('region-list')).loadRegions();
+    await (await window.__appModule('modify-mode')).enterEditMode();
     await AtlasAPI.rename_region('a','lost');
     window.recoveryAPI = AtlasAPI;
     window.__atlasToolkitTestHooks.killEngine();
@@ -461,19 +475,19 @@ try {
   console.log('PASS engine death alert and pristine reload');
 
   const idleApp = await context.newPage();
-  await idleApp.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await idleApp.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
   await idleApp.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout: 120000, polling: 500});
   if (await idleApp.locator('#status-text').textContent() !== 'Ready') throw new Error('Idle app status is not Ready');
-  await idleApp.evaluate(async () => (await import('/js/engine-client.js')).stopEngine());
+  await idleApp.evaluate(async () => (await window.__appModule('engine-client')).stopEngine());
   await idleApp.close();
   console.log('PASS fresh app startup status becomes Ready without loading');
 
   // Settings regression checks use a fresh real app page and real host errors.
   const settingsPage = await context.newPage();
-  await settingsPage.goto(origin + '/index.html', {waitUntil:'domcontentloaded'});
+  await settingsPage.goto(origin + '/index.html?test-hooks', {waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   const returnSettingsToView = async () => {
-    await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+    await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
     if (await settingsPage.evaluate(() => document.body.classList.contains('mode-modify'))) {
       const pending = await settingsPage.evaluate(() => window.settingsAPI.has_pending_modifications());
       await settingsPage.locator('#mode-extract').click();
@@ -481,13 +495,13 @@ try {
         await settingsPage.locator('#modal-overlay').waitFor({state:'visible'});
         await settingsPage.locator('#btn-modal-confirm').click();
       }
-      await waitInPage(settingsPage, async () => document.body.classList.contains('mode-extract') && !(await import('/js/busy-overlay.js')).isBusy());
+      await waitInPage(settingsPage, async () => document.body.classList.contains('mode-extract') && !(await window.__appModule('busy-overlay')).isBusy());
     }
   };
   const loadSettingsFixture = async (count = 2, pma = false) => {
     await returnSettingsToView();
     return settingsPage.evaluate(async ({count,pma}) => {
-    const {AtlasAPI: api} = await import('/js/atlas-api.js');
+    const {AtlasAPI: api} = await window.__appModule('atlas-api');
     window.settingsAPI = api;
     const c = new OffscreenCanvas(64,64); const ctx = c.getContext('2d');
     // Unique opaque pixels prevent one-pixel regions being deduplicated.
@@ -505,8 +519,8 @@ try {
     const png = new File([await c.convertToBlob({type:'image/png'})], 'settings.png');
     const text = 'settings.png\nsize: 64,64\npma: ' + pma + '\n' + Array.from({length:count}, (_,i) => 'r'+i+'\n bounds: '+(i%64)+','+Math.floor(i/64)+',1,1\n').join('');
     if (!await api.load_from_files([new File([text],'settings.atlas'),png])) throw new Error('Settings fixture failed');
-    await (await import('/js/region-list.js')).loadRegions();
-    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    await (await window.__appModule('region-list')).loadRegions();
+    (await window.__appModule('modify-mode')).updateMeshCroppingUI();
     }, {count,pma});
   };
   await loadSettingsFixture();
@@ -530,10 +544,10 @@ try {
   if (await settingsPage.locator('#options-group-mesh').isVisible()) throw new Error('Empty mesh divider visible in Edit');
   if (await settingsPage.locator('#options-row > li').evaluateAll(items => items.some(li => getComputedStyle(li).display !== 'none' && ![...li.querySelectorAll('button,label')].some(child => child.getClientRects().length)))) throw new Error('Visible empty options item');
   await settingsPage.evaluate(async () => {
-    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
     const unedited = await window.settingsAPI.set_settings({keepLayout:false});
     await onModPreviewReceived(unedited);
-    const {state} = await import('/js/state.js');
+    const {state} = await window.__appModule('state');
     if (state.hasModImage || !document.getElementById('btn-save-mod').disabled || !document.getElementById('btn-reset-mod').disabled) throw new Error('Unedited settings result enables Save or Reset');
     const sizes = [[120,60],[120,60],[150,190],[130,130],[70,160],[70,160],[170,110],[90,40]];
     for (let i=0; i<sizes.length; i++) {
@@ -552,15 +566,15 @@ try {
   const beforePacking = await settingsPage.evaluate(() => window.settingsPreviewPixels());
   await settingsPage.locator('[data-packer="rectangles"]').click();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
   // Wait for the returned EditResult to reach the displayed image, then
   // compare decoded pixels/dimensions rather than minted blob URLs.
   await waitInPage(settingsPage, async before => (await window.settingsPreviewPixels()) !== before, 60000, beforePacking);
   await settingsPage.locator('#p-num').fill('');
   await settingsPage.keyboard.type('1');
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await window.__appModule('busy-overlay')).isBusy());
   await settingsPage.keyboard.type('5');
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await window.__appModule('busy-overlay')).isBusy());
   if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
   if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
   // Keep the typed 15px value for the persistence check after reload.
@@ -571,7 +585,7 @@ try {
   if (hint !== 'New regions go into free space.\nOff: every edited page is repacked.') throw new Error('Keep layout hint');
   await settingsPage.locator('[data-packer="rectangles"]').click();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
   // Cached packs answer without the busy overlay; an uncached one shows it.
   await settingsPage.evaluate(() => {
     const overlay = document.getElementById('busy-overlay');
@@ -582,14 +596,14 @@ try {
   for (const [key, label] of [['rectangles_in_place','Rectangles In-Place ·'],['rectangles','Rectangles ·']]) {
     await settingsPage.locator('[data-packer="'+key+'"]').click();
     await settingsPage.waitForFunction(text => document.getElementById('btn-pack-chip').textContent.includes(text), label, {polling:500});
-    await waitInPage(settingsPage, async () => !(await import('/js/busy-overlay.js')).isBusy());
+    await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
   }
   if (await settingsPage.evaluate(() => window.busyShown) !== 0) throw new Error('Busy overlay shown for a cached pack');
   await settingsPage.locator('[data-packer="shelf"]').click();
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Shelf ·') && !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Shelf ·') && !(await window.__appModule('busy-overlay')).isBusy());
   if (await settingsPage.evaluate(() => window.busyShown) === 0) throw new Error('Busy overlay not seen for an uncached pack (observer control)');
   await settingsPage.locator('[data-packer="rectangles"]').click();
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·') && !(await import('/js/busy-overlay.js')).isBusy());
+  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·') && !(await window.__appModule('busy-overlay')).isBusy());
   await settingsPage.reload({waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await loadSettingsFixture();
@@ -618,8 +632,9 @@ try {
   await settingsPage.evaluate(() => { window.settingsToasts=[]; const original=window.showToast; window.showToast=(...args) => { window.settingsToasts.push(args); return original(...args); }; });
   await loadSettingsFixture();
   await settingsPage.evaluate(async () => {
-    const {renderSettings} = await import('/js/settings-panel.js');
-    renderSettings(window.settingsAPI.get_settings()); renderSettings(window.settingsAPI.get_settings());
+    // Empty updates publish settings through the app's own renderer.
+    await window.settingsAPI.set_settings({});
+    await window.settingsAPI.set_settings({});
     if (window.settingsToasts.filter(([text]) => text === 'Polygons need a .skel file; using Rectangles.').length !== 1) throw new Error('Fallback toast count');
   });
   await loadSettingsFixture();
@@ -629,7 +644,7 @@ try {
   await settingsPage.locator('#mode-modify').click();
   await waitForEdit(settingsPage);
   await settingsPage.evaluate(async () => {
-    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
     const recordPackedSize = async result => {
       if (result?.state && result.image) {
         const bitmap = await createImageBitmap(await (await fetch(result.image)).blob());
@@ -672,7 +687,7 @@ try {
   const skeletonBytes = [...fs.readFileSync(path.join(HERE, '../fixtures/synthetic-skeleton-42.skel'))];
   const loadPendingFixture = async multi => {
     await pendingPage.evaluate(async multi => {
-      const {AtlasAPI: api} = await import('/js/atlas-api.js');
+      const {AtlasAPI: api} = await window.__appModule('atlas-api');
       window.pendingAPI = api;
       await api.set_pref('packer', 'shelf');
       const c = new OffscreenCanvas(32,32); const ctx = c.getContext('2d');
@@ -683,8 +698,8 @@ try {
       const files = [new File([text], 'pending.atlas'), new File([blob], 'p.png')];
       if (multi) files.push(new File([blob], 'q.png'));
       if (!await api.load_from_files(files)) throw new Error('Pending fixture load failed');
-      await (await import('/js/region-list.js')).loadRegions();
-      (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+      await (await window.__appModule('region-list')).loadRegions();
+      (await window.__appModule('modify-mode')).updateMeshCroppingUI();
     }, multi);
   };
   const returnPendingToView = async () => {
@@ -739,7 +754,7 @@ try {
     await waitForEdit(pendingPage);
   };
   await pendingPage.evaluate(async () => {
-    const {state} = await import('/js/state.js');
+    const {state} = await window.__appModule('state');
     window.pendingBounds = () => state.modifyRegionBounds;
   });
   await modifyThroughUI(['auto_added'], 16);
@@ -750,7 +765,7 @@ try {
   await pendingPage.evaluate(async bytes => {
     const api = window.pendingAPI;
     if (!await api.apply_skel_file(new File([new Uint8Array(bytes)], 'synthetic.skel'))) throw new Error('Late skeleton rejected');
-    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    (await window.__appModule('modify-mode')).updateMeshCroppingUI();
   }, skeletonBytes);
   if (!await pendingPage.locator('#chk-mesh-hull').isEnabled()) throw new Error('Late skeleton did not enable silhouettes');
   await pendingPage.locator('#mode-modify').click();
@@ -768,13 +783,13 @@ try {
   await pendingPage.locator('#mode-modify').click();
   await waitForEdit(pendingPage);
   await pendingPage.evaluate(async () => {
-    const {onModPreviewReceived} = await import('/js/modify-mode.js');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
     await onModPreviewReceived(await window.pendingAPI.process_mod_image(new File([new Uint8Array(window.pendingPNG)], 'edit.png'), ['mesh_a']));
     window.beforeSkeletonPreview = document.getElementById('preview-img').src;
   });
   await pendingPage.evaluate(async bytes => {
     if (!await window.pendingAPI.apply_skel_file(new File([new Uint8Array(bytes)], 'during-edit.skel'))) throw new Error('Edit skeleton rejected');
-    (await import('/js/modify-mode.js')).updateMeshCroppingUI();
+    (await window.__appModule('modify-mode')).updateMeshCroppingUI();
     if (!window.pendingAPI.has_pending_modifications()) throw new Error('Edit skeleton discarded pending edits');
   }, skeletonBytes);
   await pendingPage.waitForFunction(() => document.getElementById('preview-img').src !== window.beforeSkeletonPreview, null, {polling:500});
@@ -798,9 +813,10 @@ try {
     }
   });
   await offlineContext.route('**/*', localOnly);
+  await offlineContext.addInitScript(installAppModuleHelper);
   const offlinePage = await offlineContext.newPage();
   try {
-    await offlinePage.goto(origin + '/index.html');
+    await offlinePage.goto(origin + '/index.html?test-hooks');
     await offlinePage.evaluate(async () => { await navigator.serviceWorker.ready; });
     if (!await offlinePage.evaluate(() => !!navigator.serviceWorker.controller)) {
       await offlinePage.reload();
@@ -810,7 +826,7 @@ try {
     await offlinePage.reload();
     await offlinePage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000, polling:500});
     await offlinePage.evaluate(async () => {
-      const {AtlasAPI} = await import('/js/atlas-api.js');
+      const {AtlasAPI} = await window.__appModule('atlas-api');
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 12;
       const ctx = canvas.getContext('2d');
@@ -820,7 +836,7 @@ try {
       if (!await AtlasAPI.load_from_files([new File([atlas], 'synthetic.atlas'), new File([blob], 'p.png', {type:'image/png'})])) {
         throw new Error('Offline synthetic atlas load failed');
       }
-      await (await import('/js/region-list.js')).loadRegions();
+      await (await window.__appModule('region-list')).loadRegions();
     });
     await offlinePage.locator('.region-item').first().click();
     await offlinePage.waitForFunction(() => {

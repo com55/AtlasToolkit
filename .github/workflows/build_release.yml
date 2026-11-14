@@ -72,6 +72,10 @@ jobs:
           $version | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
           echo "Building version: $version"
 
+      - name: Install JavaScript dependencies
+        shell: bash
+        run: npm ci
+
       - name: Build desktop site
         shell: bash
         run: python scripts/build_web.py --target desktop --out dist/desktop

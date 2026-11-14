@@ -17,7 +17,28 @@ import { copyPreviewImage, savePreviewImageAs, handleDesktopDrop } from './js/dr
 import { fileFromUrl, isPywebviewDesktop } from './js/platform.js';
 import { isBusy, noteBusyConflict, isModalOverlayOpen } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
+import * as atlasApiModule from './js/atlas-api.js';
+import * as stateModule from './js/state.js';
+import * as regionListModule from './js/region-list.js';
+import * as modifyModeModule from './js/modify-mode.js';
+import * as previewModule from './js/preview.js';
+import * as dropModule from './js/drop.js';
+import * as busyOverlayModule from './js/busy-overlay.js';
+import * as engineClientModule from './js/engine-client.js';
 import './js/updates.js'; // attaches window.showUpdateNotification / .showUpdateInstallFailed (pywebview-only; see file header)
+
+if (new URLSearchParams(window.location?.search).has('test-hooks')) {
+  window.__atlasModules = Object.freeze({
+    'atlas-api': atlasApiModule,
+    'state': stateModule,
+    'region-list': regionListModule,
+    'modify-mode': modifyModeModule,
+    'preview': previewModule,
+    'drop': dropModule,
+    'busy-overlay': busyOverlayModule,
+    'engine-client': engineClientModule,
+  });
+}
 
 let appVersion = '';
 let closePromptOpen = false;

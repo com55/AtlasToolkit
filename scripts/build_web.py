@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Build the web site (Pyodide) or the desktop site (no bundler required)."""
+"""Build the web site (Pyodide) or the desktop site (bundled page JavaScript)."""
 from __future__ import annotations
 
 import argparse
@@ -161,9 +161,50 @@ def _copy_shell(out: Path, skip: frozenset[str]) -> None:
             shutil.copy2(ROOT / name, out / name)
 
 
+def bundle_page(out: Path) -> str:
+    """Bundle the page, hash the emitted bytes, and link its renamed source map."""
+    esbuild = ROOT / "node_modules/.bin" / ("esbuild.cmd" if os.name == "nt" else "esbuild")
+    if not esbuild.is_file():
+        raise RuntimeError("esbuild is missing; run npm ci before building the site")
+    index = out / "index.html"
+    html = index.read_text(encoding="utf-8")
+    tag = '<script type="module" src="script.js"></script>'
+    if tag not in html:
+        raise ValueError("Expected page module script tag not found in index.html")
+    destination = out / "js"
+    destination.mkdir(parents=True, exist_ok=True)
+    # Stable temporary basename keeps repeated builds and source-map paths stable.
+    temporary = destination / ".app-bundle.js"
+    source_map = temporary.with_suffix(".js.map")
+    try:
+        subprocess.run([
+            str(esbuild), str(ROOT / "www/script.js"), "--bundle", "--format=esm",
+            "--target=es2020", "--legal-comments=none", "--charset=utf8",
+            "--sourcemap=linked", f"--outfile={temporary}",
+        ], check=True, cwd=ROOT)
+        payload = temporary.read_bytes()
+        text = payload.decode("utf-8")
+        if any(specifier.startswith(("./", "../")) for specifier in IMPORT_RE.findall(text)):
+            raise ValueError("Page bundle contains a remaining relative import")
+        digest = hashlib.sha256(payload).hexdigest()[:12]
+        name = f"app-{digest}.js"
+        # Hash before rewriting the map link, avoiding a self-referential digest.
+        text = text.replace(f"sourceMappingURL={source_map.name}", f"sourceMappingURL={name}.map")
+        (destination / name).write_text(text, encoding="utf-8")
+        source_map.replace(destination / f"{name}.map")
+        relative = f"js/{name}"
+        index.write_text(html.replace(tag, f'<script type="module" src="{relative}"></script>'),
+                         encoding="utf-8")
+        return relative
+    finally:
+        temporary.unlink(missing_ok=True)
+        source_map.unlink(missing_ok=True)
+
+
 def assemble_site(out: Path, runtime: list[Path], wheels: dict[str, Path]) -> None:
     """Copy dependencies, stamp the shell, then generate the offline worker."""
     _copy_shell(out, frozenset({"sw.js"}))
+    bundle_page(out)
     for directory, paths in (("pyodide", runtime), ("wheels", wheels.values())):
         destination = out / directory
         destination.mkdir(parents=True, exist_ok=True)
@@ -187,6 +228,7 @@ def assemble_desktop(out: Path) -> None:
     """Copy and stamp the desktop shell without browser engine dependencies."""
     _copy_shell(out, frozenset({"sw.js", "workers/engine-host-worker.js",
                                "workers/engine-transfer.js"}))
+    bundle_page(out)
     index = out / "index.html"
     index.write_text(stamp_index_html(index.read_text(encoding="utf-8"), load_version(ROOT)),
                      encoding="utf-8")

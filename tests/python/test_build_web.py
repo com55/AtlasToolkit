@@ -242,6 +242,7 @@ def test_assemble_stamps_and_generates_complete_site(tmp_path, monkeypatch):
     wheel.write_bytes(b'wheel')
     monkeypatch.setattr(build_web, 'ROOT', tmp_path)
     out = tmp_path / 'site'
+    monkeypatch.setattr(build_web, 'bundle_page', lambda out: 'js/stub.js')
     build_web.assemble_site(out, [runtime], {'atlas_toolkit': wheel})
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()) == [
         'index.html', 'pyodide/runtime.wasm', 'script.js', 'sw.js',
@@ -297,6 +298,7 @@ def test_desktop_build(tmp_path, monkeypatch, flags, expected):
 
     monkeypatch.setattr(build_web, 'download_runtime', forbidden)
     monkeypatch.setattr(build_web, 'build_project_wheels', forbidden)
+    monkeypatch.setattr(build_web, 'bundle_page', lambda out: 'js/stub.js')
     for _ in range(2):
         assert build_web.main() == expected
     out = tmp_path / 'dist/desktop'
@@ -336,3 +338,95 @@ def test_built_sites_carry_the_license_files(tmp_path, monkeypatch):
     build_web._copy_shell(out, frozenset())
     for name in build_web.NOTICE_FILES:
         assert (out / name).read_text(encoding="utf-8") == f"{name} text"
+
+
+@pytest.fixture
+def bundled_root(tmp_path, monkeypatch):
+    executable = build_web.ROOT / "node_modules/.bin" / (
+        "esbuild.cmd" if build_web.os.name == "nt" else "esbuild")
+    if not executable.is_file():
+        pytest.skip("Real esbuild unavailable; run npm ci to enable bundle tests")
+    root = tmp_path / "root"
+    (root / "www/js").mkdir(parents=True)
+    # Keep the installed launcher and its package together via a directory link.
+    (root / "node_modules").symlink_to(build_web.ROOT / "node_modules", target_is_directory=True)
+    (root / "www/script.js").write_text(
+        "import { value } from './js/a.js'; console.log(value); "
+        "import('./js/b.js').then(console.log); "
+        "console.log(new URL('../workers/engine-host-worker.js', import.meta.url));")
+    (root / "www/js/a.js").write_text("export const value = 1;")
+    (root / "www/js/b.js").write_text("export const lazy = 2;")
+    (root / "www/index.html").write_text(
+        '<title>Atlas Toolkit</title><script type="module" src="script.js"></script>')
+    (root / "www/sw.js").write_text('const assets = __CORE_ASSETS__; const cache = __CACHE_NAME__;')
+    (root / "pyproject.toml").write_text('version = "1.2.3"')
+    monkeypatch.setattr(build_web, "ROOT", root)
+    return root
+
+
+@pytest.mark.parametrize("target", ["web", "desktop"])
+def test_real_bundle_identity_imports_and_map(bundled_root, target):
+    import re
+    out = bundled_root / "dist" / target
+
+    def assemble():
+        build_web.prepare_output(out)
+        if target == "web":
+            build_web.assemble_site(out, [], {})
+        else:
+            build_web.assemble_desktop(out)
+        return next((out / "js").glob("app-*.js"))
+
+    first = assemble()
+    assert re.fullmatch(r"app-[0-9a-f]{12}\.js", first.name)
+    payload = first.read_text()
+    assert not any(x.startswith(("./", "../")) for x in build_web.IMPORT_RE.findall(payload))
+    assert "lazy" in payload
+    assert "../workers/engine-host-worker.js" in payload
+    assert f'src="js/{first.name}"' in (out / "index.html").read_text()
+    map_name = first.name + ".map"
+    assert f"sourceMappingURL={map_name}" in payload
+    mapping = json.loads((out / "js" / map_name).read_text())
+    assert len(mapping["sources"]) == 3
+    for source in mapping["sources"]:
+        assert (out / "js" / source).is_file()
+    assert (out / "js/a.js").is_file()
+    if target == "web":
+        worker = (out / "sw.js").read_text()
+        assert f"js/{first.name}" in worker and f"js/{map_name}" in worker
+    assert assemble().name == first.name
+    (bundled_root / "www/js/a.js").write_text("export const value = 3;")
+    assert assemble().name != first.name
+
+
+def test_bundle_missing_tag(bundled_root):
+    out = bundled_root / "out"
+    out.mkdir()
+    (out / "index.html").write_text("<html></html>")
+    with pytest.raises(ValueError, match="script tag"):
+        build_web.bundle_page(out)
+
+
+def test_bundle_missing_esbuild(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_web, "ROOT", tmp_path)
+    with pytest.raises(RuntimeError, match="npm ci"):
+        build_web.bundle_page(tmp_path)
+
+
+@pytest.mark.parametrize('statement', ["import('./left.js');", "import { x } from './left.js';"])
+def test_bundle_rejects_remaining_relative_import(bundled_root, monkeypatch, statement):
+    out = bundled_root / 'out'
+    build_web._copy_shell(out, frozenset())
+
+    def fake_esbuild(args, *, check, cwd):
+        assert check and cwd == bundled_root
+        temporary = Path(next(arg.removeprefix('--outfile=') for arg in args
+                              if arg.startswith('--outfile=')))
+        temporary.write_text(statement)
+        temporary.with_suffix('.js.map').write_text('{}')
+
+    monkeypatch.setattr(build_web.subprocess, 'run', fake_esbuild)
+    with pytest.raises(ValueError, match='remaining relative import'):
+        build_web.bundle_page(out)
+    assert not (out / 'js/.app-bundle.js').exists()
+    assert not (out / 'js/.app-bundle.js.map').exists()
