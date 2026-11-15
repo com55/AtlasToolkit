@@ -326,8 +326,7 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
     confirmBtn.disabled = true;
     const file = selectedFile;
     const name = result.value;
-    _addRegionDialogState = null;
-    document.body.dataset.addRegionDialogOpen = 'false';
+    close();
     try {
       await onConfirm(file, name);
     } catch (e) {
@@ -335,7 +334,6 @@ export function openAddRegionModal({ getEffectiveNames, onConfirm }) {
       if (e instanceof HostError) window.showAlert(e.message, 'Cannot add region');
       else showToast('Failed to add region.', 'error');
     } finally {
-      close();
       submitting = false;
     }
   };

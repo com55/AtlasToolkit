@@ -615,52 +615,54 @@ export const AtlasAPI = {
     const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
-    // Keep pickers and overwrite confirmation outside the busy overlay.
-    const extract = () => callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
-    const results = targets.length > 1 ? await withBusy(BUSY_LABEL, extract) : await extract();
-    const extracted = results.map(({filename, png}) => ({filename, blob: new Blob([png], {type: 'image/png'})}));
-    const count = extracted.length;
+    const run = async () => {
+      const results = await callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
+      const extracted = results.map(({filename, png}) => ({filename, blob: new Blob([png], {type: 'image/png'})}));
+      const count = extracted.length;
 
-    if (extracted.length === 0) return 'No regions to extract.';
+      if (extracted.length === 0) return 'No regions to extract.';
 
-    try {
-      // Single region, installed PWA / pywebview desktop: a native Save As
-      // dialog defaulting to "{region}.png" — matches the old Python engine's
-      // extract_files() single-file save flow (a folder picker for one file
-      // was a desktop-UX regression, found via parity audit 2026-08-23).
-      if (extracted.length === 1 && _useFolderPicker()) {
-        await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob);
-        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
-      }
+      try {
+        // Single region, installed PWA / pywebview desktop: a native Save As
+        // dialog defaulting to "{region}.png" — matches the old Python engine's
+        // extract_files() single-file save flow (a folder picker for one file
+        // was a desktop-UX regression, found via parity audit 2026-08-23).
+        if (extracted.length === 1 && _useFolderPicker()) {
+          await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob);
+          return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+        }
 
-      // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
-      if (_useFolderPicker()) {
-        const folder = await platform.pickSaveFolder();
-        if (!folder) return 'Cancelled';
-        await platform.writeFilesToFolder(
-          folder,
+        // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
+        if (_useFolderPicker()) {
+          const folder = await platform.pickSaveFolder();
+          if (!folder) return 'Cancelled';
+          await platform.writeFilesToFolder(
+            folder,
+            extracted.map(item => ({ name: item.filename, data: item.blob })),
+            _confirmDialog,
+          );
+          return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
+        }
+
+        // Single image in a browser tab: a direct download beats a zip-of-one.
+        if (extracted.length === 1) {
+          await _downloadBlob(extracted[0].filename, extracted[0].blob);
+          return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+        }
+
+        // Browser tab, multiple images: bundle into a zip.
+        const zipBlob = await createZip(
           extracted.map(item => ({ name: item.filename, data: item.blob })),
-          _confirmDialog,
         );
-        return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
+        await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
+        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return 'Cancelled';
+        throw e;
       }
-
-      // Single image in a browser tab: a direct download beats a zip-of-one.
-      if (extracted.length === 1) {
-        await _downloadBlob(extracted[0].filename, extracted[0].blob);
-        return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
-      }
-
-      // Browser tab, multiple images: bundle into a zip.
-      const zipBlob = await withBusy(BUSY_LABEL, () => createZip(
-        extracted.map(item => ({ name: item.filename, data: item.blob })),
-      ));
-      await _downloadBlob(`${_extractZipBaseName()}.zip`, zipBlob);
-      return `Successfully extracted ${count} image${count !== 1 ? 's' : ''} (zip).`;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return 'Cancelled';
-      throw e;
-    }
+    };
+    if (targets.length > 1) return withBusy(BUSY_LABEL, run);
+    return run();
   },
 
 

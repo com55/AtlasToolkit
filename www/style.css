@@ -881,8 +881,9 @@ img#preview-img {
 }
 
 /* Busy overlay — same chrome as #modal-overlay/#modal-box so Processing
-   matches confirm/alert. Confirm is dismissed before paint; silent
-   withLock still uses #modal-overlay at 4500. */
+   matches confirm/alert. Order: modals (4500) above busy (4400) above
+   context menu (4000) above drop overlay (3000) above the
+   missing-images dialog (2600). */
 #busy-overlay {
   position: fixed;
   top: 0;
@@ -892,7 +893,7 @@ img#preview-img {
   background-color: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
-  z-index: 4700;
+  z-index: 4400;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1002,9 +1003,9 @@ img#preview-img {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
-  /* Above every other overlay (context-menu 4000 is the next-highest) --
-     showAlert() can fire from inside e.g. the missing-images dialog and
-     must stay visible on top of it. */
+  /* Order: modals (4500) above busy (4400) above context menu (4000)
+     above drop overlay (3000) above the missing-images dialog (2600).
+     Confirm/alert must remain answerable during busy work. */
   z-index: 4500;
   display: flex;
   justify-content: center;

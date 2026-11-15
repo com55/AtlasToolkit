@@ -280,20 +280,22 @@ test('404 skeleton still loads atlas without applying skeleton', async t => {
   assert.equal(warnings.length, 1);
 });
 
-test('multi-region extract overwrite confirmation is outside busy', async t => {
+test('multi-region extract overwrite confirmation is shown while busy', async t => {
   fakeDesktopServer(t, {...engineHandlers, load: () => ({mesh: {}, settings: {alpha: 'straight'}}),
     extract: () => ['a', 'b'].map(name => ({filename: name + '.png', png: new Uint8Array([1])})),
     pick_save_folder: () => grant, existing_output_names: () => ['a.png'], write_files: () => null,
   }, assets);
   const { isBusy } = await import('../www/js/busy-overlay.js');
   let confirmed = false;
-  window.showConfirm = async () => { confirmed = true; assert.equal(isBusy(), false); return true; };
+  window.showConfirm = async () => { confirmed = true; assert.equal(isBusy(), true); return true; };
   t.after(() => { delete window.showConfirm; });
   await boot(t);
   await AtlasAPI.load_atlas_bundle(bundle);
   t.mock.timers.reset();
-  await AtlasAPI.extract_files([{key: 'a'}, {key: 'b'}]);
+  const result = await AtlasAPI.extract_files([{key: 'a'}, {key: 'b'}]);
   assert.equal(confirmed, true);
+  assert.equal(result, 'Saved 2 images to selected folder.');
+  assert.equal(isBusy(), false);
 });
 
 for (const mode of ['extract', 'modify']) test(`skeleton drop preserves preview in ${mode} mode`, async t => {
@@ -363,4 +365,36 @@ for (const modifier of ['ctrlKey', 'metaKey']) test(`log folder shortcut handles
   await handleLogFolderShortcut(event);
   assert.equal(calls.length, 1);
   assert.equal(prevented, 1);
+});
+
+for (const outcome of ['resolve', 'reject']) test(`add-region hides before onConfirm settles (${outcome})`, async t => {
+  t.mock.method(AtlasAPI, 'validate_region_name', async () => ({ok: true, value: 'page'}));
+  let settle, calls = 0;
+  const pending = new Promise((resolve, reject) => { settle = outcome === 'resolve' ? resolve : reject; });
+  t.mock.method(console, 'error', () => {});
+  openAddRegionModal({getEffectiveNames: () => [], onConfirm: async (file, name) => {
+    calls++;
+    assert.equal(file.name, 'page.png');
+    assert.equal(name, 'page');
+    await pending;
+  }});
+  const input = document.getElementById('add-file-input');
+  input.files = [new File(['png'], 'page.png', {type: 'image/png'})];
+  input.onchange();
+  const button = document.getElementById('add-confirm-btn');
+  const submission = button.onclick();
+  t.mock.timers.tick(150);
+  await new Promise(resolve => setImmediate(resolve));
+  try {
+    assert.equal(calls, 1);
+    assert.equal(document.getElementById('add-region-modal').classList.contains('hidden'), true);
+    assert.equal(document.body.dataset.addRegionDialogOpen, 'false');
+    assert.equal(button.disabled, true);
+    await button.onclick();
+    assert.equal(calls, 1);
+  } finally {
+    settle(outcome === 'reject' ? new Error('add failed') : undefined);
+    await submission;
+  }
+  assert.equal(document.getElementById('add-region-modal').classList.contains('hidden'), true);
 });

@@ -3,7 +3,8 @@
 /**
  * Busy overlay + re-entrant lock. Paint (withBusy) is separate from the
  * mutex (withLock): confirm stays at z-index 4500 during a silent lock.
- * Painted busy sits above rename/add/gap so leftover dialogs cannot cover it.
+ * Painted busy (z 4400) sits below every modal (4500), so a confirm or alert
+ * opened during busy work stays answerable; dialogs close before their work.
  */
 
 export const BUSY_WAIT_MESSAGE = 'Please wait for the current operation to finish.';
