@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
+import { desktopCall } from './desktop.js';
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedKeys, getSelectedLabels, getSelectedRegions } from './state.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './region-list.js';
@@ -226,14 +227,30 @@ function previewSaveDefaultName(names) {
 
 export async function copyPreviewImage() {
   contextMenu.classList.add('hidden');
+  const noImage = new Error('No image to copy.');
+  const requireImage = blob => { if (!blob) throw noImage; return blob; };
   try {
-    const blob = await getPreviewPngBlob();
-    if (!blob) { showToast('No image to copy.', 'error'); return; }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    let pngPromise;
+    if (isPywebviewDesktop()) {
+      const blob = requireImage(await getPreviewPngBlob());
+      const result = await desktopCall('copy_image', [new Uint8Array(await blob.arrayBuffer())]);
+      if (result.ok) {
+        showToast('Image copied to clipboard.', 'success');
+        return;
+      }
+      if (!result.unsupported) throw new Error(result.error || 'Failed to copy image.');
+      pngPromise = Promise.resolve(blob);
+    } else {
+      pngPromise = getPreviewPngBlob().then(requireImage);
+    }
+    // Start the write during the click, while the document still has focus.
+    // Observe rejection even if constructing ClipboardItem itself fails.
+    pngPromise.catch(() => {});
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
     showToast('Image copied to clipboard.', 'success');
   } catch (e) {
     console.error(e);
-    showToast('Failed to copy image.', 'error');
+    showToast(e === noImage ? noImage.message : (e.message || 'Failed to copy image.'), 'error');
   }
 }
 

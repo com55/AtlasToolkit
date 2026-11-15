@@ -398,3 +398,35 @@ for (const outcome of ['resolve', 'reject']) test(`add-region hides before onCon
   }
   assert.equal(document.getElementById('add-region-modal').classList.contains('hidden'), true);
 });
+
+for (const mode of ['desktop', 'fallback', 'web']) test(`copy image uses focus-safe clipboard path: ${mode}`, async t => {
+  const calls = fakeDesktopServer(t, {copy_image: () => mode === 'fallback' ? {ok: false, unsupported: true} : {ok: true}});
+  if (mode === 'web') location.pathname = '/index.html';
+  let resolvePng;
+  const pending = new Promise(resolve => { resolvePng = resolve; });
+  t.mock.method(AtlasAPI, 'save_image', () => pending);
+  const {state} = await import('../www/js/state.js');
+  const previous = state.currentMode;
+  state.currentMode = 'extract';
+  const descriptors = ['navigator', 'ClipboardItem'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]);
+  t.after(() => {
+    state.currentMode = previous;
+    for (const [k, d] of descriptors) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k];
+  });
+  let writes = 0, value;
+  globalThis.ClipboardItem = class { constructor(data) { value = data['image/png']; } };
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {clipboard: {write: async () => {
+    writes++;
+    assert.ok(value instanceof Promise);
+    assert.equal(await value, blob);
+  }}}});
+  const {copyPreviewImage} = await import('../www/js/drop.js');
+  const blob = new Blob([new Uint8Array([1, 2, 3])], {type: 'image/png'});
+  const copying = copyPreviewImage();
+  assert.equal(writes, mode === 'web' ? 1 : 0);
+  resolvePng(blob);
+  await copying;
+  assert.equal(writes, mode === 'desktop' ? 0 : 1);
+  assert.deepEqual(calls.map(c => c.method), mode === 'web' ? [] : ['copy_image']);
+  if (mode !== 'web') assert.deepEqual(calls[0].args, [new Uint8Array([1, 2, 3])]);
+});

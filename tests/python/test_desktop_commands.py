@@ -4,7 +4,7 @@ from atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
-    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder'.split())
+    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image'.split())
 
 
 def test_rpc_allowlist_on_class_and_instance(commands):
@@ -555,3 +555,18 @@ def test_open_log_folder_failure(commands, monkeypatch):
         raise OSError('unavailable')
     monkeypatch.setattr(module, 'log_dir', fail)
     assert commands.open_log_folder() == {'ok': False, 'error': 'unavailable'}
+
+@pytest.mark.parametrize("error,unsupported", [(NotImplementedError("unsupported"), True), (OSError("busy"), False)])
+def test_copy_image_failure(commands, monkeypatch, error, unsupported):
+    def fail(png):
+        assert png == b"png"
+        raise error
+    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_png", fail)
+    assert commands.copy_image(b"png") == {"ok": False, "error": str(error), "unsupported": unsupported}
+
+
+def test_copy_image_success(commands, monkeypatch):
+    seen = []
+    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_png", seen.append)
+    assert commands.copy_image(b"png") == {"ok": True}
+    assert seen == [b"png"]

@@ -13,6 +13,7 @@ import time
 import webbrowser
 from urllib.parse import urlparse
 
+from atlas_toolkit.app.clipboard import copy_png
 from atlas_toolkit.app import build_info
 from atlas_toolkit.app.logs import log_dir
 from atlas_toolkit.update.controller import get_update_dir
@@ -23,7 +24,7 @@ RPC_METHODS = frozenset("""
 startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
-restart_and_install_update install_update_from_file close_answer log open_log_folder
+restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image
 """.split())
 
 
@@ -81,6 +82,15 @@ class DesktopCommands:
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def copy_image(self, png: bytes):
+        try:
+            copy_png(png)
+            return {"ok": True}
+        except NotImplementedError as exc:
+            return {"ok": False, "error": str(exc), "unsupported": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "unsupported": False}
 
     def set_window(self, window):
         self._window = window
