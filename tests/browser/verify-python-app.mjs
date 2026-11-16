@@ -374,6 +374,13 @@ try {
       if (actual.join() !== expected.join()) throw new Error('Copy Image differs from active page PNG');
     } finally { navigator.clipboard.write = original; }
   });
+  await app.evaluate(async () => {
+    window.showToast('probe', 'success');
+    const toast = [...document.querySelectorAll('.toast')].pop();
+    // slideIn's first frame must be hidden, or the toast pops in with no entry animation.
+    const opacity = Number(getComputedStyle(toast).opacity);
+    if (opacity > 0.5) throw new Error('Toast has no entry animation, opacity ' + opacity);
+  });
   const imageDownload = app.waitForEvent('download');
   await app.evaluate(async () => (await window.__appModule('drop')).savePreviewImageAs());
   const imageSaved = await imageDownload;

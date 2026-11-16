@@ -850,7 +850,13 @@ img#preview-img {
   border-left-color: #f44336;
 }
 
+/* Explicit `from`: showToast pins inline opacity/transform at the end
+   state (fadeOut needs them), so an implicit start would equal the end. */
 @keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
   to {
     opacity: 1;
     transform: translateY(0);
