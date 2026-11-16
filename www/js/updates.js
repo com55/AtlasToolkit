@@ -3,7 +3,7 @@
 import { desktopCall } from './desktop.js';
 import { isPywebviewDesktop } from './platform.js';
 /** Native updater UI, invoked by desktop startup and update events. */
-import { showToast } from './dialogs.js';
+import { showToast, showAlert } from './dialogs.js';
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -171,7 +171,7 @@ window.showUpdateNotification = function (...args) {
       const result = await desktopCall('restart_and_install_update');
       if (!result || !result.ok) {
         const message = (result && result.error) || 'Failed to restart for update.';
-        showToast(message, 'error');
+        showAlert(message, 'Update failed');
         actionBtn.disabled = false;
         actionBtn.textContent = 'Restart to Update';
         sub.textContent = releaseName;

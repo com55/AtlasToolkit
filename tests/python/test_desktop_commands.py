@@ -4,7 +4,7 @@ from atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
-    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image'.split())
+    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster'.split())
 
 
 def test_rpc_allowlist_on_class_and_instance(commands):
@@ -479,13 +479,28 @@ def test_installer_window_visibility(commands, monkeypatch, from_file, result):
     monkeypatch.setattr(build_info, "DEV_BUILD", True)
     def install(*args):
         assert commands._window.calls[-1] == ("hide",)
+        # Restart Manager closes the app during the install: no discard prompt.
+        assert commands._closing_confirmed
         return result
     commands._updates.restart_and_install = install
     commands._updates.install_from_file = install
     commands._window.results = [["setup.exe"]]
     actual = commands.install_update_from_file() if from_file else commands.restart_and_install_update()
     assert actual == result
-    assert commands._window.calls[-1] == (("hide",) if result.get("ok") is True else ("show",))
+    failed = result.get("ok") is not True
+    assert commands._closing_confirmed is not failed
+    tail = commands._window.calls[-3:]
+    if failed:
+        # Raised from the RPC thread: marshalled restore/show only, never `on_top`.
+        assert tail == [("hide",), ("restore",), ("show",)]
+    else:
+        assert tail[-1] == ("hide",)
+
+
+def test_raise_once_after_update_relaunch(commands):
+    commands.raise_once()
+    commands.raise_once()
+    assert commands._window.calls == [("restore",), ("show",)]
 
 
 @pytest.mark.parametrize("dev", [False, True])
@@ -570,3 +585,14 @@ def test_copy_image_success(commands, monkeypatch):
     monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_png", seen.append)
     assert commands.copy_image(b"png") == {"ok": True}
     assert seen == [b"png"]
+
+
+def test_copy_raster(commands, monkeypatch):
+    seen = []
+    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_rgba", lambda *a: seen.append(a))
+    assert commands.copy_raster(2, 1, b"12345678") == {"ok": True}
+    assert seen == [(2, 1, b"12345678")]
+    def fail(*a):
+        raise NotImplementedError("no clipboard")
+    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_rgba", fail)
+    assert commands.copy_raster(2, 1, b"12345678") == {"ok": False, "error": "no clipboard", "unsupported": True}

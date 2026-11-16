@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -31,6 +32,46 @@ _INNO_SILENT_INSTALL_ARGS = (
     "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /NORESTARTAPPLICATIONS"
 )
 _SETUP_EXE_BASENAME = "AtlasToolkit-Setup-x64"
+RESULT_FILE_NAME = "update_result.json"
+# How long the app keeps the installer handle while the relaunch watcher starts.
+_HANDOFF_TIMEOUT_SECONDS = 15.0
+
+# Inno Setup exit codes (jrsoftware.org/ishelp, "Setup Exit Codes").
+_INSTALLER_EXIT_MESSAGES = {
+    1: "The installer could not start. The file may be damaged or incomplete.",
+    2: "The update was cancelled before it started.",
+    3: "The installer hit an error while preparing to install.",
+    4: "The installer hit an error while installing.",
+    5: "The update was cancelled during installation.",
+    7: "The installer could not continue. Close other copies of AtlasToolkit and try again.",
+    8: "The installer could not continue until Windows is restarted.",
+}
+
+
+def installer_failure_message(exit_code: int) -> str:
+    base = _INSTALLER_EXIT_MESSAGES.get(exit_code, "The installer stopped before finishing.")
+    return f"{base} (installer exit code {exit_code})"
+
+
+def read_install_result(update_dir: Path) -> Optional[dict[str, str]]:
+    """Consume the watcher's failure record; the relaunch flag only says it exists."""
+    path = update_dir / RESULT_FILE_NAME
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if not isinstance(data, dict) or not isinstance(data.get("exit_code"), int):
+        return None
+    return {
+        "message": installer_failure_message(data["exit_code"]),
+        "logPath": str(data.get("log_path") or ""),
+        "releaseUrl": str(data.get("release_url") or ""),
+    }
 
 
 def get_update_dir() -> Path:
@@ -167,28 +208,130 @@ def _inno_install_params(inno_log_path: Path) -> str:
     return f'{_INNO_SILENT_INSTALL_ARGS} /LOG="{inno_log_path}"'
 
 
-def build_relaunch_watcher_ps1(pending_json_path: Path, installer_process_name: str) -> str:
-    """Wait for the setup process (started by the app) to finish, then relaunch with saved argv."""
-    pending_literal = _ps_single_quoted(str(pending_json_path))
-    process_literal = _ps_single_quoted(installer_process_name)
+def build_relaunch_watcher_ps1(
+    pending_json_path: Path, installer_pid: int, claim_path: Path,
+    result_path: Path, inno_log_path: Path,
+) -> str:
+    """Wait for the installer by PID, then relaunch the app and report a failure.
 
+    The app holds the installer's process handle until a claim file exists,
+    so the PID cannot be reused before this script opens its own handle.
+    Whoever creates the claim file first (this script, or the app when the
+    installer exits early) owns reporting the result."""
     lines = [
         "$ErrorActionPreference = 'Stop'",
-        f"$Meta = Get-Content -LiteralPath {pending_literal} -Raw | ConvertFrom-Json",
-        f"$SetupName = {process_literal}",
-        "for ($i = 0; $i -lt 60; $i++) {",
-        "    if (Get-Process -Name $SetupName -ErrorAction SilentlyContinue) { break }",
-        "    Start-Sleep -Milliseconds 500",
-        "}",
-        "Wait-Process -Name $SetupName -ErrorAction SilentlyContinue",
-        "if ($Meta.relaunch_args -and @($Meta.relaunch_args).Count -gt 0) {",
-        "    Start-Process -FilePath $Meta.target_exe_path -ArgumentList @($Meta.relaunch_args)",
+        f"$Meta = Get-Content -LiteralPath {_ps_single_quoted(str(pending_json_path))} -Raw | ConvertFrom-Json",
+        f"$Claim = {_ps_single_quoted(str(claim_path))}",
+        f"$Result = {_ps_single_quoted(str(result_path))}",
+        f"$LogPath = {_ps_single_quoted(str(inno_log_path))}",
+        "try {",
+        f"    $Setup = Get-Process -Id {int(installer_pid)}",
+        "    $null = $Setup.Handle",
+        "} catch { exit 0 }",
+        "try { [System.IO.File]::Open($Claim, 'CreateNew', 'Write').Dispose() } catch { exit 0 }",
+        "$Setup.WaitForExit()",
+        "$Code = $Setup.ExitCode",
+        "if ($Code -eq 0) {",
+        "    $Flag = '--update-installed'",
         "} else {",
-        "    Start-Process -FilePath $Meta.target_exe_path",
+        "    $Info = @{ exit_code = $Code; release_url = [string]$Meta.release_url }",
+        "    if (Test-Path -LiteralPath $LogPath) { $Info.log_path = $LogPath }",
+        "    $Info | ConvertTo-Json | Set-Content -LiteralPath $Result -Encoding UTF8",
+        "    $Flag = '--update-install-failed'",
         "}",
+        # One pre-quoted string: Start-Process joins array elements without quoting them.
+        "$ArgLine = ([string]$Meta.relaunch_command_line + ' ' + $Flag).Trim()",
+        "Start-Process -FilePath $Meta.target_exe_path -ArgumentList $ArgLine",
+        "Remove-Item -LiteralPath $Claim -Force -ErrorAction SilentlyContinue",
         "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue",
     ]
     return "\r\n".join(lines) + "\r\n"
+
+
+class _InstallerProcess:
+    """A launched installer's process handle (Windows)."""
+
+    def __init__(self, handle: int, pid: int) -> None:
+        self.handle = handle
+        self.pid = pid
+
+    def exit_code(self) -> Optional[int]:
+        """None while running, otherwise the exit code."""
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if kernel32.WaitForSingleObject(wintypes.HANDLE(self.handle), 0) != 0:  # WAIT_OBJECT_0
+            return None
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(wintypes.HANDLE(self.handle), ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(code.value)
+
+    def close(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        if self.handle:
+            ctypes.WinDLL("kernel32").CloseHandle(wintypes.HANDLE(self.handle))
+            self.handle = 0
+
+
+def _launch_process(file: str, params: str, work_dir: str, show: int = 1) -> _InstallerProcess:
+    """ShellExecuteEx with a process handle, so the app can follow the installer."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong), ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR),
+            ("lpParameters", wintypes.LPCWSTR), ("lpDirectory", wintypes.LPCWSTR),
+            ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", ctypes.c_void_p), ("lpClass", wintypes.LPCWSTR),
+            ("hkeyClass", wintypes.HKEY), ("dwHotKey", wintypes.DWORD),
+            ("hIconOrMonitor", wintypes.HANDLE), ("hProcess", wintypes.HANDLE),
+        ]
+
+    SEE_MASK_NOCLOSEPROCESS, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI = 0x40, 0x100, 0x400
+    info = SHELLEXECUTEINFOW(
+        cbSize=ctypes.sizeof(SHELLEXECUTEINFOW),
+        fMask=SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb="open", lpFile=file, lpParameters=params, lpDirectory=work_dir, nShow=show,
+    )
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+    shell32.ShellExecuteExW.restype = wintypes.BOOL
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not info.hProcess:
+        raise OSError("Windows did not return a process for the installer")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetProcessId.argtypes = [wintypes.HANDLE]
+    kernel32.GetProcessId.restype = wintypes.DWORD
+    return _InstallerProcess(int(info.hProcess), int(kernel32.GetProcessId(info.hProcess)))
+
+
+def _claim(path: Path) -> bool:
+    """Create the claim file; False when the watcher created it first."""
+    try:
+        with open(path, "x"):
+            return True
+    except FileExistsError:
+        return False
+
+
+def _await_handoff(process, claim_path: Path, timeout: float) -> tuple[str, Optional[int]]:
+    """Return ("watcher", None) once the watcher owns the installer, else
+    ("app", exit_code) — exit_code is None if the installer is still running."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if claim_path.exists():
+            return "watcher", None
+        code = process.exit_code()
+        if code is not None or time.monotonic() >= deadline:
+            return ("app", code) if _claim(claim_path) else ("watcher", None)
+        time.sleep(0.1)
 
 
 def _shell_execute(file: str, params: str, work_dir: str, show: int = 0) -> None:
@@ -327,9 +470,8 @@ class UpdateController:
             target_exe = get_relaunch_executable_path()
             metadata = {
                 "installer_path": str(target_installer_path),
-                "installer_process_name": _SETUP_EXE_BASENAME,
                 "target_exe_path": str(target_exe),
-                "relaunch_args": relaunch_args,
+                "relaunch_command_line": subprocess.list2cmdline(relaunch_args),
                 "version": latest.latest_version,
                 "release_url": latest.release_url,
             }
@@ -416,9 +558,8 @@ class UpdateController:
             json.dumps(
                 {
                     "installer_path": str(installer_path),
-                    "installer_process_name": _SETUP_EXE_BASENAME,
                     "target_exe_path": str(target_exe),
-                    "relaunch_args": self._relaunch_args,
+                    "relaunch_command_line": subprocess.list2cmdline(self._relaunch_args),
                     "version": self._version or "",
                     "release_url": self._release_url or "",
                 },
@@ -431,33 +572,54 @@ class UpdateController:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         inno_log_path = update_dir / f"inno_install_{timestamp}.log"
         watcher_path = update_dir / f"relaunch_after_{timestamp}.ps1"
-        watcher_path.write_text(
-            build_relaunch_watcher_ps1(pending_json_path, _SETUP_EXE_BASENAME),
-            encoding="utf-8",
-        )
+        claim_path = update_dir / f"handoff_{timestamp}.claim"
+        result_path = update_dir / RESULT_FILE_NAME
+        for stale in (claim_path, result_path):
+            stale.unlink(missing_ok=True)
+
+        _unblock_downloaded_file(installer_path)
+        # Start the installer first: if Windows refuses it, nothing else has
+        # started yet and the app simply stays open.
+        try:
+            process = _launch_process(
+                str(installer_path), _inno_install_params(inno_log_path), str(update_dir), show=1,
+            )
+        except OSError as e:
+            log.warning("Installer launch failed: %s", e)
+            return {"ok": False, "error": f"Could not start the installer: {e}"}
 
         try:
-            _unblock_downloaded_file(installer_path)
+            try:
+                watcher_path.write_text(
+                    build_relaunch_watcher_ps1(
+                        pending_json_path, process.pid, claim_path, result_path, inno_log_path,
+                    ),
+                    encoding="utf-8",
+                )
+                _shell_execute(
+                    "powershell.exe",
+                    f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{watcher_path}"',
+                    str(update_dir),
+                )
+                timeout = _HANDOFF_TIMEOUT_SECONDS
+            except OSError as e:
+                log.warning("Relaunch watcher failed to start: %s", e)
+                timeout = 0.0
+            owner, code = _await_handoff(process, claim_path, timeout)
+        finally:
+            process.close()
 
-            watcher_params = (
-                f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass '
-                f'-File "{watcher_path}"'
-            )
-            _shell_execute("powershell.exe", watcher_params, str(update_dir))
-
-            # Launch the installer from the app (not from script) to avoid Open File Security Warning.
-            _shell_execute(
-                str(installer_path),
-                _inno_install_params(inno_log_path),
-                str(update_dir),
-                show=1,
-            )
-
-            threading.Timer(0.25, lambda: os._exit(0)).start()
-            log.info("Launched installer directly and relaunch watcher: %s", installer_path.name)
-            return {"ok": True}
-        except Exception as e:
+        if owner == "app" and code is not None and code != 0:
+            # The installer quit before the watcher took over: report it here.
+            log.warning("Installer exited early with code %s", code)
+            claim_path.unlink(missing_ok=True)
             return {
                 "ok": False,
-                "error": f"Failed to launch update installer: {e}",
+                "error": installer_failure_message(code),
+                "logPath": str(inno_log_path) if inno_log_path.is_file() else "",
             }
+        if owner == "app":
+            log.warning("Relaunch watcher did not take over; the app will not reopen by itself.")
+        log.info("Installer running (pid %s); exiting for the update.", process.pid)
+        threading.Timer(0.25, lambda: os._exit(0)).start()
+        return {"ok": True}

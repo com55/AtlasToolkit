@@ -13,7 +13,7 @@ import time
 import webbrowser
 from urllib.parse import urlparse
 
-from atlas_toolkit.app.clipboard import copy_png
+from atlas_toolkit.app.clipboard import copy_png, copy_rgba
 from atlas_toolkit.app import build_info
 from atlas_toolkit.app.logs import log_dir
 from atlas_toolkit.update.controller import get_update_dir
@@ -24,7 +24,7 @@ RPC_METHODS = frozenset("""
 startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
-restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image
+restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster
 """.split())
 
 
@@ -52,6 +52,7 @@ class DesktopCommands:
         self._startup_lock = threading.Lock()
         self._close_lock = threading.Lock()
         self._closing_confirmed = False
+        self._raised_after_update = False
         self._close_check_in_progress = False
         self._close_event = None
         self._close_proceed = False
@@ -84,8 +85,15 @@ class DesktopCommands:
             return {"ok": False, "error": str(exc)}
 
     def copy_image(self, png: bytes):
+        return self._copy(lambda: copy_png(png))
+
+    def copy_raster(self, width: int, height: int, rgba: bytes):
+        """The preview's own pixels: no engine render and no PNG decode."""
+        return self._copy(lambda: copy_rgba(width, height, rgba))
+
+    def _copy(self, publish):
         try:
-            copy_png(png)
+            publish()
             return {"ok": True}
         except NotImplementedError as exc:
             return {"ok": False, "error": str(exc), "unsupported": True}
@@ -264,11 +272,7 @@ class DesktopCommands:
         return self._updates.download()
 
     def restart_and_install_update(self):
-        self._set_update_window_visible(False)
-        result = self._updates.restart_and_install()
-        if result.get("ok") is not True:
-            self._set_update_window_visible(True)
-        return result
+        return self._run_installer(self._updates.restart_and_install)
 
     def install_update_from_file(self):
         if not build_info.DEV_BUILD:
@@ -276,21 +280,43 @@ class DesktopCommands:
         path = self._dialog(self._file_dialog.OPEN, allow_multiple=False, file_types=("Installer (*.exe)",))
         if not path:
             return {"ok": False, "cancelled": True}
-        self._set_update_window_visible(False)
-        result = self._updates.install_from_file(Path(path))
-        if result.get("ok") is not True:
-            self._set_update_window_visible(True)
-        return result
+        return self._run_installer(lambda: self._updates.install_from_file(Path(path)))
 
-    def _set_update_window_visible(self, visible):
+    def _run_installer(self, start):
+        """Hide while the installer runs. The installer closes the app through
+        Restart Manager, which must not raise the discard-changes confirm."""
+        with self._close_lock:
+            self._closing_confirmed = True
         if self._window is not None:
             try:
-                if visible:
-                    self._window.show()
-                else:
-                    self._window.hide()
+                self._window.hide()
             except Exception:
                 pass
+        result = start()
+        if result.get("ok") is not True:
+            with self._close_lock:
+                self._closing_confirmed = False
+            self._bring_to_front()
+        return result
+
+    def raise_once(self):
+        """`loaded` handler after an update relaunch; later loads (F5) leave focus alone."""
+        if not self._raised_after_update:
+            self._raised_after_update = True
+            self._bring_to_front()
+
+    def _bring_to_front(self):
+        """Raise from a worker thread: only Invoke-marshalled pywebview calls
+        and Win32 calls, no `on_top` property (pywebview sets it unmarshalled)."""
+        window = self._window
+        if window is None:
+            return
+        for action in (window.restore, window.show):
+            try:
+                action()
+            except Exception:
+                pass
+        self._win32_to_front(pin=False)
 
     def _native_hwnd(self) -> int | None:
         window = self._window
@@ -335,6 +361,9 @@ class DesktopCommands:
                 window.on_top = False
         except Exception:
             pass
+        self._win32_to_front(pin=pin)
+
+    def _win32_to_front(self, *, pin: bool) -> None:
         if sys.platform != "win32":
             return
         try:

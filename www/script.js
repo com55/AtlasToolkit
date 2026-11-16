@@ -118,9 +118,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     installButton.addEventListener('click', async () => {
       try {
         const r = await desktopCall('install_update_from_file');
-        if (!r.ok && !r.cancelled) await showAlert(r.error || 'Install failed.', 'Install update');
+        if (!r.ok && !r.cancelled) await showAlert(r.error || 'Install failed.', 'Update failed');
       } catch (e) {
-        await showAlert(e.message, 'Install update');
+        await showAlert(e.message, 'Update failed');
       }
     });
   }

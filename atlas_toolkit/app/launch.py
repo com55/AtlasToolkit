@@ -15,15 +15,19 @@ from atlas_toolkit.app import build_info
 from atlas_toolkit.app.desktop_commands import DesktopCommands, window_title
 from atlas_toolkit.app.paths import is_source_run
 from atlas_toolkit.app.logs import start_session_log, install_excepthooks
+from atlas_toolkit.update.controller import get_update_dir, read_install_result
 
 log = logging.getLogger(__name__)
 
 
 def _consume_launch_flags(
     argv: list[str],
-) -> tuple[list[str], Optional[dict[str, str]], bool]:
+) -> tuple[list[str], Optional[dict[str, str]], bool, bool]:
+    """Strip launcher-only flags. The last value says the app was relaunched
+    by the update watcher and should come to the front."""
     clean_args: list[str] = []
     failed = False
+    installed = False
     failed_log = ""
     failed_release_url = ""
     failed_message = ""
@@ -34,6 +38,10 @@ def _consume_launch_flags(
         arg = argv[i]
         if arg == "--debug":
             debug = True
+            i += 1
+            continue
+        if arg == "--update-installed":
+            installed = True
             i += 1
             continue
         if arg == "--update-install-failed":
@@ -57,12 +65,14 @@ def _consume_launch_flags(
 
     payload: Optional[dict[str, str]] = None
     if failed:
+        payload = read_install_result(get_update_dir())
+    if failed and payload is None:
         payload = {
             "message": failed_message or "Update installation failed. The app was relaunched.",
             "logPath": failed_log,
             "releaseUrl": failed_release_url,
         }
-    return clean_args, payload, debug
+    return clean_args, payload, debug, failed or installed
 
 
 def configure_stdio() -> None:
@@ -93,7 +103,7 @@ def setup_drop(window: webview.Window, commands: DesktopCommands) -> None:
 def run() -> None:
     configure_stdio()
 
-    clean_argv, pending_failure, debug_requested = _consume_launch_flags(sys.argv[1:])
+    clean_argv, pending_failure, debug_requested, relaunched = _consume_launch_flags(sys.argv[1:])
     sys.argv = [sys.argv[0], *clean_argv]
 
     webview_debug = debug_requested and (is_source_run() or build_info.DEV_BUILD)
@@ -148,4 +158,7 @@ def run() -> None:
 
     window.events.closed += on_closed
     window.events.loaded += lambda: setup_drop(window, commands)
+    if relaunched:
+        # Started by the hidden update watcher, which cannot hand us the foreground.
+        window.events.loaded += commands.raise_once
     webview.start(debug=webview_debug)
