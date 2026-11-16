@@ -276,3 +276,15 @@ def test_view_keys_after_rename(method, args):
     assert getattr(host, method)(['a'], *args) == before
     with pytest.raises(api.RegionNotFound):
         getattr(host, method)(['missing'], *args)
+
+
+@pytest.mark.parametrize("factory", [one_page, all_pma])
+@pytest.mark.parametrize("alpha", ["straight", "premultiplied"])
+def test_preview_pixels_equal_save_image(factory, alpha):
+    """Desktop Copy image sends the preview raster instead of save_image."""
+    host, _ = loaded(factory)
+    for names in (["a"], ["b", "a"]):
+        preview = host.preview(names, False, False, False, alpha)
+        saved = decode(host.save_image(names, False, False, alpha))
+        assert (preview["width"], preview["height"]) == saved.size
+        assert preview["rgba"] == saved.tobytes()

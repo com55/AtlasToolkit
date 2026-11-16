@@ -10,12 +10,16 @@ import time
 from PIL import Image
 
 
-def png_to_dib(png: bytes) -> bytes:
+def _image_to_dib(image: Image.Image) -> bytes:
     """Return a 32-bit BI_RGB DIB, preserving Pillow's BGRA pixel bytes."""
+    output = BytesIO()
+    image.convert("RGBA").save(output, format="BMP")
+    return output.getvalue()[14:]
+
+
+def png_to_dib(png: bytes) -> bytes:
     with Image.open(BytesIO(png)) as image:
-        output = BytesIO()
-        image.convert("RGBA").save(output, format="BMP")
-        return output.getvalue()[14:]
+        return _image_to_dib(image)
 
 
 class _WindowsBackend:
@@ -79,11 +83,23 @@ class _WindowsBackend:
 
 def copy_png(png: bytes, *, backend=None) -> None:
     """Publish PNG and CF_DIB together; backend injection permits Linux tests."""
+    _publish(png, png_to_dib(png), backend)
+
+
+def copy_rgba(width: int, height: int, rgba: bytes, *, backend=None) -> None:
+    """Publish raw straight-alpha pixels without a decode step. The PNG is
+    transient clipboard data, so it takes the fastest compression level."""
+    image = Image.frombytes("RGBA", (int(width), int(height)), bytes(rgba))
+    output = BytesIO()
+    image.save(output, format="PNG", compress_level=1)
+    _publish(output.getvalue(), _image_to_dib(image), backend)
+
+
+def _publish(png: bytes, dib: bytes, backend) -> None:
     if backend is None:
         if sys.platform != "win32":
             raise NotImplementedError("Native image clipboard is only supported on Windows.")
         backend = _WindowsBackend()
-    dib = png_to_dib(png)
     png_format = backend.register_png()
     for attempt in range(5):
         if backend.open():

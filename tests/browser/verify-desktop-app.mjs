@@ -243,6 +243,18 @@ try {
     await page.locator('#btn-modal-confirm').click();
     await ready(); await open('one/one.atlas'); await regions(['a','b']);
   }, ['--fail-startup']);
+  await scenario('10 Copy image reuses the preview pixels', 'one/one.atlas', async ({page,regions,idle,frames}) => {
+    await regions(['a','b']);
+    await page.locator('.region-item[data-label="a"]').click();
+    await page.waitForFunction(() => document.querySelector('#preview-img')?.src.startsWith('blob:'), null, {timeout:60000, polling:500});
+    await idle();
+    const before = frames.length;
+    await page.evaluate(() => window.copyPreviewImage());
+    const methods = frames.slice(before).map(frame => frame.method);
+    // No engine render before the clipboard call (Linux reports it unsupported,
+    // so the browser-clipboard fallback may render afterwards).
+    assert.equal(methods[0], 'copy_raster', methods.join());
+  });
 } finally {
   await browser?.close();
   fs.rmSync(temp,{recursive:true,force:true});

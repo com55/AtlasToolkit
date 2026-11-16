@@ -22,6 +22,8 @@ let _meshMaskEnabled = true;
 let _forcedResizing = false, _meshHullEnabled = false;
 let _loadEpoch = 0, _skelEpoch = 0;
 const _previewCache = new PreviewCache(24), _hulls = new Map();
+// Pixels behind the most recent preview fetch, valid while that cache entry is.
+let _lastPreview = null;
 const _viewKey = names => viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
@@ -574,6 +576,18 @@ export const AtlasAPI = {
 
   preview_is_cached(names) { return _previewCache.has(_viewKey(names)); },
 
+  /**
+   * The straight-alpha pixels of the preview shown for `names` — the same
+   * image save_image() would encode — or null when they are no longer current.
+   * Shares the preview cache's invalidation: a cleared or replaced entry no
+   * longer owns the stored URL.
+   */
+  preview_raster(names) {
+    if (!_lastPreview || !names?.length) return null;
+    const key = _viewKey(names);
+    return key === _lastPreview.key && _previewCache.owns(_lastPreview.url) ? _lastPreview.raster : null;
+  },
+
   async get_preview(names) {
     if (!_state || !names?.length) return null;
     const key = _viewKey(names);
@@ -584,6 +598,7 @@ export const AtlasAPI = {
       if (!raster) return null;
       const url = await rasterToUrl(raster);
       _previewCache.set(key, url);
+      _lastPreview = {key, url, raster: {width: raster.width, height: raster.height, rgba: raster.rgba}};
       _hulls.set(key, raster.hulls);
       for (const cachedKey of _hulls.keys()) {
         if (!_previewCache.has(cachedKey)) _hulls.delete(cachedKey);

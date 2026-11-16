@@ -92,3 +92,25 @@ def test_failed_transfer_frees_memory():
         with pytest.raises(OSError):
             backend.put(99, b"png")
     assert calls == [("unlock", 123), ("free", 123)]
+
+
+def test_copy_rgba_publishes_the_same_pixels():
+    from io import BytesIO
+    from PIL import Image
+    from atlas_toolkit.app.clipboard import copy_rgba
+    image = Image.new("RGBA", (3, 2))
+    image.putdata([(x * 40, y * 90, 7, 50 + x * 60 + y) for y in range(2) for x in range(3)])
+    published = {}
+
+    class Backend:
+        def register_png(self): return 99
+        def open(self): return True
+        def empty(self): pass
+        def put(self, fmt, data): published[fmt] = data
+        def close(self): pass
+
+    copy_rgba(3, 2, image.tobytes(), backend=Backend())
+    assert Image.open(BytesIO(published[99])).convert("RGBA").tobytes() == image.tobytes()
+    assert published[8] == png_to_dib(published[99])
+    with pytest.raises(ValueError):
+        copy_rgba(3, 3, image.tobytes(), backend=Backend())

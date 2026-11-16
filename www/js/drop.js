@@ -232,14 +232,23 @@ export async function copyPreviewImage() {
   try {
     let pngPromise;
     if (isPywebviewDesktop()) {
-      const blob = requireImage(await getPreviewPngBlob());
-      const result = await desktopCall('copy_image', [new Uint8Array(await blob.arrayBuffer())]);
+      // Reuse the shown preview's pixels: re-rendering and PNG round trips
+      // made Copy take about a second on large selections.
+      const raster = state.currentMode === 'modify' ? null : AtlasAPI.preview_raster(getSelectedKeys());
+      let blob = null;
+      let result;
+      if (raster) {
+        result = await desktopCall('copy_raster', [raster.width, raster.height, raster.rgba]);
+      } else {
+        blob = requireImage(await getPreviewPngBlob());
+        result = await desktopCall('copy_image', [new Uint8Array(await blob.arrayBuffer())]);
+      }
       if (result.ok) {
         showToast('Image copied to clipboard.', 'success');
         return;
       }
       if (!result.unsupported) throw new Error(result.error || 'Failed to copy image.');
-      pngPromise = Promise.resolve(blob);
+      pngPromise = blob ? Promise.resolve(blob) : getPreviewPngBlob().then(requireImage);
     } else {
       pngPromise = getPreviewPngBlob().then(requireImage);
     }
