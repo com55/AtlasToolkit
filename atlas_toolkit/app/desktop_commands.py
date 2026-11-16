@@ -272,7 +272,7 @@ class DesktopCommands:
         return self._updates.download()
 
     def restart_and_install_update(self):
-        return self._run_installer(self._updates.restart_and_install)
+        return self._run_installer(lambda hide: self._updates.restart_and_install(on_handoff=hide))
 
     def install_update_from_file(self):
         if not build_info.DEV_BUILD:
@@ -280,23 +280,27 @@ class DesktopCommands:
         path = self._dialog(self._file_dialog.OPEN, allow_multiple=False, file_types=("Installer (*.exe)",))
         if not path:
             return {"ok": False, "cancelled": True}
-        return self._run_installer(lambda: self._updates.install_from_file(Path(path)))
+        return self._run_installer(lambda hide: self._updates.install_from_file(Path(path), on_handoff=hide))
 
     def _run_installer(self, start):
-        """Hide while the installer runs. The installer closes the app through
-        Restart Manager, which must not raise the discard-changes confirm."""
+        """The window stays up until the installer is confirmed running, so a
+        refused or failed installer is reported in place. The installer closes
+        the app through Restart Manager, which must not raise the discard
+        confirm."""
         with self._close_lock:
             self._closing_confirmed = True
-        if self._window is not None:
-            try:
-                self._window.hide()
-            except Exception:
-                pass
-        result = start()
+
+        def hide():
+            if self._window is not None:
+                try:
+                    self._window.hide()
+                except Exception:
+                    pass
+
+        result = start(hide)
         if result.get("ok") is not True:
             with self._close_lock:
                 self._closing_confirmed = False
-            self._bring_to_front()
         return result
 
     def raise_once(self):
@@ -378,9 +382,26 @@ class DesktopCommands:
             user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)  # HWND_TOPMOST
             if not pin:
                 user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)  # HWND_NOTOPMOST
-            user32.SetForegroundWindow(hwnd)
+            self._take_foreground(user32, hwnd)
         except Exception as e:
             log.debug("bring-to-front failed: %s", e)
+
+    @staticmethod
+    def _take_foreground(user32, hwnd) -> None:
+        """SetForegroundWindow is refused to a process the user did not just
+        use (e.g. one the update watcher started) and only flashes the taskbar.
+        Sharing the foreground thread's input state lifts that lock."""
+        foreground = user32.GetForegroundWindow()
+        current = threading.get_native_id()  # the Win32 thread id on Windows
+        owner = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+        attached = bool(owner and owner != current and user32.AttachThreadInput(current, owner, True))
+        try:
+            user32.BringWindowToTop(hwnd)
+            if not user32.SetForegroundWindow(hwnd):
+                log.debug("SetForegroundWindow was refused")
+        finally:
+            if attached:
+                user32.AttachThreadInput(current, owner, False)
 
     def _unpin_window(self) -> None:
         """Drop the temporary always-on-top from `_raise_window(pin=True)`.

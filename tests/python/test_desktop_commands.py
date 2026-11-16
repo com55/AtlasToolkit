@@ -70,7 +70,7 @@ class FakeWindow:
 def commands(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.json")
     updates = SimpleNamespace(pending_failure=None, check_for_notification=lambda: {"version": "test"},
-                              install_from_file=lambda path: {"ok": True})
+                              install_from_file=lambda path, on_handoff=None: {"ok": True})
     return DesktopCommands(FakeWindow(), DesktopFiles(), EventBroker(), config.AppConfig(),
                            updates, [], lambda: False, SimpleNamespace(OPEN=1, FOLDER=2, SAVE=3))
 
@@ -200,7 +200,7 @@ def test_delegates_and_os_commands(commands, tmp_path, monkeypatch):
     assert (tmp_path / "out").read_bytes() == b"content"
     for method, target in [("get_update_download_progress", "get_progress"), ("download_update", "download"),
                            ("restart_and_install_update", "restart_and_install")]:
-        setattr(commands._updates, target, lambda: {"ok": True})
+        setattr(commands._updates, target, lambda **kwargs: {"ok": True})
         assert getattr(commands, method)() == {"ok": True}
     opened = []
     monkeypatch.setattr(module.webbrowser, "open", opened.append)
@@ -290,7 +290,11 @@ def test_installer_dialog_and_forwarded_path(commands, tmp_path, monkeypatch):
     monkeypatch.setattr(build_info, "DEV_BUILD", True)
     path = tmp_path / "setup.exe"
     received = []
-    commands._updates.install_from_file = lambda chosen: received.append(chosen) or {"ok": True}
+    def install(chosen, on_handoff):
+        received.append(chosen)
+        on_handoff()
+        return {"ok": True}
+    commands._updates.install_from_file = install
     commands._window.results = [[str(path)]]
     assert commands.install_update_from_file() == {"ok": True}
     assert received == [path]
@@ -477,10 +481,13 @@ def test_build_window_title(commands, monkeypatch, dev):
 @pytest.mark.parametrize("result", [{"ok": True}, {"ok": False}, {"cancelled": True}])
 def test_installer_window_visibility(commands, monkeypatch, from_file, result):
     monkeypatch.setattr(build_info, "DEV_BUILD", True)
-    def install(*args):
-        assert commands._window.calls[-1] == ("hide",)
+    def install(*args, on_handoff):
+        # Visible until the installer is confirmed running.
+        assert ("hide",) not in commands._window.calls
         # Restart Manager closes the app during the install: no discard prompt.
         assert commands._closing_confirmed
+        if result.get("ok") is True:
+            on_handoff()
         return result
     commands._updates.restart_and_install = install
     commands._updates.install_from_file = install
@@ -489,12 +496,9 @@ def test_installer_window_visibility(commands, monkeypatch, from_file, result):
     assert actual == result
     failed = result.get("ok") is not True
     assert commands._closing_confirmed is not failed
-    tail = commands._window.calls[-3:]
-    if failed:
-        # Raised from the RPC thread: marshalled restore/show only, never `on_top`.
-        assert tail == [("hide",), ("restore",), ("show",)]
-    else:
-        assert tail[-1] == ("hide",)
+    # A failure is reported in the window that never went away.
+    assert (("hide",) in commands._window.calls) is not failed
+    assert ("show",) not in commands._window.calls
 
 
 def test_raise_once_after_update_relaunch(commands):
@@ -596,3 +600,29 @@ def test_copy_raster(commands, monkeypatch):
         raise NotImplementedError("no clipboard")
     monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_rgba", fail)
     assert commands.copy_raster(2, 1, b"12345678") == {"ok": False, "error": "no clipboard", "unsupported": True}
+
+
+@pytest.mark.parametrize("owner", [77, 0, "current"])
+def test_take_foreground_shares_input_only_around_the_call(owner):
+    import threading
+    current = threading.get_native_id()
+    owner = current if owner == "current" else owner
+    calls = []
+
+    class User32:
+        def GetForegroundWindow(self): return 5 if owner else 0
+        def GetWindowThreadProcessId(self, hwnd, pid): return owner
+        def AttachThreadInput(self, a, b, attach):
+            calls.append(("attach", a, b, attach))
+            return True
+        def BringWindowToTop(self, hwnd): calls.append(("top", hwnd))
+        def SetForegroundWindow(self, hwnd):
+            calls.append(("foreground", hwnd))
+            return True
+
+    DesktopCommands._take_foreground(User32(), 9)
+    middle = [("top", 9), ("foreground", 9)]
+    if owner and owner != current:
+        assert calls == [("attach", current, owner, True), *middle, ("attach", current, owner, False)]
+    else:
+        assert calls == middle

@@ -13,7 +13,7 @@ def test_local_installer(tmp_path, monkeypatch):
     monkeypatch.setattr(controller.sys, "argv", ["app", "sample.atlas"])
     updates = controller.UpdateController()
     restarted = []
-    monkeypatch.setattr(updates, "restart_and_install", lambda: restarted.append(True) or {"ok": True})
+    monkeypatch.setattr(updates, "restart_and_install", lambda on_handoff=None: restarted.append(True) or {"ok": True})
     assert updates.install_from_file(source) == {"ok": True}
     assert restarted == [True]
     assert updates._installer_path.name == "AtlasToolkit-Setup-x64.exe"
@@ -35,7 +35,7 @@ def test_local_installer_same_path(tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "is_running_as_exe", lambda: True)
     updates = controller.UpdateController()
     called = []
-    monkeypatch.setattr(updates, "restart_and_install", lambda: called.append(True) or {"ok": True})
+    monkeypatch.setattr(updates, "restart_and_install", lambda on_handoff=None: called.append(True) or {"ok": True})
     assert updates.install_from_file(source) == {"ok": True}
     assert called == [True]
     assert source.read_bytes() == b"installer"
@@ -50,7 +50,7 @@ def test_local_installer_copy_error(tmp_path, monkeypatch):
     monkeypatch.setattr(controller.shutil, "copyfile", fail)
     updates = controller.UpdateController()
     called = []
-    monkeypatch.setattr(updates, "restart_and_install", lambda: called.append(True))
+    monkeypatch.setattr(updates, "restart_and_install", lambda on_handoff=None: called.append(True))
     assert updates.install_from_file(tmp_path / "source.exe") == {"ok": False, "error": "copy failed"}
     assert called == []
     assert not updates._ready
@@ -114,7 +114,9 @@ def test_installer_starts_before_watcher(tmp_path, monkeypatch):
     process = FakeProcess([None])
     controller, updates, calls, timers = _ready_controller(tmp_path, monkeypatch, process, timeout=30)
     started = time.monotonic()
-    assert updates.restart_and_install() == {"ok": True}
+    handed = []
+    assert updates.restart_and_install(on_handoff=lambda: handed.append(len(calls))) == {"ok": True}
+    assert handed == [2]  # after both launches, before exit
     assert time.monotonic() - started < 5  # exits as soon as the watcher claims
     assert [c[0] for c in calls] == ["installer", "watcher"]
     assert calls[0][2] == 1 and calls[1] == ("watcher", "powershell.exe", 0)
@@ -143,7 +145,7 @@ def test_installer_launch_failure_starts_no_watcher(tmp_path, monkeypatch):
 def test_non_program_file_is_refused_before_launch(tmp_path, monkeypatch):
     controller, updates, calls, timers = _ready_controller(tmp_path, monkeypatch, FakeProcess([None]))
     updates._installer_path.write_text("not an installer")
-    result = updates.restart_and_install()
+    result = updates.restart_and_install(on_handoff=lambda: calls.append("handoff"))
     assert result == {"ok": False, "error": "This file is not a Windows program, "
                       "so it cannot be an AtlasToolkit installer."}
     assert calls == [] and timers == []
@@ -153,8 +155,10 @@ def test_installer_early_exit_is_reported_in_app(tmp_path, monkeypatch):
     process = FakeProcess([1])
     controller, updates, calls, timers = _ready_controller(
         tmp_path, monkeypatch, process, watcher_claims=False)
-    result = updates.restart_and_install()
+    handed = []
+    result = updates.restart_and_install(on_handoff=lambda: handed.append(True))
     assert result == {"ok": False, "error": controller.installer_failure_message(1), "logPath": ""}
+    assert handed == []
     assert "damaged" in result["error"] and "exit code 1" in result["error"]
     assert timers == [] and process.closed
     # The app's claim stays as a marker, so a watcher arriving late still loses.

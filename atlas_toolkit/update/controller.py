@@ -527,7 +527,7 @@ class UpdateController:
             )
             return {"ok": False, "error": msg}
 
-    def install_from_file(self, path: Path) -> dict:
+    def install_from_file(self, path: Path, on_handoff=None) -> dict:
         if not is_running_as_exe():
             return {"ok": False, "error": "Dev mode does not support restart-and-install self-update."}
         target = get_update_dir() / f"{_SETUP_EXE_BASENAME}.exe"
@@ -541,9 +541,11 @@ class UpdateController:
         self._version = "local file"
         self._release_url = ""
         self._ready = True
-        return self.restart_and_install()
+        return self.restart_and_install(on_handoff=on_handoff)
 
-    def restart_and_install(self) -> dict[str, Any]:
+    def restart_and_install(self, on_handoff=None) -> dict[str, Any]:
+        """`on_handoff` runs once the installer is confirmed running, just
+        before the app exits (the desktop hides its window there)."""
         if not is_running_as_exe():
             return {
                 "ok": False,
@@ -644,5 +646,7 @@ class UpdateController:
         if owner == "app":
             log.warning("Relaunch watcher did not take over; the app will not reopen by itself.")
         log.info("Installer running (pid %s); exiting for the update.", process.pid)
+        if on_handoff is not None:
+            on_handoff()
         threading.Timer(0.25, lambda: os._exit(0)).start()
         return {"ok": True}
