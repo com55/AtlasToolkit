@@ -22,8 +22,9 @@ let _meshMaskEnabled = true;
 let _forcedResizing = false, _meshHullEnabled = false;
 let _loadEpoch = 0, _skelEpoch = 0;
 const _previewCache = new PreviewCache(24), _hulls = new Map();
-// Pixels behind the most recent preview fetch, valid while that cache entry is.
-let _lastPreview = null;
+// Pixels behind cached previews (key -> {url, raster}), for desktop Copy
+// image. An entry is valid only while the preview cache still owns its URL.
+const _rasters = new Map(), RASTER_CACHE_BYTES = 64 * 1024 * 1024;
 const _viewKey = names => viewPreviewKey(names, _loadEpoch, _meshMaskEnabled, _skelEpoch, _forcedResizing);
 const IMAGE_PICKER_ACCEPT = 'image/png,.png';
 
@@ -333,7 +334,7 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
     _currentAtlasDirectory = sourceDir;
     _loadEpoch++;
     _previewCache.invalidateAll();
-    _hulls.clear();
+    _hulls.clear(); _rasters.clear();
     return true;
   } catch (e) {
     if (e instanceof HostError) await window.showAlert(e.message, 'Cannot open atlas');
@@ -454,7 +455,7 @@ export const AtlasAPI = {
       const applied = result?.state && !result.unchanged ? await acceptEditResult(result) : result;
       if (result?.unchanged) _state = result.state;
       else if (result && !result.state) _state = result;
-      _previewCache.invalidateAll(); _hulls.clear();
+      _previewCache.invalidateAll(); _hulls.clear(); _rasters.clear();
       await publishSettings();
       return applied;
     };
@@ -479,7 +480,7 @@ export const AtlasAPI = {
     _currentSkel = {name: file.name, blob: file};
     if (_sourceFiles) _sourceFiles.skel = _currentSkel;
     _skelEpoch++;
-    _previewCache.invalidateAll(); _hulls.clear();
+    _previewCache.invalidateAll(); _hulls.clear(); _rasters.clear();
     return true;
     } catch (e) {
       if (e instanceof HostError) { window.showToast(e.message, 'error'); return false; }
@@ -583,22 +584,32 @@ export const AtlasAPI = {
    * longer owns the stored URL.
    */
   preview_raster(names) {
-    if (!_lastPreview || !names?.length) return null;
-    const key = _viewKey(names);
-    return key === _lastPreview.key && _previewCache.owns(_lastPreview.url) ? _lastPreview.raster : null;
+    if (!names?.length) return null;
+    const entry = _rasters.get(_viewKey(names));
+    return entry && _previewCache.owns(entry.url) ? entry.raster : null;
   },
 
   async get_preview(names) {
     if (!_state || !names?.length) return null;
     const key = _viewKey(names);
     const hit = _previewCache.get(key);
-    if (hit) return hit;
+    if (hit) {
+      const pixels = _rasters.get(key);
+      if (pixels) { _rasters.delete(key); _rasters.set(key, pixels); }
+      return hit;
+    }
     try {
       const raster = await callHost('preview', [names, _meshMaskEnabled && _state.mesh.available, _forcedResizing, true, _state.settings.alpha], {coalesce: 'preview'});
       if (!raster) return null;
       const url = await rasterToUrl(raster);
       _previewCache.set(key, url);
-      _lastPreview = {key, url, raster: {width: raster.width, height: raster.height, rgba: raster.rgba}};
+      _rasters.set(key, {url, raster: {width: raster.width, height: raster.height, rgba: raster.rgba}});
+      let bytes = 0;
+      for (const [cachedKey, entry] of [..._rasters].reverse()) {
+        if (!_previewCache.owns(entry.url)) { _rasters.delete(cachedKey); continue; }
+        bytes += entry.raster.rgba.byteLength;
+        if (bytes > RASTER_CACHE_BYTES && cachedKey !== key) _rasters.delete(cachedKey);
+      }
       _hulls.set(key, raster.hulls);
       for (const cachedKey of _hulls.keys()) {
         if (!_previewCache.has(cachedKey)) _hulls.delete(cachedKey);

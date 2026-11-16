@@ -248,11 +248,26 @@ try {
     await page.locator('.region-item[data-label="a"]').click();
     await page.waitForFunction(() => document.querySelector('#preview-img')?.src.startsWith('blob:'), null, {timeout:60000, polling:500});
     await idle();
-    const before = frames.length;
-    await page.evaluate(() => window.copyPreviewImage());
-    const methods = frames.slice(before).map(frame => frame.method);
+    const copyMethods = async () => {
+      const before = frames.length;
+      await page.evaluate(() => window.copyPreviewImage());
+      // Headless Linux has no image clipboard: dismiss the fallback's alert.
+      const alert = page.locator('#modal-overlay');
+      if (await alert.isVisible()) await page.locator('#btn-modal-confirm').click();
+      return frames.slice(before).map(frame => frame.method);
+    };
     // No engine render before the clipboard call (Linux reports it unsupported,
     // so the browser-clipboard fallback may render afterwards).
+    let methods = await copyMethods();
+    assert.equal(methods[0], 'copy_raster', methods.join());
+    // Back to an already-viewed region: a preview cache hit keeps its pixels too.
+    for (const label of ['b', 'a']) {
+      const previous = await page.locator('#preview-img').getAttribute('src');
+      await page.locator(`.region-item[data-label="${label}"]`).click();
+      await page.waitForFunction(previous => document.querySelector('#preview-img')?.src !== previous, previous, {timeout:60000, polling:500});
+      await idle();
+    }
+    methods = await copyMethods();
     assert.equal(methods[0], 'copy_raster', methods.join());
   });
 } finally {
