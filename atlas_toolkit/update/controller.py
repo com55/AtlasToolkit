@@ -312,6 +312,24 @@ def _launch_process(file: str, params: str, work_dir: str, show: int = 1) -> _In
     return _InstallerProcess(int(info.hProcess), int(kernel32.GetProcessId(info.hProcess)))
 
 
+def _installer_check(path: Path) -> Optional[str]:
+    """A fixed message for a file that is not a Windows program at all."""
+    try:
+        with open(path, "rb") as handle:
+            if handle.read(2) == b"MZ":
+                return None
+    except OSError as e:
+        return f"Could not read the installer: {e.strerror or e}"
+    return "This file is not a Windows program, so it cannot be an AtlasToolkit installer."
+
+
+def _launch_error_message(error: OSError) -> str:
+    detail = (error.strerror or str(error)).strip().replace("%1", "the file")
+    code = getattr(error, "winerror", None) or error.errno
+    suffix = f" (Windows: {detail}, code {code})" if code else f" ({detail})"
+    return "Windows could not start this installer. It may be damaged or not an AtlasToolkit installer." + suffix
+
+
 def _claim(path: Path) -> bool:
     """Create the claim file; False when the watcher created it first."""
     try:
@@ -552,6 +570,10 @@ class UpdateController:
                 "error": f"Cannot locate executable for relaunch: {target_exe}",
             }
 
+        problem = _installer_check(installer_path)
+        if problem:
+            return {"ok": False, "error": problem}
+
         update_dir = get_update_dir()
         pending_json_path = update_dir / "pending_update.json"
         pending_json_path.write_text(
@@ -574,7 +596,9 @@ class UpdateController:
         watcher_path = update_dir / f"relaunch_after_{timestamp}.ps1"
         claim_path = update_dir / f"handoff_{timestamp}.claim"
         result_path = update_dir / RESULT_FILE_NAME
-        for stale in (claim_path, result_path):
+        # A claim file stays behind as a marker when the app wins it, so a late
+        # watcher still loses; clear earlier attempts' markers here instead.
+        for stale in (*update_dir.glob("handoff_*.claim"), result_path):
             stale.unlink(missing_ok=True)
 
         _unblock_downloaded_file(installer_path)
@@ -586,7 +610,7 @@ class UpdateController:
             )
         except OSError as e:
             log.warning("Installer launch failed: %s", e)
-            return {"ok": False, "error": f"Could not start the installer: {e}"}
+            return {"ok": False, "error": _launch_error_message(e)}
 
         try:
             try:
@@ -612,7 +636,6 @@ class UpdateController:
         if owner == "app" and code is not None and code != 0:
             # The installer quit before the watcher took over: report it here.
             log.warning("Installer exited early with code %s", code)
-            claim_path.unlink(missing_ok=True)
             return {
                 "ok": False,
                 "error": installer_failure_message(code),

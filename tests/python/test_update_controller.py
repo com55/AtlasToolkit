@@ -73,7 +73,7 @@ def _ready_controller(tmp_path, monkeypatch, process, *, watcher_claims=True, wa
                       timeout=0.3):
     from atlas_toolkit.update import controller
     installer = tmp_path / "setup.exe"
-    installer.write_bytes(b"installer")
+    installer.write_bytes(b"MZ installer")
     executable = tmp_path / "app.exe"
     executable.write_bytes(b"app")
     monkeypatch.setattr(controller, "get_update_dir", lambda: tmp_path)
@@ -130,12 +130,23 @@ def test_installer_starts_before_watcher(tmp_path, monkeypatch):
 
 
 def test_installer_launch_failure_starts_no_watcher(tmp_path, monkeypatch):
-    error = OSError(193, "%1 is not a valid Win32 application")
+    error = OSError(13, "Access is denied.")
+    error.winerror = 5  # what ctypes.WinError(5) carries on Windows
     controller, updates, calls, timers = _ready_controller(tmp_path, monkeypatch, error)
     result = updates.restart_and_install()
-    assert not result["ok"] and result["error"].startswith("Could not start the installer:")
+    assert result == {"ok": False, "error": "Windows could not start this installer. It may be damaged "
+                      "or not an AtlasToolkit installer. (Windows: Access is denied., code 5)"}
     assert [c[0] for c in calls] == ["installer"] and timers == []
     assert not list(tmp_path.glob("relaunch_after_*.ps1"))
+
+
+def test_non_program_file_is_refused_before_launch(tmp_path, monkeypatch):
+    controller, updates, calls, timers = _ready_controller(tmp_path, monkeypatch, FakeProcess([None]))
+    updates._installer_path.write_text("not an installer")
+    result = updates.restart_and_install()
+    assert result == {"ok": False, "error": "This file is not a Windows program, "
+                      "so it cannot be an AtlasToolkit installer."}
+    assert calls == [] and timers == []
 
 
 def test_installer_early_exit_is_reported_in_app(tmp_path, monkeypatch):
@@ -146,7 +157,11 @@ def test_installer_early_exit_is_reported_in_app(tmp_path, monkeypatch):
     assert result == {"ok": False, "error": controller.installer_failure_message(1), "logPath": ""}
     assert "damaged" in result["error"] and "exit code 1" in result["error"]
     assert timers == [] and process.closed
-    assert not list(tmp_path.glob("handoff_*.claim"))
+    # The app's claim stays as a marker, so a watcher arriving late still loses.
+    assert len(list(tmp_path.glob("handoff_*.claim"))) == 1
+    (tmp_path / "handoff_old.claim").write_text("")
+    updates.restart_and_install()
+    assert not (tmp_path / "handoff_old.claim").exists()
 
 
 def test_watcher_claim_wins_over_early_exit(tmp_path, monkeypatch):
