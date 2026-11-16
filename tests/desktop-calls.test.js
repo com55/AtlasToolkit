@@ -401,6 +401,7 @@ for (const outcome of ['resolve', 'reject']) test(`add-region hides before onCon
 
 for (const mode of ['desktop', 'fallback', 'web']) test(`copy image uses focus-safe clipboard path: ${mode}`, async t => {
   const calls = fakeDesktopServer(t, {copy_image: () => mode === 'fallback' ? {ok: false, unsupported: true} : {ok: true}});
+  t.mock.timers.reset(); // desktop copy yields a real frame/timer so the menu can close first
   if (mode === 'web') location.pathname = '/index.html';
   let resolvePng;
   const pending = new Promise(resolve => { resolvePng = resolve; });

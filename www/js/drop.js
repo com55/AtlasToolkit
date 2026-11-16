@@ -232,6 +232,13 @@ export async function copyPreviewImage() {
   try {
     let pngPromise;
     if (isPywebviewDesktop()) {
+      // Let the closed menu paint before the copy work holds the page, or
+      // the click looks stuck. (Web keeps its synchronous clipboard.write:
+      // it must start inside the click.) The timeout covers a stalled rAF.
+      await new Promise(resolve => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(resolve, 0));
+        setTimeout(resolve, 100);
+      });
       // Reuse the shown preview's pixels: re-rendering and PNG round trips
       // made Copy take about a second on large selections.
       const raster = state.currentMode === 'modify' ? null : AtlasAPI.preview_raster(getSelectedKeys());
