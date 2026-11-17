@@ -556,13 +556,6 @@ export const AtlasAPI = {
     return _loadAtlasFiles(atlasFile, imageFileMap, sourceDir);
   },
 
-  /** Directory the current atlas was natively opened from, or '' — pywebview
-   * only (see `_currentAtlasDirectory`'s doc comment). Used as the starting
-   * directory for extract/save native dialogs. */
-  get_current_atlas_directory() {
-    return _currentAtlasDirectory;
-  },
-
   /** Filename of the currently-loaded atlas, or '' if none — used by
    * script.js to update the pywebview native window title. */
   get_current_atlas_filename() {

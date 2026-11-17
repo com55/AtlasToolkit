@@ -41,25 +41,7 @@ async function openExternalUrl(url, invalidMessage = 'Invalid URL.') {
   }
 }
 
-window.showUpdateNotification = function (...args) {
-  let payload = null;
-
-  if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
-    payload = args[0];
-  } else {
-    const legacyVersion = String(args[0] || '');
-    payload = {
-      latestVersion: legacyVersion,
-      releaseName: String(args[1] || ''),
-      releaseUrl: String(args[2] || ''),
-      tagName: legacyVersion
-        ? (legacyVersion.startsWith('v') ? legacyVersion : `v${legacyVersion}`)
-        : '',
-      sourceTreeUrl: String(args[2] || ''),
-      action: 'open_source_tag',
-    };
-  }
-
+window.showUpdateNotification = function (payload) {
   const latestVersion = String(payload.latestVersion || '');
   const releaseName = String(payload.releaseName || latestVersion || 'New release');
   const releaseUrl = String(payload.releaseUrl || '');

@@ -100,7 +100,6 @@ test('bundle fetch loads atlas, page bytes and captured skeleton; missing pages 
   const calls = fakeDesktopServer(t, {...engineHandlers, load: (...args) => {captured = args; return {mesh:{}};}}, assets);
   await boot(t);
   assert.equal(await AtlasAPI.load_atlas_bundle(bundle), true);
-  assert.equal(AtlasAPI.get_current_atlas_directory(), 'source');
   assert.deepEqual(captured.slice(0,2), ['hero.atlas', assets['asset/atlas']]);
   assert.deepEqual(captured[2], {'page.png': new TextEncoder().encode('png')});
   assert.equal(captured[3], 'hero.skel'); assert.deepEqual(captured[4], new TextEncoder().encode('skel'));

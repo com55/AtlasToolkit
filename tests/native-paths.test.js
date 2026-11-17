@@ -3,12 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { nativePathBasename, matchDroppedPngToPage, joinNativePath, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename, ensurePngExtension, finalizeSaveFilename } from '../www/js/platform.js';
-
-test('joinNativePath keeps Windows or POSIX separators', () => {
-  assert.equal(joinNativePath('C:\\atlas', 'page.png'), 'C:\\atlas\\page.png');
-  assert.equal(joinNativePath('/tmp/atlas', 'page.png'), '/tmp/atlas/page.png');
-});
+import { nativePathBasename, matchDroppedPngToPage, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename, ensurePngExtension, finalizeSaveFilename } from '../www/js/platform.js';
 
 test('nativePathBasename handles Windows and POSIX paths', () => {
   assert.equal(nativePathBasename('C:\\\\atlas\\\\page.png'), 'page.png');

@@ -66,14 +66,6 @@ export function previewZoomOriginY(containerH, topAnchored) {
   return topAnchored ? 0 : containerH / 2;
 }
 
-/** Join a directory and filename with the separator already used in `dir`. */
-export function joinNativePath(dir, name) {
-  const file = String(name || '').replace(/^[\\/]+/, '');
-  if (!dir) return file;
-  const base = String(dir).replace(/[\\/]+$/, '');
-  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/';
-  return `${base}${sep}${file}`;
-}
 
 /** Last path segment of a native OS path (Windows or POSIX). */
 export function nativePathBasename(path) {
@@ -215,7 +207,7 @@ export async function pickAtlasFile() {
 
 /**
  * Pick a folder to save into. pywebview: native folder dialog (returns a
- * plain path string). Browser: File System Access API (returns a
+ * `{path, grant}` write grant). Browser: File System Access API (returns a
  * FileSystemDirectoryHandle). Returns null if unsupported or cancelled.
  */
 export async function pickSaveFolder() {
@@ -253,7 +245,7 @@ export async function confirmOverwrite(names, confirm) {
 /**
  * Names in `names` that already exist under `target`.
  * A directory with the same name counts: the write would hit that path.
- * target: a plain path string (pywebview) or a FileSystemDirectoryHandle.
+ * target: a `{path, grant}` write grant (pywebview) or a FileSystemDirectoryHandle.
  */
 export async function existingOutputNames(target, names) {
   const list = (Array.isArray(names) ? names : []).filter((name) => typeof name === 'string' && name);
@@ -293,7 +285,7 @@ function _saveCancelled() {
 
 /**
  * Write a list of {name, data} to a folder.
- * target: a plain path string (pywebview) or a FileSystemDirectoryHandle
+ * target: a `{path, grant}` write grant (pywebview) or a FileSystemDirectoryHandle
  * (browser, from pickSaveFolder).
  * `confirm(message, title)` is required when any output name already exists.
  * Declining throws AbortError and writes nothing.

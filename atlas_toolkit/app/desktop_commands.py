@@ -107,18 +107,17 @@ class DesktopCommands:
         with self._startup_lock:
             if self._startup_result is not None:
                 return {**self._startup_result, "atlas": None, "atlasError": None}
-            if self._startup_result is None:
-                atlas, error = None, None
-                if len(self._argv) > 1 and self._argv[1].lower().endswith(".atlas"):
-                    try:
-                        atlas = self._files.atlas_bundle(Path(self._argv[1]))
-                    except (OSError, UnicodeDecodeError) as exc:
-                        error = str(exc)
-                self._startup_result = dict(version=get_current_version(), devBuild=build_info.DEV_BUILD,
-                                            atlas=atlas, atlasError=error,
-                                            updateFailure=self._updates.pending_failure)
-                self._update_thread = threading.Thread(target=self._run_update_check, daemon=True)
-                self._update_thread.start()
+            atlas, error = None, None
+            if len(self._argv) > 1 and self._argv[1].lower().endswith(".atlas"):
+                try:
+                    atlas = self._files.atlas_bundle(Path(self._argv[1]))
+                except (OSError, UnicodeDecodeError) as exc:
+                    error = str(exc)
+            self._startup_result = dict(version=get_current_version(), devBuild=build_info.DEV_BUILD,
+                                        atlas=atlas, atlasError=error,
+                                        updateFailure=self._updates.pending_failure)
+            self._update_thread = threading.Thread(target=self._run_update_check, daemon=True)
+            self._update_thread.start()
             return dict(self._startup_result)
 
     def _run_update_check(self):

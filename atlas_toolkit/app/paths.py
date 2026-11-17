@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Filesystem paths for bundled resources (www/, etc.)."""
+"""Filesystem paths for bundled resources (the built desktop site, etc.)."""
 
 from __future__ import annotations
 

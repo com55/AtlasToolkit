@@ -22,3 +22,12 @@ export async function loadFileAsFile(path, mime = 'image/png') {
   const name = String(path).replace(/\\/g, '/').split('/').pop();
   return new File([blob], name, { type: mime });
 }
+
+/** Join a directory and filename with the separator already used in `dir`. */
+export function joinNativePath(dir, name) {
+  const file = String(name || '').replace(/^[\\/]+/, '');
+  if (!dir) return file;
+  const base = String(dir).replace(/[\\/]+$/, '');
+  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/';
+  return `${base}${sep}${file}`;
+}

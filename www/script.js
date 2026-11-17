@@ -150,8 +150,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // show on first page load until the user toggles modes at least once
   // (found via adversarial DOM smoke test, 2026-08-31).
   setMode('extract');
-  if (isPywebviewDesktop()) await _clearStaleServiceWorkerUnderDesktop();
-  else registerServiceWorker();
+  if (!isPywebviewDesktop()) registerServiceWorker();
 
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
@@ -188,24 +187,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     logStage(loaded ? 'CLI atlas loaded' : 'CLI atlas load failed');
   }
 });
-
-/**
- * Desktop now runs on http and must never register a service worker.
- * Clear stale registrations and caches before continuing desktop startup.
- */
-async function _clearStaleServiceWorkerUnderDesktop() {
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map((r) => r.unregister()));
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } catch (e) {
-    console.warn('Stale service-worker cleanup failed:', e);
-  }
-}
 
 /**
  * Register the service worker and wire up a user-prompted update flow: PWA
