@@ -182,6 +182,20 @@ def test_config_threads(tmp_path, monkeypatch):
         for thread in started:
             thread.join()
     assert len(json.loads(config.CONFIG_PATH.read_text())) == 160
+    assert [p.name for p in tmp_path.iterdir()] == ["prefs.json"]  # no temp files left
+
+
+def test_config_write_is_atomic(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "prefs.json")
+    prefs = config.AppConfig()
+    prefs.set("kept", 1)
+    def fail(*args):
+        raise OSError("disk full")
+    monkeypatch.setattr(config.os, "replace", fail)
+    prefs.set("lost", 2)
+    # The old file is untouched and the half-written temp file is removed.
+    assert json.loads(config.CONFIG_PATH.read_text()) == {"kept": 1}
+    assert [p.name for p in tmp_path.iterdir()] == ["prefs.json"]
 
 
 def test_delegates_and_os_commands(commands, tmp_path, monkeypatch):

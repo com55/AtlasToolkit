@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,24 @@ class AppConfig:
         with self._lock:
             self._data[key] = value
             try:
-                CONFIG_PATH.write_text(json.dumps(self._data), encoding="utf-8")
+                _write_atomic(CONFIG_PATH, json.dumps(self._data))
             except Exception as e:
                 log.warning("Failed to save config: %s", e)
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Replace `path` in one step, so a crash or a second app reading it never
+    sees a half-written file."""
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
