@@ -176,6 +176,7 @@ def live(tmp_path):
         response = conn.getresponse()
         assert response.getheader("Cache-Control") == "no-store"
         assert response.getheader("X-Content-Type-Options") == "nosniff"
+        assert response.getheader("Server") == "AtlasToolkit"  # no Python version
         assert not any(k.lower().startswith("access-control-") for k, _ in response.getheaders())
         if path == "api/events" and response.status == 200:
             return conn, response

@@ -78,6 +78,11 @@ class DesktopServer:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
             timeout = connection_timeout
+            server_version = "AtlasToolkit"
+
+            def version_string(self):
+                # The stdlib default names the Python version to any local page.
+                return self.server_version
 
             def handle_one_request(self):
                 self.connection.settimeout(self.timeout)
