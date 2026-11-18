@@ -40,14 +40,15 @@ def test_pma_page_keeps_glow_next_to_a_straight_page(monkeypatch, packer, option
         assert not g[:, 8:].any(), crop
 
 
-def test_cross_page_all_pma_composite_is_exact():
+@pytest.mark.parametrize("try_keep_layout", [True, False])
+def test_cross_page_all_pma_composite_is_exact(try_keep_layout):
     text = "a.png\nsize: 16,8\npma: true\nP\n bounds: 0,0,16,8\n\nb.png\nsize: 16,8\npma: true\nQ\n bounds: 0,0,16,8\n"
     atlas = SpineAtlas.load(text, {"a.png": Image.new("RGBA", (16, 8)), "b.png": Image.new("RGBA", (16, 8))})
     want = with_glow(premultiplied_pattern(16, 8, 5), 4, 4, GLOW_IN)
     image = img(want)
     for _ in range(6):
         atlas.replace_composite(["P", "Q"], image)
-        atlas = atlas.build(options=PackOptions(mesh_aware=False))
+        atlas = atlas.build(options=PackOptions(mesh_aware=False, try_keep_layout=try_keep_layout))
         image = atlas.extract_composite(["P", "Q"])
         assert np.array_equal(np.asarray(image), want)
 

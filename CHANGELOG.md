@@ -6,6 +6,9 @@ the full notes and screenshots.
 
 ## [Unreleased] - Python engine
 
+A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
+desktop and web apps are unchanged and still run the JavaScript engine.
+
 ### Breaking: `PackOptions`
 - `build()`, `save()`, `pack()` and `pack_is_cached()` take one
   `options=PackOptions(...)` instead of `packer=`, `packer_options=` and
@@ -28,9 +31,6 @@ the full notes and screenshots.
 - One old combination has no equivalent: `repack="auto"` used to patch an
   add-only page in the same build that repacked a page with a replace or
   remove. `try_keep_layout` is one switch for every page.
-
-A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
-desktop and web apps are unchanged and still run the JavaScript engine.
 
 ### Breaking
 - Mesh-aware packing now applies to `pma: true` pages. `mesh_aware=None`
@@ -58,8 +58,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   unchanged; composite images are always split and each piece is drawn into
   its region's slot when the image is that region's canvas size and the
   piece meets the same rules; additions go into free space. Any other
-  edited page is repacked with "rectangles" /
-  "polygons". `PackOptions(try_keep_layout=False)` repacks every edited page.
+  edited page is repacked with the selected packer (including "shelf").
+  `PackOptions(try_keep_layout=False)` repacks every edited page.
   Kept-layout pages are not deduplicated afresh: regions that become pixel-identical
   keep their own rects. Vacating a rect or pasting a mod can clear
   never-rendered pixels of an overlapping hulled region, so its extract()

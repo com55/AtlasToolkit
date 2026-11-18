@@ -308,6 +308,8 @@ const RECTS = [[6,6,44,38],[54,6,36,32],[94,6,30,26],[128,6,34,22],[128,32,26,20
 const rects = (list, fill) => list.map(([x,y,w,h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`).join('');
 const POLY = '<path d="M8 8 L52 8 L52 22 L30 44 L8 44 Z"/><path d="M34 46 L56 24 L56 60 L34 60 Z"/><path d="M60 8 L96 8 L84 40 L60 40 Z"/><path d="M88 42 L100 10 L132 10 L132 42 Z"/><circle cx="150" cy="26" r="14"/><path d="M8 50 L30 50 L30 96 L8 96 Z"/><path d="M60 46 L110 46 L110 62 L60 62 Z"/><path d="M114 48 L160 48 L137 92 Z"/><path d="M36 66 L106 66 L90 100 L36 100 Z"/>';
 const PACKER_INFO = [
+  ['Auto', 'Uses Polygons when a .skel is loaded, otherwise Rectangles.',
+    `<g fill="#3d7fb8">${POLY}</g><rect x="34" y="24" width="22" height="36" fill="none" stroke="#9cc6ea" stroke-dasharray="2 2" opacity=".8"/>`],
   ['Shelf', 'Lays regions out in rows, tallest first. The fastest packer; leaves empty space above shorter regions in a row.',
     rects(SHELF, '#3d7fb8') + '<g stroke="#888" stroke-dasharray="3 3"><line x1="4" y1="46" x2="166" y2="46"/><line x1="4" y1="78" x2="166" y2="78"/></g>'],
   ['Rectangles', 'Puts each region into the first gap its rectangle fits, including gaps between regions already placed. Smaller pages than Shelf.',

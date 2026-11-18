@@ -105,6 +105,8 @@ built = atlas.build()                           # a new SpineAtlas; `atlas` is u
     (`PackOptions(mesh_aware=False)` with it raises `ValueError`). With
     `"polygons"`, a region's rect can contain pixels of neighbours nested into
     its empty corners; extract with `mesh_crop=True` to see only the region.
+    Auto's size-aware choice (Polygons > Rectangles > Shelf by region count
+    and each region's size) comes later.
   - `padding`: pixels between packed images, default 2, 1 to 256.
   - `mesh_aware`: cut each region's pixels outside its mesh hull before
     packing. Default on whenever the atlas has usable mesh data, so a `.skel`

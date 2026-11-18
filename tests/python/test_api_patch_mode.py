@@ -79,7 +79,9 @@ def test_add_and_replace_pristine_keeps_the_layout_when_it_fits():
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
     atlas.replace({"A": img(16, 16, 9)})   # A's own slot: drawn there
-    assert patched(atlas.build())
+    built = atlas.build()
+    assert patched(built)
+    assert bounds(built, "A") == (0, 0, 16, 16, 0)
 
 
 def test_add_and_replace_pristine_repacks_without_keep_layout():
@@ -137,6 +139,7 @@ def _three_pages():
 def test_three_pages_all_keep_their_layout():
     built = _three_pages().build()
     assert patched(built)
+    assert bounds(built, "C") == (0, 0, 16, 16, 0)
     assert bounds(built, "D")[:2] == (16, 0)      # kept in place too
     assert built.pages["r.png"].tobytes() == THREE_PAGE_IMAGES["r.png"].tobytes()
 
@@ -261,7 +264,7 @@ def test_too_large_names_the_page():
     assert info.value.page == "q.png"
 
 
-def test_unedited_build_still_validates_repack():
+def test_unedited_build_rejects_invalid_packer():
     with pytest.raises(ValueError):
         SpineAtlas.load(TEXT, {"p.png": page()}).build(options=PackOptions(packer="never"))
 

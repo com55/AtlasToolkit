@@ -115,9 +115,9 @@ def test_shared_composite_other_page_keeps_layout():
         assert (before[y:y + h, x:x + w] == after[y:y + h, x:x + w]).all()
 
 
-def test_split_composite_keeps_the_layout():
-    # Control: with the image split (the default), both regions still go back
-    # into their own slots.
+def test_shared_composite_exclusion_does_not_affect_split_builds():
+    # The shared-composite exclusion leaves split builds eligible to keep
+    # both regions in their own slots.
     kept = plain().build(options=kept_unsplit(share_composite_image=False))
     repacked = plain().build(options=repacked_unsplit(share_composite_image=False))
     assert kept.atlas_text != repacked.atlas_text
@@ -135,3 +135,23 @@ def test_single_survivor_composite_still_in_place():
     assert in_place.layout(kept) == in_place.layout(atlas)
     assert kept.pages["p.png"].size == (48, 16)
     assert (np.asarray(kept.extract("A")) == arr).all()
+
+
+def test_cross_page_shared_composite_repacks_both_pages():
+    text = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
+            "C\n bounds: 32,0,12,12\n\n"
+            "q.png\nsize: 48,16\nD\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
+            "E\n bounds: 32,0,12,12\n")
+    atlas = SpineAtlas.load(text, {
+        "p.png": in_place.page(48, 16, aliased_rects()),
+        "q.png": in_place.page(48, 16, aliased_rects(), seed=2),
+    })
+    # The image fits both survivors' slots, so only the shared-image exclusion
+    # makes both pages repack.
+    arr = np.zeros((16, 16, 4), np.uint8)
+    arr[5:13, 2:12] = in_place.pattern(10, 8, 9)
+    atlas.replace_composite(["A", "D"], Image.fromarray(arr, "RGBA"))
+    kept = atlas.build(options=kept_unsplit())
+    repacked = atlas.build(options=repacked_unsplit())
+    assert set(kept.pages) == {"p.png", "q.png"}
+    in_place.same_build(kept, repacked)

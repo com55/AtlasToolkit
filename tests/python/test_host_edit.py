@@ -181,12 +181,11 @@ def test_unknown_edit_key(method, args):
         getattr(host, method)(*args)
 
 
-def test_single_modify_with_split_composite_replaces_full_image():
+def test_single_modify_replaces_full_image():
     host, _ = loaded(lambda: (
         one_page()[0].replace(' bounds: 1,2,3,2', ' bounds: 1,2,3,2\n offsets: 1,1,5,4'),
         one_page()[1],
     ))
-    host._pack_settings['split_composite'] = True
     host.enter_edit()
     result = host.modify(['a'], page_bytes(5, 4), 'straight')
     assert result['regions']['a'][:4] == [0, 0, 5, 4]

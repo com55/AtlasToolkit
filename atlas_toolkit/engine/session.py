@@ -1071,7 +1071,8 @@ class AtlasSession:
         `in_place` (SpineAtlas only, spec 2026-11-05): every touched page whose
         image is its declared size is tried in place; a page that does not fit
         repacks. `keep_layout_gap` is the gap an in-place placement leaves
-        around an added region (SpineAtlas passes its padding, >= 1).
+        around an added region (SpineAtlas passes its padding, >= 1),
+        normalized like the nest gap (0 or invalid becomes 4).
         `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry
         for added regions.
         `report`, `bleed`: see _build_pages."""
