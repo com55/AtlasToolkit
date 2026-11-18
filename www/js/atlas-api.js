@@ -836,13 +836,17 @@ onEngineDied(async (message) => {
 
 /** Convert persisted pack preferences to the current host settings contract. */
 export function migrateSettingPrefs(stored) {
+  // The old app saved every setting on every launch, so before sharing was
+  // ever stored a saved 'shelf' / split=false are old defaults, not choices.
+  // A stored split=true maps to its inverse, which is the default anyway.
+  const legacy = stored.packShareCompositeImage == null;
   const inPlace = stored.packer === 'rectangles_in_place' || stored.packer === 'polygons_in_place';
-  const packer = inPlace ? stored.packer.replace('_in_place', '') : stored.packer;
+  let packer = inPlace ? stored.packer.replace('_in_place', '') : stored.packer;
+  if (legacy && packer === 'shelf') packer = 'auto';
   return {
     packer: ['auto', 'shelf', 'rectangles', 'polygons'].includes(packer) ? packer : 'auto',
     keepLayout: inPlace ? true : (stored.packKeepLayout ?? true),
-    shareCompositeImage: stored.packShareCompositeImage
-      ?? (stored.packSplitComposite == null ? false : !stored.packSplitComposite),
+    shareCompositeImage: legacy ? false : stored.packShareCompositeImage,
   };
 }
 

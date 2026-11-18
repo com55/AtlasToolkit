@@ -25,9 +25,9 @@ for (const packer of ['grid', 'unknown']) {
 }
 
 for (const split of [false, true]) {
-  test(`legacy split ${split} migrates to inverse sharing`, () => {
+  test(`legacy split ${split} migrates to sharing off (inverse of true, old default for false)`, () => {
     assert.deepEqual(migrateSettingPrefs({packSplitComposite: split}), {
-      ...defaults, shareCompositeImage: !split,
+      ...defaults, shareCompositeImage: false,
     });
   });
   test(`explicit sharing ${split} wins over a legacy split preference`, () => {
@@ -65,3 +65,22 @@ for (const stored of [
     assert.equal(Object.hasOwn(saved, 'packSplitComposite'), false);
   });
 }
+
+test('old auto-saved shelf + split=false reset to the new defaults once', () => {
+  assert.deepEqual(migrateSettingPrefs({packer: 'shelf', packSplitComposite: false}), defaults);
+});
+test('old install keeps a non-shelf packer, sharing stays off', () => {
+  assert.deepEqual(migrateSettingPrefs({packer: 'rectangles', packSplitComposite: false}), {
+    ...defaults, packer: 'rectangles',
+  });
+});
+test('shelf chosen on a new install is kept once sharing is stored', () => {
+  assert.deepEqual(migrateSettingPrefs({packer: 'shelf', packShareCompositeImage: true}), {
+    ...defaults, packer: 'shelf', shareCompositeImage: true,
+  });
+});
+test('old rectangles_in_place with split=false migrates to rectangles + keep layout', () => {
+  assert.deepEqual(migrateSettingPrefs({packer: 'rectangles_in_place', packSplitComposite: false}), {
+    ...defaults, packer: 'rectangles', keepLayout: true,
+  });
+});

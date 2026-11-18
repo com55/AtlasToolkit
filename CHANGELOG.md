@@ -7,7 +7,8 @@ the full notes and screenshots.
 ## [Unreleased] - Python engine
 
 A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
-desktop and web apps are unchanged and still run the JavaScript engine.
+apps run the Python engine too: the web/PWA app in a Pyodide worker, the
+desktop app through a local server.
 
 ### Breaking: `PackOptions`
 - `build()`, `save()`, `pack()` and `pack_is_cached()` take one
@@ -55,9 +56,10 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   whose new pixels fit its old slot (the canvas size `extract()` gives,
   nothing visible outside the old trimmed rect, pixels shared with an
   overlapping neighbour unchanged) is drawn there with its rect and offsets
-  unchanged; composite images are always split and each piece is drawn into
-  its region's slot when the image is that region's canvas size and the
-  piece meets the same rules; additions go into free space. Any other
+  unchanged; when composites are split, each piece is drawn into its region's
+  slot if the image is that region's canvas size and the piece meets the
+  same rules (with `share_composite_image=True` a page holding such a replace
+  is repacked); additions go into free space. Any other
   edited page is repacked with the selected packer (including "shelf").
   `PackOptions(try_keep_layout=False)` repacks every edited page.
   Kept-layout pages are not deduplicated afresh: regions that become pixel-identical

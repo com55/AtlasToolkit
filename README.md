@@ -131,8 +131,8 @@ built = atlas.build()                           # a new SpineAtlas; `atlas` is u
   - `share_composite_image`: `replace_composite` only. Off (default) cuts the
     image back into one piece per region: the inverse of
     `extract_composite(force_resize=True)`. On, every region of the group uses
-    the whole image at the image's own size (offsets dropped), as the app
-    does, and a page holding such a replace is repacked.
+    the whole image at the image's own size (offsets dropped), and a page
+    holding such a replace is repacked.
 
   `atlas.build(options=PackOptions(packer="polygons", padding=4))`
 - `mesh_crop=True` on the extract methods and `packer="polygons"` or

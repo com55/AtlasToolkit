@@ -20,7 +20,9 @@ const HINTS = {
   keepLayout: 'Keep existing region positions when possible. Otherwise, repack using the selected packer.',
 };
 const LOCK_REASONS = {
-  meshAware: v => (v.packer === 'polygons' || (v.packer === 'auto' && v.polygonsAllowed)) ? 'Polygons packers always pack by mesh outline.' : 'Needs a usable .skel file.',
+  meshAware: v => v.packer === 'polygons' ? 'Polygons always packs by mesh outline.'
+    : (v.packer === 'auto' && v.polygonsAllowed) ? 'Auto uses Polygons with a .skel, which always packs by mesh outline.'
+    : 'Needs a usable .skel file.',
   bleed: () => 'Pages with premultiplied alpha never get bleed.',
 };
 
