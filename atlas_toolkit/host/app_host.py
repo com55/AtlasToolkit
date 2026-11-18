@@ -43,8 +43,9 @@ class AppHost:
             "bleed": True,
         }
 
-    def _settings(self) -> dict:
-        settings = dict(self._pack_settings)
+    def _settings(self, pack_settings: dict | None = None) -> dict:
+        requested_settings = dict(self._pack_settings if pack_settings is None else pack_settings)
+        settings = dict(requested_settings)
         usable_mesh = self._require_atlas().mesh_unavailable_reason is None
         requested = settings["packer"]
         fallback = requested.startswith("polygons") and not usable_mesh
@@ -63,6 +64,8 @@ class AppHost:
             alphaVisible=self._all_pma,
             bleedLocked=self._all_pma,  # bleed never touches pma pages
             fallbackFrom=requested if fallback else None,
+            # What the user chose, before locks and fallbacks: the panel's draft starts here.
+            requested=requested_settings,
         )
         return settings
 
@@ -98,6 +101,12 @@ class AppHost:
                 valid = False
             if not valid:
                 raise ValueError(f"invalid setting: {key}")
+
+    def preview_settings(self, settings: dict) -> dict:
+        """The settings state set_settings(settings) would produce (effective
+        values, locks, fallback), without storing or packing anything."""
+        self._validate_settings(settings)
+        return self._settings({**self._pack_settings, **settings})
 
     def settings_need_pack(self, settings: dict) -> bool:
         """True when set_settings(settings) would pack: Edit Mode with edits

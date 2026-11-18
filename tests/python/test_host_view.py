@@ -85,6 +85,9 @@ def test_load_reports_state():
             "keepLayoutLocked": False, "polygonsAllowed": False,
             "alpha": "straight", "alphaVisible": False, "fallbackFrom": None,
             "bleed": True, "bleedLocked": False,
+            "requested": {"packer": "shelf", "padding": 2, "meshAware": True,
+                          "splitComposite": False, "keepLayout": True,
+                          "alpha": "straight", "bleed": True},
         },
     }
 

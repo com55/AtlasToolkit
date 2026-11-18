@@ -353,3 +353,26 @@ def test_bleed_defaults_on_and_reaches_the_packer(calls):
 def test_bleed_is_locked_when_every_page_is_pma():
     assert loaded(all_pma)._state()['settings']['bleedLocked'] is True
     assert loaded(mixed_pma)._state()['settings']['bleedLocked'] is False
+
+
+def test_preview_settings_matches_set_settings_without_side_effects(mesh, calls):
+    host = loaded()
+    host.set_skeleton('sample.skel', b'mesh')
+    host.enter_edit()
+    calls.clear()
+    before = host._state()['settings']
+    assert before['requested'] == {'packer': 'shelf', 'padding': 2, 'meshAware': True,
+                                   'splitComposite': False, 'keepLayout': True,
+                                   'alpha': 'straight', 'bleed': True}
+    draft = {'packer': 'rectangles_in_place', 'splitComposite': False, 'padding': 5}
+    preview = host.preview_settings(draft)
+    # Nothing stored or packed.
+    assert host._state()['settings'] == before and calls == []
+    # Locks follow the draft: In-Place forces Split Composite while the request keeps False.
+    assert preview['splitComposite'] is True and preview['splitCompositeLocked'] is True
+    assert preview['requested']['splitComposite'] is False and preview['padding'] == 5
+    applied = host.set_settings(draft)
+    state = applied['state']['settings'] if 'state' in applied else applied['settings']
+    assert state == preview
+    with pytest.raises(ValueError):
+        host.preview_settings({'padding': 0})
