@@ -473,6 +473,11 @@ class AtlasSession:
             for page in self._document.pages:
                 first.setdefault(page.filename, page)
             patching = {filename for filename in touched if self._declared_size_matches(first[filename])}
+            if not split_composite:
+                # Spec 2026-11-18: the regions share the whole image, which
+                # place_in_place's composite fit rule (one piece per region)
+                # does not describe; such a page repacks unsplit instead.
+                patching -= self._shared_composite_pages(batches, region_pages)
         else:
             patching = self._patch_pages(batches, region_pages) if patch_adds else set()
         remaining = {region_pages[key] for key in self._raw_effective_model(batches)["region_names"]}
@@ -560,24 +565,17 @@ class AtlasSession:
         pixels = np.frombuffer(self._raster.get_pixels(handle), np.uint8).reshape(height, width, 4)
         return self._raster.from_pixels(width, height, color_bleed(pixels).tobytes())
 
-    def _composite_pieces(self, modifiers: dict[str, AtlasModifier], batches: list[dict], mesh_lookup_fn) -> dict:
-        """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
-        survivors have no nine-patch and a non-empty offsets canvas; others
-        stay as they are. A survivor without repack mesh (none, or mesh-aware
-        repack off) is cut to its whole rect. Survivors: the batch's names
-        (first occurrence) that no later mod batch names and that are not
-        removed, in batch order (spec 2026-10-21 §3.2). Each survivor's metas
-        come from its own page's modifier (`modifiers` maps page file name to
-        modifier); a survivor that is not a pristine key of one of those
-        pages (an added key) makes the batch fall back (spec 2026-10-21 §3.7)."""
+    def _composite_batches(self, batches: list[dict]) -> list[tuple[int, dict, list[str]]]:
+        """Every composite-marked mod batch with its survivors: the batch's
+        names (first occurrence) that no later mod batch names and that are
+        not removed, in batch order (spec 2026-10-21 §3.2)."""
         removed = {b["target_key"] for b in batches if b.get("type") == "remove"}
-        pma_pages = {page.filename for page in self._document.pages if page.pma}
         last_mod: dict[str, int] = {}
         for index, batch in enumerate(batches):
             if batch.get("type") == "mod":
                 for name in batch["names"]:
                     last_mod[name] = index
-        pieces: dict = {}
+        found: list[tuple[int, dict, list[str]]] = []
         for index, batch in enumerate(batches):
             if batch.get("type") != "mod" or not batch.get("composite"):
                 continue
@@ -586,6 +584,33 @@ class AtlasSession:
                 if name in survivors or name in removed or last_mod[name] != index:
                     continue
                 survivors.append(name)
+            found.append((index, batch, survivors))
+        return found
+
+    def _shared_composite_pages(self, batches: list[dict], region_pages: dict[str, str]) -> set[str]:
+        """Spec 2026-11-18: pages of the survivors of a multi-survivor
+        composite mod batch -- the pages whose regions would share one image.
+        A single-survivor batch is a plain mod (the image is that region's
+        canvas) and its page keeps its layout."""
+        pages: set[str] = set()
+        for _index, _batch, survivors in self._composite_batches(batches):
+            if len(survivors) < 2:
+                continue
+            pages.update(page for page in map(region_pages.get, survivors) if page is not None)
+        return pages
+
+    def _composite_pieces(self, modifiers: dict[str, AtlasModifier], batches: list[dict], mesh_lookup_fn) -> dict:
+        """Spec 2026-10-13 §3.1: cut every composite-marked mod batch whose
+        survivors have no nine-patch and a non-empty offsets canvas; others
+        stay as they are. A survivor without repack mesh (none, or mesh-aware
+        repack off) is cut to its whole rect. Survivors: see
+        `_composite_batches` (spec 2026-10-21 §3.2). Each survivor's metas
+        come from its own page's modifier (`modifiers` maps page file name to
+        modifier); a survivor that is not a pristine key of one of those
+        pages (an added key) makes the batch fall back (spec 2026-10-21 §3.7)."""
+        pma_pages = {page.filename for page in self._document.pages if page.pma}
+        pieces: dict = {}
+        for _index, batch, survivors in self._composite_batches(batches):
             owners: dict[str, AtlasModifier] = {}
             for name in survivors:
                 region = self._processor.regions.get(name)
