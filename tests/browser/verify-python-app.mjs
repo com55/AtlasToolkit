@@ -579,9 +579,10 @@ try {
   const headings = await settingsPage.locator('#pack-panel .pack-heading').allInnerTexts();
   if (headings.join('|') !== 'Packer|Regions|Spacing|Layout') throw new Error('Settings groups: ' + headings.join('|'));
   const labels = await settingsPage.locator('.pk-item > span:last-child').evaluateAll(nodes => nodes.map(n => n.firstChild.textContent));
-  if (labels.join('|') !== 'Shelf|Rectangles|Polygons|Rectangles In-Place|Polygons In-Place') throw new Error('Packer names');
-  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Shelf · 2px')) throw new Error('Default chip');
-  for (const key of ['polygons','polygons_in_place']) {
+  if (labels.join('|') !== 'Auto|Shelf|Rectangles|Polygons') throw new Error('Packer names');
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Auto · 2px')) throw new Error('Default chip');
+  if (!await settingsPage.locator('[data-packer="auto"]').evaluate(el => el.classList.contains('selected'))) throw new Error('Auto not selected on a fresh profile');
+  for (const key of ['polygons']) {
     const row = settingsPage.locator('[data-packer="'+key+'"]');
     if (!await row.isDisabled() || !(await row.innerText()).includes('Needs a .skel file')) throw new Error('Polygon availability');
   }
@@ -591,7 +592,8 @@ try {
   if (await settingsPage.locator('#options-row > li').evaluateAll(items => items.some(li => getComputedStyle(li).display !== 'none' && ![...li.querySelectorAll('button,label')].some(child => child.getClientRects().length)))) throw new Error('Visible empty options item');
   await settingsPage.evaluate(async () => {
     const {onModPreviewReceived} = await window.__appModule('modify-mode');
-    const unedited = await window.settingsAPI.set_settings({keepLayout:false});
+    // Select Shelf explicitly so the later Shelf-to-Rectangles pixel check keeps its purpose.
+    const unedited = await window.settingsAPI.set_settings({packer:'shelf',keepLayout:false});
     await onModPreviewReceived(unedited);
     const {state} = await window.__appModule('state');
     if (state.hasModImage || !document.getElementById('btn-save-mod').disabled || !document.getElementById('btn-reset-mod').disabled) throw new Error('Unedited settings result enables Save or Reset');
@@ -650,18 +652,24 @@ try {
   await saveSettings();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('15px'), null, {polling:500});
   await openSettings();
-  await settingsPage.locator('[data-packer="rectangles_in_place"]').click();
-  // Locks follow the draft before Save (engine preview).
-  await settingsPage.waitForFunction(() => document.querySelector('[data-setting="splitComposite"]').disabled, null, {polling:500});
-  for (const key of ['splitComposite','keepLayout']) if (!await settingsPage.locator('[data-setting="'+key+'"]').isChecked()) throw new Error('In-place lock value');
+  // Sharing and layout are independent of the packer, including in the draft.
+  for (const packer of ['shelf', 'rectangles', 'auto']) {
+    await settingsPage.locator('[data-packer="'+packer+'"]').click();
+    await settingsPage.waitForFunction(key => document.querySelector('[data-packer="'+key+'"]').classList.contains('selected'), packer, {polling:500});
+    for (const key of ['shareCompositeImage', 'keepLayout']) {
+      if (!await settingsPage.locator('[data-setting="'+key+'"]').isEnabled()) throw new Error('Packer locked ' + key);
+    }
+  }
+  if (await settingsPage.locator('#hint-shareCompositeImage').count() !== 1) throw new Error('Share Composite Image hint missing');
   // Hints are closed until their info button opens them.
   if (await settingsPage.locator('#hint-keepLayout').isVisible()) throw new Error('Keep layout hint open by default');
   await settingsPage.locator('[data-hint="keepLayout"]').click();
-  if (!(await settingsPage.locator('#hint-keepLayout').innerText()).includes('existing regions stay where they are')) throw new Error('Keep layout hint');
+  if (!(await settingsPage.locator('#hint-keepLayout').innerText()).includes('Keep existing region positions when possible')) throw new Error('Keep layout hint');
   if (await settingsPage.locator('[data-hint="keepLayout"]').getAttribute('aria-expanded') !== 'true') throw new Error('Hint button state');
   await settingsPage.locator('#btn-packer-info').click();
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
-  if (await settingsPage.locator('.pi-card').count() !== 5) throw new Error('Packer info cards');
+  if (await settingsPage.locator('.pi-card').count() !== 3) throw new Error('Packer info cards');
+  if (!(await settingsPage.locator('#packer-info').innerText()).includes('Try to Keep Layout works with any packer.')) throw new Error('Packer info layout explanation');
   await settingsPage.keyboard.press('Escape');
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
   if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Closing packer info closed the panel');
@@ -704,7 +712,7 @@ try {
   await settingsPage.locator('#sidebar-head').click();
   await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
   // Pack both once (the draft above was cancelled), so the next two are cached.
-  await choosePacker('rectangles_in_place', 'Rectangles In-Place ·');
+  await choosePacker('auto', 'Auto ·');
   await choosePacker('rectangles', 'Rectangles ·');
   // Cached packs answer without the busy overlay; an uncached one shows it.
   await settingsPage.evaluate(() => {
@@ -713,7 +721,7 @@ try {
     new MutationObserver(() => { if (getComputedStyle(overlay).display !== 'none') window.busyShown++; })
       .observe(overlay, {attributes:true});
   });
-  for (const [key, label] of [['rectangles_in_place','Rectangles In-Place ·'],['rectangles','Rectangles ·']]) await choosePacker(key, label);
+  for (const [key, label] of [['auto','Auto ·'],['rectangles','Rectangles ·']]) await choosePacker(key, label);
   if (await settingsPage.evaluate(() => window.busyShown) !== 0) throw new Error('Busy overlay shown for a cached pack');
   await choosePacker('shelf', 'Shelf ·');
   if (await settingsPage.evaluate(() => window.busyShown) === 0) throw new Error('Busy overlay not seen for an uncached pack (observer control)');
@@ -752,12 +760,24 @@ try {
   const reopenedWide = await settingsPage.locator('#pack-panel').boundingBox();
   if (reopenedWide.x < 0 || reopenedWide.x + reopenedWide.width > 1280) throw new Error('Settings overflows after returning wide');
   await settingsPage.evaluate(async () => {
-    await window.settingsAPI.set_pref('packer','polygons');
+    await window.settingsAPI.set_pref('packer','polygons_in_place');
+    await window.settingsAPI.set_pref('packKeepLayout',false);
   });
   await settingsPage.reload({waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await settingsPage.evaluate(() => { window.settingsToasts=[]; const original=window.showToast; window.showToast=(...args) => { window.settingsToasts.push(args); return original(...args); }; });
   await loadSettingsFixture();
+  // An old in-place preference migrates before the host sees it. No .skel: Polygons falls back.
+  await settingsPage.locator('#mode-modify').click();
+  await waitForEdit(settingsPage);
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Rectangles ·')) throw new Error('Migrated polygons fallback chip');
+  if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Migrated preference opened an error dialog');
+  await settingsPage.evaluate(async () => {
+    const settings = window.settingsAPI.get_settings();
+    if (settings.fallbackFrom !== 'polygons' || settings.requested.packer !== 'polygons' || !settings.requested.keepLayout) throw new Error('In-place preference migration');
+    if (await window.settingsAPI.get_pref('packer') !== 'polygons' || await window.settingsAPI.get_pref('packKeepLayout') !== true) throw new Error('Migration not persisted');
+  });
+  await returnSettingsToView();
   await settingsPage.evaluate(async () => {
     // Empty updates publish settings through the app's own renderer.
     await window.settingsAPI.set_settings({});
@@ -905,7 +925,15 @@ try {
   if (await pendingPage.locator('#add-page-select').isVisible()) throw new Error('Single-page Add selector visible');
   await pendingPage.locator('#add-cancel-btn').click();
   await pendingPage.locator('#btn-pack-chip').click();
-  for (const packer of ['polygons','polygons_in_place']) if (!await pendingPage.locator('[data-packer="'+packer+'"]').isEnabled()) throw new Error('Polygon row disabled with mesh');
+  for (const packer of ['polygons']) if (!await pendingPage.locator('[data-packer="'+packer+'"]').isEnabled()) throw new Error('Polygon row disabled with mesh');
+  // With a usable skeleton, every packer is selectable and leaves sharing/layout unlocked.
+  for (const packer of ['auto', 'shelf', 'rectangles', 'polygons']) {
+    await pendingPage.locator('[data-packer="'+packer+'"]').click();
+    await pendingPage.waitForFunction(key => document.querySelector('[data-packer="'+key+'"]').classList.contains('selected'), packer, {polling:500});
+    for (const key of ['shareCompositeImage', 'keepLayout']) {
+      if (!await pendingPage.locator('[data-setting="'+key+'"]').isEnabled()) throw new Error('Packer locked ' + key + ' with mesh');
+    }
+  }
   await pendingPage.locator('[data-packer="polygons"]').click();
   await pendingPage.waitForFunction(() => document.querySelector('[data-setting="meshAware"]')?.disabled && document.querySelector('[data-setting="meshAware"]')?.checked, null, {polling:500});
   await pendingPage.locator('#pack-save').click();

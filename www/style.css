@@ -1824,7 +1824,7 @@ body.mode-extract #advance-toolbar {
 .pi-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #999; margin-bottom: 6px; }
 .pi-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .pi-legend i { width: 12px; height: 9px; display: inline-block; border-radius: 2px; }
-.pi-region { background: #3d7fb8; } .pi-same { background: #5a5a5a; } .pi-edit { background: #d08a2e; } .pi-add { background: #4caf50; }
+.pi-region { background: #3d7fb8; }
 .pi-card { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid #3c3c3c; align-items: start; }
 .pi-card svg { width: 170px; height: 112px; display: block; }
 .pi-card h4 { margin: 0 0 4px; font-size: 13.5px; color: #e3e3e3; display: flex; gap: 8px; align-items: center; }

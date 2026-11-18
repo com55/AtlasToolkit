@@ -34,10 +34,10 @@ class AppHost:
         self._revision = 0
         self._saved_revision = -1
         self._pack_settings = {
-            "packer": "shelf",
+            "packer": "auto",
             "padding": 2,
             "meshAware": True,
-            "splitComposite": False,
+            "shareCompositeImage": False,
             "keepLayout": True,
             "alpha": "straight",
             "bleed": True,
@@ -47,23 +47,20 @@ class AppHost:
         requested_settings = dict(self._pack_settings if pack_settings is None else pack_settings)
         settings = dict(requested_settings)
         usable_mesh = self._require_atlas().mesh_unavailable_reason is None
-        requested = settings["packer"]
-        fallback = requested.startswith("polygons") and not usable_mesh
+        # "auto" is polygons whenever the atlas has usable mesh data, so it
+        # never falls back and locks Mesh-Aware the same way polygons does.
+        auto = settings["packer"] == "auto"
+        fallback = settings["packer"] == "polygons" and not usable_mesh
         if fallback:
-            settings["packer"] = requested.replace("polygons", "rectangles")
-        polygon = settings["packer"].startswith("polygons")
-        in_place = settings["packer"].endswith("_in_place")
+            settings["packer"] = "rectangles"
+        polygon = (auto and usable_mesh) or settings["packer"] == "polygons"
         settings.update(
             meshAware=True if polygon else usable_mesh and settings["meshAware"],
             meshAwareLocked=polygon or not usable_mesh,
-            splitComposite=True if in_place else settings["splitComposite"],
-            splitCompositeLocked=in_place,
-            keepLayout=True if in_place else settings["keepLayout"],
-            keepLayoutLocked=in_place,
             polygonsAllowed=usable_mesh,
             alphaVisible=self._all_pma,
             bleedLocked=self._all_pma,  # bleed never touches pma pages
-            fallbackFrom=requested if fallback else None,
+            fallbackFrom="polygons" if fallback else None,
             # What the user chose, before locks and fallbacks: the panel's draft starts here.
             requested=requested_settings,
         )
@@ -71,19 +68,17 @@ class AppHost:
 
     def _pack_arguments(self) -> dict:
         settings = self._settings()
-        # Task 3 shim: the in-place packers are gone from the API, so map them
-        # to their base packer with keep-layout forced on and composites split
-        # (what "rectangles_in_place" / "polygons_in_place" used to mean).
-        packer = settings["packer"]
-        in_place = packer.endswith("_in_place")
         return {
             "options": PackOptions(
-                packer=packer.removesuffix("_in_place"),
+                packer=settings["packer"],
                 padding=settings["padding"],
-                mesh_aware=None if settings["packer"].startswith("polygons") else settings["meshAware"],
-                try_keep_layout=True if in_place else settings["keepLayout"],
+                # auto and polygons resolve mesh-aware themselves; a stored
+                # meshAware=False must not turn auto into rectangles while the
+                # panel shows Mesh-Aware locked on.
+                mesh_aware=None if settings["packer"] in ("auto", "polygons") else settings["meshAware"],
+                try_keep_layout=settings["keepLayout"],
                 bleed=settings["bleed"],
-                share_composite_image=False if in_place else not settings["splitComposite"],
+                share_composite_image=settings["shareCompositeImage"],
             ),
         }
 
@@ -93,12 +88,10 @@ class AppHost:
             raise ValueError("settings must be a dict")
         for key, value in settings.items():
             if key == "packer":
-                valid = isinstance(value, str) and value in (
-                    "shelf", "rectangles", "polygons", "rectangles_in_place", "polygons_in_place",
-                )
+                valid = isinstance(value, str) and value in ("auto", "shelf", "rectangles", "polygons")
             elif key == "padding":
                 valid = type(value) is int and 1 <= value <= 256
-            elif key in ("meshAware", "splitComposite", "keepLayout", "bleed"):
+            elif key in ("meshAware", "shareCompositeImage", "keepLayout", "bleed"):
                 valid = type(value) is bool
             elif key == "alpha":
                 valid = isinstance(value, str) and value in ("straight", "premultiplied")

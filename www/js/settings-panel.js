@@ -7,23 +7,20 @@ import { isTouchDevice, isPywebviewDesktop } from './platform.js';
 import { isBusy, noteBusyConflict } from './busy-overlay.js';
 
 const PACKERS = [
+  ['auto', 'Auto', 'Polygons with a .skel, otherwise Rectangles.'],
   ['shelf', 'Shelf', 'Rows, tallest first. Fastest.'],
   ['rectangles', 'Rectangles', 'Fills the gaps between rectangles.'],
   ['polygons', 'Polygons', 'Fills gaps using mesh outlines.'],
-  ['rectangles_in_place', 'Rectangles In-Place', 'Keeps the layout when edits fit.'],
-  ['polygons_in_place', 'Polygons In-Place', 'Keeps the layout, judged by mesh outline.'],
 ];
 const HINTS = {
   meshAware: "Clears pixels outside each region's mesh outline before packing. Spine never draws them, so regions can sit closer. Needs a .skel.",
-  splitComposite: 'When one image replaces several regions, cuts it back into one piece per region: the exact inverse of Forced Resizing.<br>Off: those regions share the whole image.<br>In-Place packers always split.',
+  shareCompositeImage: 'When one image replaces several regions, every region uses the whole image.<br>Off: the image is cut back into one piece per region.',
   bleed: "Gives transparent pixels next to each image that image's colour (alpha stays 0), as Spine's packer does, so filtering draws no dark edges. Premultiplied pages are left as they are.",
   padding: "Empty pixels kept between images, so a neighbour never shows at a region's edge when the texture is filtered. Default 2.",
-  keepLayout: "If a page's only edits are new regions (and renames), existing regions stay where they are and the new ones go into free space; the page grows only if they don't fit.<br>Off: every edited page is repacked.",
+  keepLayout: 'Keep existing region positions when possible. Otherwise, repack using the selected packer.',
 };
 const LOCK_REASONS = {
-  meshAware: v => v.packer.startsWith('polygons') ? 'Polygons packers always pack by mesh outline.' : 'Needs a usable .skel file.',
-  splitComposite: () => 'In-Place packers always split composites.',
-  keepLayout: () => 'In-Place packers always keep the layout.',
+  meshAware: v => (v.packer === 'polygons' || (v.packer === 'auto' && v.polygonsAllowed)) ? 'Polygons packers always pack by mesh outline.' : 'Needs a usable .skel file.',
   bleed: () => 'Pages with premultiplied alpha never get bleed.',
 };
 
@@ -149,8 +146,7 @@ export function renderSettings(value) {
   if (!value) return;
   settings = value;
   if (value.fallbackFrom && fallback !== value.fallbackFrom) {
-    const inplace = value.fallbackFrom === 'polygons_in_place';
-    window.showToast(inplace ? 'Polygons In-Place need a .skel file; using Rectangles In-Place.' : 'Polygons need a .skel file; using Rectangles.', 'info');
+    window.showToast('Polygons need a .skel file; using Rectangles.', 'info');
   }
   fallback = value.fallbackFrom;
   // The engine changed underneath an open draft (e.g. a .skel arrived): re-preview it.
@@ -180,9 +176,9 @@ function render() {
   content.innerHTML = `<div class="pack-cols">
     <div class="pack-col"><div class="sec"><div class="sec-head"><p class="pack-heading">Packer</p><button type="button" class="info-btn" id="btn-packer-info" aria-label="About the packers">${INFO}</button></div><div class="pk-menu">${packers}</div></div></div>
     <div class="pack-col">
-      <div class="sec"><p class="pack-heading">Regions</p>${toggle(value, 'meshAware', 'Mesh-Aware')}${toggle(value, 'splitComposite', 'Split Composite')}</div>
+      <div class="sec"><p class="pack-heading">Regions</p>${toggle(value, 'meshAware', 'Mesh-Aware')}${toggle(value, 'shareCompositeImage', 'Share Composite Image')}</div>
       <div class="sec"><p class="pack-heading">Spacing</p><div class="sec-head"><span class="pack-sub">Padding (px)</span>${infoButton('padding', 'Padding')}<button id="btn-pad-reset" type="button" data-help="Reset to default (2)" aria-label="Reset to default (2)">${RESET}</button></div>${hint('padding', 'hint-flush')}<div class="padding-controls"><input type="range" id="p-range" min="1" max="100" value="${Math.min(100,value.padding)}"><input type="number" id="p-num" min="1" max="256" step="1" value="${value.padding}"></div><div class="opt-gap"></div>${toggle(value, 'bleed', 'Bleed')}</div>
-      <div class="sec"><p class="pack-heading">Layout</p>${toggle(value, 'keepLayout', 'Keep layout when only adding')}</div>
+      <div class="sec"><p class="pack-heading">Layout</p>${toggle(value, 'keepLayout', 'Try to Keep Layout')}</div>
       ${alphaSection}
     </div>
   </div>
@@ -250,8 +246,9 @@ function showPackerInfo() {
     overlay.innerHTML = `<div id="packer-info" role="dialog" aria-modal="true" aria-labelledby="packer-info-title">
       <h3 id="packer-info-title">Packers</h3>
       <p class="pi-lead">A packer decides where regions go on the atlas page when you save edits.</p>
-      <div class="pi-legend"><span><i class="pi-region"></i>region</span><span><i class="pi-same"></i>unchanged</span><span><i class="pi-edit"></i>edited</span><span><i class="pi-add"></i>added</span></div>
+      <div class="pi-legend"><span><i class="pi-region"></i>region</span></div>
       <div class="pi-list">${PACKER_INFO.map(([title, body, svg, skel]) => `<div class="pi-card"><svg viewBox="0 0 170 112" aria-hidden="true"><rect x="1" y="1" width="168" height="110" fill="#1e1e1e" stroke="#555"/>${svg}</svg><div><h4>${title}${skel ? ' <span class="pi-pill">needs .skel</span>' : ''}</h4><p>${body}</p></div></div>`).join('')}</div>
+      <p>Try to Keep Layout works with any packer.</p>
       <div class="modal-buttons"><button type="button" class="btn-primary" id="packer-info-ok">OK</button></div>
     </div>`;
     document.body.append(overlay);
@@ -317,11 +314,6 @@ const PACKER_INFO = [
     rects(RECTS, '#3d7fb8')],
   ['Polygons', "Packs by each region's mesh outline instead of its rectangle, so shapes nest into each other's empty corners. The smallest pages. A region's rectangle may then hold parts of its neighbours (dashed); Spine draws only inside the mesh.",
     `<g fill="#3d7fb8">${POLY}</g><rect x="34" y="24" width="22" height="36" fill="none" stroke="#9cc6ea" stroke-dasharray="2 2" opacity=".8"/>`, true],
-  ['Rectangles In-Place', "Keeps the page's layout when every edit fits in place: a replaced image stays where it was, a removed region leaves a gap, and added regions go into free space. A replacement fits when it is the size Extract gives and draws nothing outside the region. Otherwise the page is repacked with Rectangles.",
-    rects([[6,6,44,38],[94,6,30,26],[128,6,34,22],[6,48,40,28],[102,48,26,20],[6,80,56,20]], '#5a5a5a') + rects([[54,6,36,32],[50,48,48,24]], '#d08a2e')
-      + '<rect x="132" y="48" width="22" height="18" fill="none" stroke="#777" stroke-dasharray="3 2"/>' + rects([[70,80,40,22]], '#4caf50') + '<text x="90" y="95" font-size="12" fill="#fff" text-anchor="middle">+</text>'],
-  ['Polygons In-Place', "Keeps the page's layout when every edit fits in place, judging each edit by the region's mesh outline: pixels outside it are ignored. Replaced images stay put, removed regions leave a gap, added regions go into free space. Otherwise the page is repacked with Polygons.",
-    '<g fill="#5a5a5a"><path d="M8 8 L52 8 L52 22 L30 44 L8 44 Z"/><path d="M88 42 L100 10 L132 10 L132 42 Z"/><circle cx="150" cy="26" r="14"/><path d="M8 50 L30 50 L30 96 L8 96 Z"/><path d="M36 66 L106 66 L90 100 L36 100 Z"/></g><path d="M60 8 L96 8 L84 40 L60 40 Z" fill="#d08a2e"/><path d="M60 46 L110 46 L110 62 L60 62 Z" fill="#d08a2e"/><path d="M114 48 L160 48 L137 92 Z" fill="#4caf50"/><text x="137" y="66" font-size="12" fill="#fff" text-anchor="middle">+</text>', true],
 ];
 const INFO = '<svg xmlns="http://www.w3.org/2000/svg" height="15" width="15" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Z"/></svg>';
 const CHECK = '<svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg>';

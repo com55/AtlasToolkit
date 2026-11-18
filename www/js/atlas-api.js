@@ -444,8 +444,17 @@ export const AtlasAPI = {
   /** Settings state for a draft of requested values; stores and packs nothing. */
   preview_settings(requested) { return callHost('preview_settings', [requested]); },
   async init_settings_from_prefs() {
-    const partial = {};
-    for (const [key, pref, value] of SETTING_PREFS) partial[key] = await AtlasAPI.get_pref(pref, value);
+    const partial = {}, stored = {};
+    for (const [key, pref, value] of SETTING_PREFS) {
+      stored[pref] = await AtlasAPI.get_pref(pref, null);
+      partial[key] = stored[pref] ?? value;
+    }
+    stored.packSplitComposite = await AtlasAPI.get_pref('packSplitComposite', null);
+    const migrated = migrateSettingPrefs(stored);
+    Object.assign(partial, migrated);
+    for (const [key, pref] of SETTING_PREFS) {
+      if (Object.hasOwn(migrated, key)) await AtlasAPI.set_pref(pref, migrated[key]);
+    }
     try { await AtlasAPI.set_settings(partial, {busy: false}); }
     catch (e) {
       if (!(e instanceof HostError) || e.type !== 'ValueError') throw e;
@@ -825,9 +834,21 @@ onEngineDied(async (message) => {
   }
 });
 
+/** Convert persisted pack preferences to the current host settings contract. */
+export function migrateSettingPrefs(stored) {
+  const inPlace = stored.packer === 'rectangles_in_place' || stored.packer === 'polygons_in_place';
+  const packer = inPlace ? stored.packer.replace('_in_place', '') : stored.packer;
+  return {
+    packer: ['auto', 'shelf', 'rectangles', 'polygons'].includes(packer) ? packer : 'auto',
+    keepLayout: inPlace ? true : (stored.packKeepLayout ?? true),
+    shareCompositeImage: stored.packShareCompositeImage
+      ?? (stored.packSplitComposite == null ? false : !stored.packSplitComposite),
+  };
+}
+
 const SETTING_PREFS = [
-  ['packer', 'packer', 'shelf'], ['padding', 'packPadding', 2],
-  ['meshAware', 'packMeshAware', true], ['splitComposite', 'packSplitComposite', false],
+  ['packer', 'packer', 'auto'], ['padding', 'packPadding', 2],
+  ['meshAware', 'packMeshAware', true], ['shareCompositeImage', 'packShareCompositeImage', false],
   ['keepLayout', 'packKeepLayout', true], ['alpha', 'imageAlpha', 'straight'],
   ['bleed', 'packBleed', true],
 ];
