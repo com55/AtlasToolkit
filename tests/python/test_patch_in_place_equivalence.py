@@ -141,11 +141,37 @@ def _add_over_cleared_pixels(monkeypatch):
     return atlas
 
 
+def _add_two_remove_one(monkeypatch):
+    """One add survives, the other is removed again before the build."""
+    atlas = SpineAtlas.load(patch_mode.TEXT, {"p.png": patch_mode.page()})
+    atlas.add_region("N", patch_mode.img(10, 10))
+    atlas.add_region("M", patch_mode.img(6, 6))
+    atlas.remove_region("N")
+    return atlas
+
+
+def _pma_page_add(monkeypatch):
+    """An add on a premultiplied page (the add enters in that space)."""
+    text = patch_mode.TEXT.replace("size: 64,32\n", "size: 64,32\npma: true\n")
+    atlas = SpineAtlas.load(text, {"p.png": patch_mode.page()})
+    atlas.add_region("N", patch_mode.img(10, 10, seed=3), alpha_mode="premultiplied")
+    return atlas
+
+
+def _mesh_atlas_mesh_aware_off(monkeypatch):
+    """A .skel is loaded but mesh-aware is off: the add is not cut."""
+    atlas = added_mesh.load(monkeypatch)
+    atlas.add_region("X", added_mesh.opaque())
+    return atlas
+
+
+
 @dataclass(frozen=True)
 class Case:
     build: Callable
     padding: int = 2
     mesh: bool = False   # also compare polygons vs polygons_in_place
+    options: tuple = ()  # extra PackerOptions fields, e.g. (("mesh_aware", False),)
 
 
 CASES = {
@@ -160,7 +186,15 @@ CASES = {
     "many_adds": Case(_many_adds),
     "identical_adds": Case(_identical_adds),
     "add_over_cleared_pixels": Case(_add_over_cleared_pixels, mesh=True),
+    "add_two_remove_one": Case(_add_two_remove_one),
+    "pma_page_add": Case(_pma_page_add),
+    # mesh_aware=False forbids polygons, so only the rectangles pair applies.
+    "mesh_atlas_mesh_aware_off": Case(_mesh_atlas_mesh_aware_off, options=(("mesh_aware", False),)),
 }
+
+
+def _options(case: Case) -> PackerOptions:
+    return PackerOptions(padding=case.padding, bleed=False, **dict(case.options))
 
 
 def _pairs(case: Case) -> tuple[tuple[str, str], ...]:
@@ -218,7 +252,7 @@ def test_add_only_patch_equals_in_place(monkeypatch, case, packers):
     spec = CASES[case]
     patch_packer, in_place_packer = packers
     atlas = spec.build(monkeypatch)
-    options = PackerOptions(padding=spec.padding, bleed=False)
+    options = _options(spec)
     patched = atlas.build(packer=patch_packer, packer_options=options)
     in_place = atlas.build(packer=in_place_packer, packer_options=options)
     assert_same(patched, in_place)
@@ -316,13 +350,29 @@ PINS = {
             "p.png": "142a55b2a2e52db94f3bd86592de25d67c5e1e5678c6e535c9ecd3fdeaa701eb",
         },
     },
+    ("add_two_remove_one", "rectangles"): {
+        "atlas": "5c1db46256b5e8ffc15933bf61970886b8656d654a25ca1f373c6a44758c704c",
+        "pages": {
+            "p.png": "839977ca5e951bc0440fad940173c03391323d56cd43861a9192da1f96cc4f55",
+        },
+    },
+    ("pma_page_add", "rectangles"): {
+        "atlas": "afca883f28c2ba94f6b7713c66bd7a42a1b96a2d16476ae6701ca5aae6afddc3",
+        "pages": {
+            "p.png": "6612a74d35359a0047d5aab1634262ba2d723a898fbedd24c833167a38594ea2",
+        },
+    },
+    ("mesh_atlas_mesh_aware_off", "rectangles"): {
+        "atlas": "67f5526718bd0b106bb4b29c9aea47de839a626b3587466a8ee843e37a77bf70",
+        "pages": {
+            "p.png": "dca9cf1c8d09e06abd0d6568a293bff8f1cde0acdd459afc1e304b4b4f4dd430",
+        },
+    },
 }
 
 
 @pytest.mark.parametrize("case, packers", PARAMS)
 def test_add_only_bytes_pinned(monkeypatch, case, packers):
     spec = CASES[case]
-    built = spec.build(monkeypatch).build(
-        packer=packers[0], packer_options=PackerOptions(padding=spec.padding, bleed=False),
-    )
+    built = spec.build(monkeypatch).build(packer=packers[0], packer_options=_options(spec))
     assert digests(built) == PINS[(case, packers[0])]
