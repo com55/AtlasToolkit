@@ -668,7 +668,7 @@ try {
   if (await settingsPage.locator('[data-hint="keepLayout"]').getAttribute('aria-expanded') !== 'true') throw new Error('Hint button state');
   await settingsPage.locator('#btn-packer-info').click();
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
-  if (await settingsPage.locator('.pi-card').count() !== 3) throw new Error('Packer info cards');
+  if (await settingsPage.locator('.pi-card').count() !== 4) throw new Error('Packer info cards');
   if (!(await settingsPage.locator('#packer-info').innerText()).includes('Try to Keep Layout works with any packer.')) throw new Error('Packer info layout explanation');
   await settingsPage.keyboard.press('Escape');
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
