@@ -931,36 +931,6 @@ class AtlasModifier:
             nest_options, modded_sprites, added_sprites, mesh_lookup_fn,
         )
 
-    def patch(
-        self,
-        *,
-        batches: Sequence[dict],
-        mesh_lookup_fn: Optional[Callable[[str], Optional[dict]]],
-        gap: int,
-    ) -> PackResult:
-        """Spec 2026-10-31 §5 ("patch mode"): place this page's added regions
-        into its free space and leave every pristine region where it is.
-        `batches` are this page's (adds, renames; never a mod or remove of a
-        pristine region -- the session routes those pages to repack()).
-        `mesh_lookup_fn` (None when mesh-aware is off) gives pristine hulls
-        by key and added hulls by internal key.
-
-        Live = pixels nothing may cover: each pristine rect group's hull
-        (regions with identical stored rect and rotate share one group; a
-        group with any mesh-less member is its whole rect), and alpha > 0
-        pixels outside every hulled rect. Added sprites with mesh data are
-        cut to their hull and nest by it. Before any paste, every non-live
-        pixel under a placed rect is cleared to (0,0,0,0). Pristine pixels
-        are never cut to their hulls (a mesh-aware repack would cut them);
-        only never-rendered ones under a placement are cleared."""
-        _pristine_names, pristine_regions = self._scoped_region_meta()
-        for batch in batches:
-            kind = batch.get("type")
-            names = batch["names"] if kind == "mod" else [batch.get("target_key")] if kind == "remove" else []
-            if any(name in pristine_regions for name in names):
-                raise ValueError("patch() is only for pages whose pristine regions are not modified or removed")
-        return self.place_in_place(batches=batches, modded_sprites={}, pieces={}, mesh_lookup_fn=mesh_lookup_fn, gap=gap)
-
     def _pixels(self, handle: ImageHandle) -> np.ndarray:
         w, h = self.raster.size(handle)
         return np.frombuffer(self.raster.get_pixels(handle), dtype=np.uint8).reshape(h, w, 4).copy()
@@ -1025,10 +995,11 @@ class AtlasModifier:
     ) -> Optional[PackResult]:
         """Spec 2026-11-05 §4: keep this page's layout. Removed rects are
         vacated, edited groups are pasted into their own slots when they fit
-        (§4.2), adds go into free space (patch §5.2-5.3). Returns None when an
-        edited group does not fit; nothing it allocated is used then (the
-        session releases it). Never mutates base_image, a sprite or a piece.
-        With no mods and no removes this is patch mode, byte for byte."""
+        (§4.2), adds go into free space (spec 2026-10-31 §5.2-5.3). Returns
+        None when an edited group does not fit; nothing it allocated is used
+        then (the session releases it). Never mutates base_image, a sprite or
+        a piece. The only keep-the-layout path: an add-only page goes through
+        it too, with no mods and no pieces."""
         _pristine_names, pristine_regions = self._scoped_region_meta()
         effective = derive_effective_model(pristine_regions, list(batches))
         region_names, regions = effective["region_names"], effective["regions"]
@@ -1135,7 +1106,7 @@ class AtlasModifier:
             view = canvas_px[window_of(key)[0]]
             view[~others] = block[~others]
 
-        # §4.4: adds -- patch's placement, over the post-vacate canvas.
+        # §4.4: adds -- free-space placement over the post-vacate canvas.
         live = (count > 0) | ((canvas_px[..., 3] > 0) & ~hulled)
         return self._place_adds(canvas_px, live, added, sources, regions, mesh_lookup_fn, gap, survivor_set, batches)
 

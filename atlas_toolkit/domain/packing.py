@@ -593,9 +593,9 @@ def nest_place_into(
     items: list[dict], canvas_w: int, canvas_h: int, live: np.ndarray, gap_distance: int = 4,
 ) -> dict:
     """nest_pack's search on a canvas that already holds pixels (spec
-    2026-10-31 §5.2, "patch mode"). `live` is a (canvas_h, canvas_w) mask,
-    nonzero = must stay uncovered; it is dilated by the gap and seeded into
-    the occupied grid exactly as a placed nest item is stamped, so new
+    2026-10-31 §5.2, free-space placement). `live` is a (canvas_h, canvas_w)
+    mask, nonzero = must stay uncovered; it is dilated by the gap and seeded
+    into the occupied grid exactly as a placed nest item is stamped, so new
     items keep the gap from it. Same order, rotations, first-fit, growth
     and cap as nest_pack. The output size is trimmed to the original
     canvas plus the placements (the search can overshoot when it grows)

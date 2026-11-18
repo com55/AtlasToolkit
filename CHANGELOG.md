@@ -151,8 +151,9 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   colour instead of treating it as straight alpha.
 
 ### Differences from the app's engine
-- Patch mode, undo-on-remove and hull cutting of added regions are
-  Python-only; the app always repacks and keeps added sprites whole.
+- Keeping a page's layout (adds go into free space), undo-on-remove and hull
+  cutting of added regions are Python-only; the app always repacks and keeps
+  added sprites whole.
 - `pma` is kept on repack (the app drops it).
 - pma pages are masked to mesh hulls, keep alpha-0 colour when deduplicating
   sprites, and are resized with a premultiplied Lanczos (the app treats pma

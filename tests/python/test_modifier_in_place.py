@@ -119,17 +119,6 @@ def test_vacate_keeps_a_neighbours_hull_inside_the_removed_rect():
 
 
 
-def test_patch_delegates_with_identical_bytes():
-    rgba = page_rgba(64, 32, [(0, 0, 16, 16), (16, 0, 16, 16)])
-    text = "p.png\nsize: 64,32\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
-    a, raster_a, f = setup(text, rgba)
-    b, raster_b, _ = setup(text, rgba)
-    one = a.patch(batches=[add(raster_a, f, "N", pattern(10, 10, 4))], mesh_lookup_fn=None, gap=2)
-    two = run(b, [add(raster_b, f, "N", pattern(10, 10, 4))], gap=2)
-    assert (pixels(raster_a, one) == pixels(raster_b, two)).all()
-    assert one.document.serialize() == two.document.serialize()
-
-
 def test_each_group_is_masked_by_its_own_hull():
     text = "p.png\nsize: 32,16\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
     modifier, raster, _ = setup(text, page_rgba(32, 16, [(0, 0, 32, 16)]))

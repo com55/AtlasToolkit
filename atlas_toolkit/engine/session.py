@@ -277,32 +277,14 @@ class AtlasSession:
         width, height = page.size
         return width > 0 and height > 0 and tuple(self._raster.size(self._page_images[page.filename])) == (width, height)
 
-    def _patch_pages(self, batches: list[dict], region_pages: dict[str, str]) -> set[str]:
-        """Spec 2026-10-31 §3.2: pages with a surviving add, no mod or remove
-        of a pristine region, and an image the size their text declares."""
-        pristine = self._processor.regions
-        # Defensive: after deferred undo (spec 2026-10-31 §3.1) every AddBatch present survives.
-        survivors = set(self._raw_effective_model(batches)["region_names"])
-        candidates = {b["page"] for b in batches if b.get("type") == "add" and b["internal_key"] in survivors}
-        for batch in batches:
-            kind = batch.get("type")
-            if kind == "mod":
-                candidates.difference_update(region_pages[n] for n in batch["names"] if n in pristine)
-            elif kind == "remove" and batch["target_key"] in pristine:
-                candidates.discard(region_pages[batch["target_key"]])
-        first = {}
-        for page in self._document.pages:
-            first.setdefault(page.filename, page)
-        return {filename for filename in candidates if self._declared_size_matches(first[filename])}
-
     def _touched_pages(self, batches: list[dict], region_pages: dict[str, str], *, single_page_shortcut: bool = True) -> list[str]:
         """Spec 2026-10-21 §3.2: pages that own a region a mod names, receive
         an add, or lose a region to a remove, in page order. A rename touches
         nothing (text-only rewrite, §3.4). A region added and then removed
         again nets out and touches nothing either. A one-page atlas repacks
         for any batch, exactly as before multi-page support.
-        With `single_page_shortcut` False (patch mode), a single page follows
-        the multi-page rule, so renames alone do not touch it."""
+        With `single_page_shortcut` False (a kept layout), a single page
+        follows the multi-page rule, so renames alone do not touch it."""
         if single_page_shortcut and len(self._document.pages) == 1:
             return [self._document.pages[0].filename] if batches else []
         added = {batch["internal_key"] for batch in batches if batch.get("type") == "add"}
@@ -449,8 +431,7 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
-        patch_adds: bool = False,
-        patch_padding: int = 0,
+        keep_layout_gap: int = 0,
         added_mesh_lookup=None,
         in_place: bool = False,
         report: dict | None = None,
@@ -466,8 +447,9 @@ class AtlasSession:
         pma (domain/bleed.py); untouched, rename-only and emptied pages are
         left as they are."""
         region_pages = self._region_pages(batches)
-        shortcut = not (patch_adds or in_place) or not self._declared_size_matches(self._document.pages[0])
+        shortcut = not in_place or not self._declared_size_matches(self._document.pages[0])
         touched = self._touched_pages(batches, region_pages, single_page_shortcut=shortcut)
+        patching: set[str] = set()
         if in_place:
             first = {}
             for page in self._document.pages:
@@ -478,8 +460,6 @@ class AtlasSession:
                 # place_in_place's composite fit rule (one piece per region)
                 # does not describe; such a page repacks unsplit instead.
                 patching -= self._shared_composite_pages(batches, region_pages)
-        else:
-            patching = self._patch_pages(batches, region_pages) if patch_adds else set()
         remaining = {region_pages[key] for key in self._raw_effective_model(batches)["region_names"]}
         renames = {
             batch["target_key"]: batch["new_atlas_name"]
@@ -504,7 +484,7 @@ class AtlasSession:
                         modded_sprites=sprites,
                         pieces={name: piece for name, piece in pieces.items() if name in modifiers[filename].regions},
                         mesh_lookup_fn=self._repack_mesh_lookup(added_mesh_lookup),
-                        gap=patch_padding,
+                        gap=keep_layout_gap,
                     )
                     if result is None:
                         self._raster.release_except(before)  # spec M-5: a refused attempt leaves nothing behind
@@ -1075,8 +1055,7 @@ class AtlasSession:
         *,
         shelf_padding: int = 0,
         mesh_footprint: bool = True,
-        patch_adds: bool = False,
-        patch_padding: int = 0,
+        keep_layout_gap: int = 0,
         added_mesh_lookup=None,
         in_place: bool = False,
         share_untouched: bool = False,
@@ -1089,15 +1068,12 @@ class AtlasSession:
         copying and must not be mutated by the caller.
         Never publishes: batches, sprites, pristine pages and snapshot are
         unchanged, and every handle the call allocated is released.
-        `patch_adds` (SpineAtlas only, spec 2026-10-31): pages whose only edits
-        are adds and renames get the adds placed into their free space with
-        `patch_padding` px of gap instead of a repack. `patch_padding` is
-        normalized like the nest gap (0 or invalid becomes 4); SpineAtlas
-        always passes its padding (>= 1).
+        `in_place` (SpineAtlas only, spec 2026-11-05): every touched page whose
+        image is its declared size is tried in place; a page that does not fit
+        repacks. `keep_layout_gap` is the gap an in-place placement leaves
+        around an added region (SpineAtlas passes its padding, >= 1).
         `added_mesh_lookup` (SpineAtlas only): internal key -> mesh geometry
         for added regions.
-        `in_place` (SpineAtlas only, spec 2026-11-05): every touched page whose
-        image is its declared size is tried in place; a page that does not fit repacks.
         `report`, `bleed`: see _build_pages."""
         self._require_open()
         if not self._mod_batches:
@@ -1112,7 +1088,7 @@ class AtlasSession:
             document, images = self._build_pages(
                 self._mod_batches, self._modded_sprites, split_composite,
                 shelf_padding=shelf_padding, mesh_footprint=mesh_footprint,
-                patch_adds=patch_adds, patch_padding=patch_padding,
+                keep_layout_gap=keep_layout_gap,
                 added_mesh_lookup=added_mesh_lookup,
                 in_place=in_place,
                 report=report,

@@ -886,7 +886,7 @@ class SpineAtlas:
                 split_composite=resolved.split,  # by keyword: tests patch pack_pending(self, **kw)
                 shelf_padding=0 if resolved.nest else resolved.padding,
                 mesh_footprint=resolved.mesh_footprint,
-                patch_adds=False, patch_padding=resolved.padding,
+                keep_layout_gap=resolved.padding,
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
                 in_place=resolved.keep_layout,
                 share_untouched=share_untouched,
