@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
 import { desktopCall } from './desktop.js';
-import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine } from './engine-client.js';
+import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine, engineStarting } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
@@ -14,6 +14,13 @@ function callHost(...args) {
   if (engineStartupError) return Promise.reject(engineStartupError);
   return engineCallHost(...args);
 }
+/** A file opened while the engine is still starting waits under the busy
+ * overlay, so the app does not look idle while nothing appears to happen. */
+async function _awaitEngineReady() {
+  const starting = engineStarting();
+  if (starting) await withBusy(ENGINE_STARTING_LABEL, () => starting.catch(() => {}));
+}
+const ENGINE_STARTING_LABEL = 'Preparing AtlasToolkit engine...';
 export const LOAD_CANCELLED = 'cancelled';
 let _edit = false, _activePageIndex = 0, _editPages = [];
 let _state = null, _sourceFiles = null, _currentSkel = null;
@@ -166,6 +173,7 @@ async function _findAtlasTextFile(files) {
 async function _loadAtlasFromFileList(files, options = {}) {
   const list = Array.isArray(files) ? files : Array.from(files || []);
   if (list.length === 0) return false;
+  await _awaitEngineReady();
 
   const atlasFile = await _findAtlasTextFile(list);
   if (!atlasFile) {
@@ -276,6 +284,7 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
  */
 async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFiles = []) {
   try {
+    await _awaitEngineReady();
     const rawText = await _readFileAsText(atlasFile);
     const convertedText = rawText;
     const requiredPages = await _extractRequiredPages(convertedText);
@@ -432,6 +441,8 @@ export const AtlasAPI = {
   },
 
   get_settings() { return _state?.settings || null; },
+  /** Settings state for a draft of requested values; stores and packs nothing. */
+  preview_settings(requested) { return callHost('preview_settings', [requested]); },
   async init_settings_from_prefs() {
     const partial = {};
     for (const [key, pref, value] of SETTING_PREFS) partial[key] = await AtlasAPI.get_pref(pref, value);

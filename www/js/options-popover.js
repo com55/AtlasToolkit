@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
-/** Help popover for option toggles (hover delay / long-press). */
+/** Help popover for every [data-help] element (hover delay / long-press). */
 
 import { isTouchDevice, isPywebviewDesktop } from './platform.js';
 
@@ -52,43 +52,52 @@ function showHelpFor(el) {
   pop.style.top = `${top}px`;
 }
 
-function toggleLabels() {
-  return document.querySelectorAll('#options-row .toggle-label');
+/** The help target under `node`: any element carrying data-help. */
+function helpTargetOf(node) {
+  return node instanceof Element ? node.closest('[data-help]') : null;
 }
 
+/** One delegated tooltip for every [data-help] element (it replaces the
+ *  native title tooltip: hover delay on mouse, long-press on touch). */
 export function initOptionsPopover() {
-  for (const label of toggleLabels()) {
-    label.addEventListener('mouseenter', () => {
-      if (useLongPress()) return;
-      if (hoverTimer) clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => showHelpFor(label), HOVER_DELAY_MS);
-    });
-    label.addEventListener('mouseleave', () => {
-      if (useLongPress()) return;
-      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-      hideHelpPopover();
-    });
-    label.addEventListener('touchstart', (ev) => {
-      if (!useLongPress() || ev.touches.length !== 1) return;
-      if (longPressTimer) clearTimeout(longPressTimer);
-      longPressTimer = setTimeout(() => {
-        swallowNextClick = true;
-        showHelpFor(label);
-      }, LONG_PRESS_MS);
-    }, { passive: true });
-    label.addEventListener('touchend', () => {
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    });
-    label.addEventListener('touchcancel', () => {
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    });
-    label.addEventListener('click', (ev) => {
-      if (!swallowNextClick) return;
-      swallowNextClick = false;
-      ev.preventDefault();
-      ev.stopPropagation();
-    }, true);
-  }
+  let hovered = null;
+  document.addEventListener('mouseover', (ev) => {
+    if (useLongPress()) return;
+    const target = helpTargetOf(ev.target);
+    if (target === hovered) return;
+    hovered = target;
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    hideHelpPopover();
+    if (target) hoverTimer = setTimeout(() => { if (hovered === target && target.isConnected) showHelpFor(target); }, HOVER_DELAY_MS);
+  });
+  document.addEventListener('mouseout', (ev) => {
+    if (useLongPress() || !hovered) return;
+    if (ev.relatedTarget instanceof Node && hovered.contains(ev.relatedTarget)) return;
+    if (helpTargetOf(ev.relatedTarget) === hovered) return;
+    hovered = null;
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    hideHelpPopover();
+  });
+  // A click acts on the control; the tooltip should not linger over what it opened.
+  document.addEventListener('mousedown', () => { if (!useLongPress()) hideHelpPopover(); }, true);
+  document.addEventListener('touchstart', (ev) => {
+    const target = helpTargetOf(ev.target);
+    if (!useLongPress() || !target || ev.touches.length !== 1) return;
+    if (longPressTimer) clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      swallowNextClick = true;
+      showHelpFor(target);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+  const cancelPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+  document.addEventListener('touchend', cancelPress);
+  document.addEventListener('touchcancel', cancelPress);
+  document.addEventListener('click', (ev) => {
+    if (!swallowNextClick) return;
+    swallowNextClick = false;
+    ev.preventDefault();
+    ev.stopPropagation();
+  }, true);
 
   document.addEventListener('click', () => {
     if (!useLongPress()) return;

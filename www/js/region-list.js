@@ -104,7 +104,7 @@ export function updateRemoveButtonState() {
   const selectedCount = state.selectedIndices.size;
   const wouldEmptyAtlas = selectedCount > 0 && selectedCount === state.regionsData.length;
   btn.disabled = selectedCount === 0 || wouldEmptyAtlas;
-  btn.title = wouldEmptyAtlas ? "Can't remove every region." : 'Remove select regions';
+  btn.dataset.help = wouldEmptyAtlas ? "Can't remove every region." : 'Remove selected regions';
 }
 
 /** Rename only ever targets a single region -- disable the button for any
@@ -115,7 +115,7 @@ export function updateRenameButtonState() {
   const btn = document.getElementById('btn-rename-region');
   const single = state.selectedIndices.size === 1;
   btn.disabled = !single;
-  btn.title = single ? 'Rename selected region' : 'Select a single region to rename';
+  btn.dataset.help = single ? 'Rename selected region' : 'Select a single region to rename';
 }
 
 export function triggerPreviewUpdate() {

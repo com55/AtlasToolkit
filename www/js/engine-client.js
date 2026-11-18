@@ -117,6 +117,11 @@ export function startEngine(onStatus, options = {}) {
   return state.promise;
 }
 
+/** The start promise while the engine is still starting, otherwise null. */
+export function engineStarting() {
+  return engine && !engine.ready ? engine.promise : null;
+}
+
 export function callHost(method, args, opts = {}) {
   if (!engine) return Promise.reject(new HostError('EngineStopped', 'Engine is not started'));
   const state = engine;

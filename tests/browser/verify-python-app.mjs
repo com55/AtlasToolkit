@@ -489,6 +489,42 @@ try {
   await idleApp.close();
   console.log('PASS fresh app startup status becomes Ready without loading');
 
+  // A file opened while the engine is still starting waits under the busy
+  // overlay; the .skel button is always shown; tooltips use the help popover.
+  const earlyApp = await context.newPage();
+  await earlyApp.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
+  await earlyApp.waitForFunction(() => !!document.getElementById('btn-pick-skel')?.textContent, null, {polling: 100});
+  if (!await earlyApp.locator('#btn-pick-skel').isDisabled() || !(await earlyApp.locator('#btn-pick-skel').innerText()).includes('Open an atlas first')) throw new Error('Skeleton button before an atlas');
+  const early = await earlyApp.evaluate(async () => {
+    const preparing = document.getElementById('status-text').textContent.startsWith('Preparing');
+    const {AtlasAPI} = await window.__appModule('atlas-api');
+    const c = new OffscreenCanvas(4, 4); c.getContext('2d').fillRect(0, 0, 4, 4);
+    const png = new File([await c.convertToBlob({type: 'image/png'})], 'p.png');
+    const loading = AtlasAPI.load_from_files([new File(['p.png\nsize: 4,4\na\n bounds: 0,0,4,4\n'], 'early.atlas'), png]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const overlay = document.getElementById('busy-overlay');
+    const busy = !overlay.classList.contains('hidden') && document.getElementById('busy-label').textContent;
+    const loaded = await loading;
+    await (await window.__appModule('region-list')).loadRegions();
+    (await window.__appModule('modify-mode')).updateMeshCroppingUI();
+    return {preparing, busy, loaded};
+  });
+  if (!early.preparing) throw new Error('Engine was ready before the early load; the check proves nothing');
+  if (early.busy !== 'Preparing AtlasToolkit engine...') throw new Error('No busy overlay while the engine starts: ' + early.busy);
+  if (!early.loaded) throw new Error('Early load failed');
+  if (!await earlyApp.locator('#btn-pick-skel').isEnabled() || !(await earlyApp.locator('#btn-pick-skel').innerText()).includes('Add .skel')) throw new Error('Skeleton button without a .skel');
+  if (await earlyApp.locator('[title]').count()) throw new Error('Native title tooltips remain');
+  // Disabled buttons still show their help (Save Image needs a selection).
+  if (!await earlyApp.locator('#btn-save-merged').isDisabled()) throw new Error('Save Image should start disabled');
+  await earlyApp.locator('#btn-save-merged').hover();
+  await earlyApp.locator('#opt-help-popover').waitFor({state: 'visible', timeout: 5000});
+  if (await earlyApp.locator('#opt-help-popover').innerText() !== 'Save the preview image as PNG') throw new Error('Help popover text');
+  await earlyApp.mouse.move(0, 0);
+  await earlyApp.locator('#opt-help-popover').waitFor({state: 'hidden', timeout: 5000});
+  await earlyApp.evaluate(async () => (await window.__appModule('engine-client')).stopEngine());
+  await earlyApp.close();
+  console.log('PASS early load waits under the busy overlay; skeleton button states; help popover on disabled buttons');
+
   // Settings regression checks use a fresh real app page and real host errors.
   const settingsPage = await context.newPage();
   await settingsPage.goto(origin + '/index.html?test-hooks', {waitUntil:'domcontentloaded'});
@@ -539,6 +575,9 @@ try {
   await waitForEdit(settingsPage);
   await settingsPage.locator('#btn-pack-chip').click();
   if (!await settingsPage.locator('body > #pack-panel').isVisible()) throw new Error('Settings panel placement');
+  if (await settingsPage.locator('#options-row').evaluate(el => el.classList.contains('compact-chips'))) throw new Error('Chips lost their words on a wide row');
+  const headings = await settingsPage.locator('#pack-panel .pack-heading').allInnerTexts();
+  if (headings.join('|') !== 'Packer|Regions|Spacing|Layout') throw new Error('Settings groups: ' + headings.join('|'));
   const labels = await settingsPage.locator('.pk-item > span:last-child').evaluateAll(nodes => nodes.map(n => n.firstChild.textContent));
   if (labels.join('|') !== 'Shelf|Rectangles|Polygons|Rectangles In-Place|Polygons In-Place') throw new Error('Packer names');
   if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Shelf · 2px')) throw new Error('Default chip');
@@ -571,28 +610,102 @@ try {
     };
   });
   const beforePacking = await settingsPage.evaluate(() => window.settingsPreviewPixels());
+  // The panel edits a draft: nothing repacks until Save, which also closes it.
+  const settingsIdle = () => waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
+  const openSettings = async () => {
+    if (!await settingsPage.locator('#pack-panel').isVisible()) await settingsPage.locator('#btn-pack-chip').click();
+  };
+  const saveSettings = async () => {
+    await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
+    await settingsPage.locator('#pack-save').click();
+    await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
+    await settingsIdle();
+  };
+  const choosePacker = async (key, label) => {
+    await openSettings();
+    await settingsPage.locator('[data-packer="'+key+'"]').click();
+    await saveSettings();
+    await settingsPage.waitForFunction(text => document.getElementById('btn-pack-chip').textContent.includes(text), label, {polling:500});
+  };
   await settingsPage.locator('[data-packer="rectangles"]').click();
+  await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
+  if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Choosing a packer closed the panel');
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Shelf ·')) throw new Error('Draft packer applied before Save');
+  if (!await settingsPage.locator('.pack-dirty').isVisible()) throw new Error('Unsaved note missing');
+  await saveSettings();
   await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
   // Wait for the returned EditResult to reach the displayed image, then
   // compare decoded pixels/dimensions rather than minted blob URLs.
   await waitInPage(settingsPage, async before => (await window.settingsPreviewPixels()) !== before, 60000, beforePacking);
+  await openSettings();
   await settingsPage.locator('#p-num').fill('');
   await settingsPage.keyboard.type('1');
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('1px') && !(await window.__appModule('busy-overlay')).isBusy());
+  await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
   await settingsPage.keyboard.type('5');
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('15px') && !(await window.__appModule('busy-overlay')).isBusy());
+  await settingsPage.waitForTimeout(600);
   if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
   if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('2px')) throw new Error('Draft padding applied before Save');
   // Keep the typed 15px value for the persistence check after reload.
+  await saveSettings();
+  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('15px'), null, {polling:500});
+  await openSettings();
   await settingsPage.locator('[data-packer="rectangles_in_place"]').click();
+  // Locks follow the draft before Save (engine preview).
   await settingsPage.waitForFunction(() => document.querySelector('[data-setting="splitComposite"]').disabled, null, {polling:500});
   for (const key of ['splitComposite','keepLayout']) if (!await settingsPage.locator('[data-setting="'+key+'"]').isChecked()) throw new Error('In-place lock value');
-  const hint = await settingsPage.locator('#pack-panel .hint').innerText();
-  if (hint !== 'New regions go into free space.\nOff: every edited page is repacked.') throw new Error('Keep layout hint');
-  await settingsPage.locator('[data-packer="rectangles"]').click();
-  await settingsPage.waitForFunction(() => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·'), null, {polling:500});
-  await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
+  // Hints are closed until their info button opens them.
+  if (await settingsPage.locator('#hint-keepLayout').isVisible()) throw new Error('Keep layout hint open by default');
+  await settingsPage.locator('[data-hint="keepLayout"]').click();
+  if (!(await settingsPage.locator('#hint-keepLayout').innerText()).includes('existing regions stay where they are')) throw new Error('Keep layout hint');
+  if (await settingsPage.locator('[data-hint="keepLayout"]').getAttribute('aria-expanded') !== 'true') throw new Error('Hint button state');
+  await settingsPage.locator('#btn-packer-info').click();
+  await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
+  if (await settingsPage.locator('.pi-card').count() !== 5) throw new Error('Packer info cards');
+  await settingsPage.keyboard.press('Escape');
+  await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
+  if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Closing packer info closed the panel');
+  // Cancel drops the draft.
+  await settingsPage.locator('#pack-cancel').click();
+  await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Rectangles · 15px')) throw new Error('Cancel applied the draft');
+  await openSettings();
+  if (!await settingsPage.locator('[data-packer="rectangles"]').evaluate(el => el.classList.contains('selected'))) throw new Error('Cancelled draft survived reopening');
+  // Unsaved changes hold the panel open: outside clicks and Escape do not
+  // close it (and the outside click does not go through); only Cancel / Save.
+  await settingsPage.locator('label:has([data-setting="bleed"])').click();
+  await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
+  const selectedBefore = await settingsPage.locator('.region-item.selected').count();
+  const target = settingsPage.locator('.region-item:not(.selected)').first();
+  await target.click({force: true});
+  await settingsPage.waitForTimeout(300);
+  if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Outside click closed a dirty panel');
+  if (await settingsPage.locator('.region-item.selected').count() !== selectedBefore) throw new Error('Outside click went through while held open');
+  if (!await settingsPage.locator('#pack-panel').evaluate(el => el.classList.contains('pack-attention'))) throw new Error('No attention cue on a held close');
+  // Hover still reaches the page underneath: a tooltip outside the panel shows.
+  await settingsPage.locator('#btn-add-region').hover();
+  await settingsPage.locator('#opt-help-popover').waitFor({state:'visible', timeout:5000});
+  if (await settingsPage.locator('#opt-help-popover').innerText() !== 'Add new region') throw new Error('Hover blocked while held open');
+  await settingsPage.mouse.move(0, 0);
+  await settingsPage.keyboard.press('Escape');
+  await settingsPage.waitForTimeout(300);
+  if (!await settingsPage.locator('#pack-panel').isVisible() || await settingsPage.locator('#pack-save').isDisabled()) throw new Error('Escape closed a dirty panel');
+  await settingsPage.locator('#pack-cancel').click();
+  await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
+  if (!await settingsPage.locator('[data-setting="bleed"]').isChecked()) throw new Error('Cancel kept the draft');
+  // The flash must not replay when the panel opens again.
+  await openSettings();
+  if (await settingsPage.locator('#pack-panel').evaluate(el => el.classList.contains('pack-attention') || el.getAnimations().length > 0)) throw new Error('Attention flash replays on open');
+  await settingsPage.locator('#pack-cancel').click();
+  await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
+  // A clean panel still closes on an outside click; hints start closed every time.
+  await openSettings();
+  if (await settingsPage.locator('#hint-keepLayout').isVisible()) throw new Error('Hint stayed open after reopening');
+  await settingsPage.locator('#sidebar-head').click();
+  await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
+  // Pack both once (the draft above was cancelled), so the next two are cached.
+  await choosePacker('rectangles_in_place', 'Rectangles In-Place ·');
+  await choosePacker('rectangles', 'Rectangles ·');
   // Cached packs answer without the busy overlay; an uncached one shows it.
   await settingsPage.evaluate(() => {
     const overlay = document.getElementById('busy-overlay');
@@ -600,17 +713,11 @@ try {
     new MutationObserver(() => { if (getComputedStyle(overlay).display !== 'none') window.busyShown++; })
       .observe(overlay, {attributes:true});
   });
-  for (const [key, label] of [['rectangles_in_place','Rectangles In-Place ·'],['rectangles','Rectangles ·']]) {
-    await settingsPage.locator('[data-packer="'+key+'"]').click();
-    await settingsPage.waitForFunction(text => document.getElementById('btn-pack-chip').textContent.includes(text), label, {polling:500});
-    await waitInPage(settingsPage, async () => !(await window.__appModule('busy-overlay')).isBusy());
-  }
+  for (const [key, label] of [['rectangles_in_place','Rectangles In-Place ·'],['rectangles','Rectangles ·']]) await choosePacker(key, label);
   if (await settingsPage.evaluate(() => window.busyShown) !== 0) throw new Error('Busy overlay shown for a cached pack');
-  await settingsPage.locator('[data-packer="shelf"]').click();
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Shelf ·') && !(await window.__appModule('busy-overlay')).isBusy());
+  await choosePacker('shelf', 'Shelf ·');
   if (await settingsPage.evaluate(() => window.busyShown) === 0) throw new Error('Busy overlay not seen for an uncached pack (observer control)');
-  await settingsPage.locator('[data-packer="rectangles"]').click();
-  await waitInPage(settingsPage, async () => document.getElementById('btn-pack-chip').textContent.includes('Rectangles ·') && !(await window.__appModule('busy-overlay')).isBusy());
+  await choosePacker('rectangles', 'Rectangles ·');
   await settingsPage.reload({waitUntil:'domcontentloaded'});
   await settingsPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout:120000,polling:500});
   await loadSettingsFixture();
@@ -623,7 +730,20 @@ try {
   await settingsPage.setViewportSize({width:360,height:640});
   const bounds = await settingsPage.locator('#pack-panel').boundingBox();
   if (bounds.x < 0 || bounds.x + bounds.width > 360) throw new Error('Settings overflows narrow screen');
-  await settingsPage.locator('#pack-close').click();
+  if (!await settingsPage.locator('#options-row').evaluate(el => el.classList.contains('compact-chips'))) throw new Error('Chips keep their words on a narrow row');
+  if (await settingsPage.locator('#btn-pack-chip .chip-label').isVisible()) throw new Error('Settings word shown on a narrow row');
+  if (!await settingsPage.locator('#btn-pack-chip .chip-sep').isVisible()) throw new Error('Chip divider hidden on a narrow row');
+  // Phone: a full modal; its own buttons decide, so no unsaved note.
+  if (!await settingsPage.locator('#pack-panel').evaluate(el => el.classList.contains('is-touch-modal'))) throw new Error('Narrow settings is not a modal');
+  if (await settingsPage.locator('.pack-dirty').isVisible()) throw new Error('Unsaved note shown in the phone modal');
+  await settingsPage.locator('#btn-packer-info').click();
+  await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
+  const infoTop = await settingsPage.evaluate(() => [document.getElementById('packer-info-overlay').scrollTop, document.getElementById('packer-info-title').getBoundingClientRect().top]);
+  if (infoTop[0] !== 0 || infoTop[1] < 0 || infoTop[1] > 640) throw new Error('Packer info did not open at its top: ' + infoTop);
+  if (await settingsPage.locator('#packer-info').evaluate(el => getComputedStyle(el).overflowY) === 'auto') throw new Error('Packer info scrolls inside itself');
+  await settingsPage.keyboard.press('Escape');
+  await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
+  await settingsPage.locator('#pack-cancel').click();
   await settingsPage.locator('#btn-pack-chip').click();
   const openedNarrow = await settingsPage.locator('#pack-panel').boundingBox();
   if (openedNarrow.x < 0 || openedNarrow.x + openedNarrow.width > 360) throw new Error('Settings opened narrow overflows');
@@ -673,6 +793,8 @@ try {
   if (!await settingsPage.locator('#s-alpha').isVisible()) throw new Error('PMA alpha hidden');
   if (!await settingsPage.locator('[data-setting="bleed"]').isDisabled()) throw new Error('Bleed not locked for a pma atlas');
   await settingsPage.locator('#p-num').fill('256');
+  await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
+  await settingsPage.locator('#pack-save').click();
   try {
     await settingsPage.locator('#modal-overlay').waitFor({state:'visible',timeout:30000});
   } catch (error) {
@@ -682,7 +804,9 @@ try {
     await settingsPage.evaluate(() => window.restoreSettingsSizeProbe());
   }
   if (await settingsPage.locator('#modal-title').innerText() !== 'Cannot apply setting') throw new Error('Setting failure title');
-  if (await settingsPage.locator('#p-num').inputValue() !== '2') throw new Error('Failed padding did not revert');
+  // A failed Save keeps the panel and its draft, so the value can be fixed.
+  if (await settingsPage.locator('#p-num').inputValue() !== '256' || !await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Failed Save lost the draft');
+  if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('2px')) throw new Error('Failed setting applied');
   if (await settingsPage.evaluate(() => window.settingsAPI.get_pref('packPadding',2)) !== 2) throw new Error('Failed setting persisted');
   await settingsPage.locator('#btn-modal-confirm').click();
   await settingsPage.close();
@@ -784,6 +908,8 @@ try {
   for (const packer of ['polygons','polygons_in_place']) if (!await pendingPage.locator('[data-packer="'+packer+'"]').isEnabled()) throw new Error('Polygon row disabled with mesh');
   await pendingPage.locator('[data-packer="polygons"]').click();
   await pendingPage.waitForFunction(() => document.querySelector('[data-setting="meshAware"]')?.disabled && document.querySelector('[data-setting="meshAware"]')?.checked, null, {polling:500});
+  await pendingPage.locator('#pack-save').click();
+  await pendingPage.locator('#pack-panel').waitFor({state:'hidden'});
   await waitForEdit(pendingPage);
   await returnPendingToView();
   await loadPendingFixture(false);

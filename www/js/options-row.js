@@ -50,10 +50,19 @@ function syncLineStartClasses(row) {
   }
 }
 
+function wrapsToNextLine(row) {
+  const items = [...row.children].filter(li => li.getClientRects().length);
+  return items.length > 1 && items.some(li => li.offsetTop > items[0].offsetTop + 1);
+}
+
 export function syncOptionsRowOverflow() {
   const row = rowEl();
   const btn = collapseBtn();
   if (!row || !btn) return;
+
+  // Drop the chip words first when the groups do not fit on one line.
+  row.classList.remove('compact-chips');
+  if (wrapsToNextLine(row)) row.classList.add('compact-chips');
 
   const keepExpanded = row.classList.contains('is-expanded');
   const overflow = keepExpanded

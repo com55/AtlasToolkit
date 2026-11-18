@@ -379,7 +379,7 @@ export function showMissingAtlasImagesDialog(missingPages) {
       if (!row || !statusEl || !actionBtn) return;
       selectedByPage[pageName] = file;
       statusEl.innerText = formatSelectedImageLabel(file, pageName);
-      statusEl.title = String(file.name || pageName);
+      statusEl.dataset.help = String(file.name || pageName);
       row.classList.add('selected');
       actionBtn.innerText = 'Change';
       actionBtn.classList.add('btn-save');

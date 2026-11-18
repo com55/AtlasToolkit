@@ -301,30 +301,33 @@ export function updateMeshCroppingUI() {
   document.getElementById('chk-mesh-mask').disabled = !available;
   updateMeshHullUI();
 
+  // Always shown; a .skel attaches to an open atlas, so it waits for one.
   const btn = document.getElementById('btn-pick-skel');
   const atlasLoaded = !!AtlasAPI.get_current_atlas_filename();
+  let state, value, help, icon = '';
   if (!atlasLoaded) {
-    btn.parentElement.classList.add('hidden');
-    refreshPanelSplit();
-    return;
-  }
-  btn.parentElement.classList.remove('hidden');
-  refreshPanelSplit();
-  btn.classList.remove('skel-missing', 'skel-invalid', 'skel-ok');
-  if (!skelFileName) {
-    btn.textContent = '⚠️ Choose .skel file';
-    btn.classList.add('skel-missing');
-    btn.title = 'Pick a .skel file to enable mesh-based masking.';
+    [state, value, help] = ['skel-none', 'Open an atlas first', 'Open an atlas, then add its .skel file.'];
+  } else if (!skelFileName) {
+    [state, value, help, icon] = ['skel-missing', 'Add .skel', 'Add the .skel file to use mesh outlines (Mesh Cropping, Mesh-Aware, Polygons).', SKEL_ADD];
   } else if (!available) {
-    btn.textContent = '⚠️ ' + skelFileName;
-    btn.classList.add('skel-invalid');
-    btn.title = MESH_UNAVAILABLE_MESSAGES[unavailableReason] || 'This .skel file cannot be used for mesh masking.';
+    [state, value, help, icon] = ['skel-invalid', skelFileName, MESH_UNAVAILABLE_MESSAGES[unavailableReason] || 'This .skel file cannot be used for mesh masking.', SKEL_ERROR];
   } else {
-    btn.textContent = skelFileName;
-    btn.classList.add('skel-ok');
-    btn.title = `Mesh masking active using ${skelFileName}. Click to choose a different file.`;
+    [state, value, help, icon] = ['skel-ok', skelFileName, `Mesh data from ${skelFileName}. Click to choose a different file.`, SKEL_OK];
   }
+  btn.disabled = !atlasLoaded;
+  btn.classList.remove('skel-none', 'skel-missing', 'skel-invalid', 'skel-ok');
+  btn.classList.add(state);
+  btn.dataset.help = help;
+  btn.setAttribute('aria-label', `Skeleton: ${value}`);
+  const safe = value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);  // a file name is user data
+  btn.innerHTML = `${SKEL_ICON}<span class="chip-label">Skeleton</span><span class="chip-sep"></span>${icon}<span class="skel-value">${safe}</span>`;
+  refreshPanelSplit();
 }
+
+const SKEL_ICON = '<svg class="skel-icon" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M60.7 28.6c.5 14.6 10.6 22.7 30.8 25.9 17.1 2.7 32.5 1.3 37.5-13.3 9.8-28.5-13.5-21.4-33.6-24.6-20.2-3.2-35.4-11.4-34.7 12m6.1 60c1.9 10.9 12 17.1 27.6 16.7 15.5-.4 27.1-6.5 28.8-18.3 3-21.8-14.2-13.4-29.7-12.9-15.7.5-30.4-6.9-26.7 14.5M87 138.5c3.1 8.1 11.6 11.6 23 9.1 11.4-2.4 19.4-6.2 18.7-15.5-1.2-17.2-12.5-11.8-23.9-9.3-11.4 2.4-23.8-.3-17.8 15.7m9.8 38.1c.9 6.9 6.8 10.9 16.1 10.9 9.3-.1 16.4-3.8 17.6-11.1 2.2-13.6-8.2-8.6-17.5-8.5-9.3 0-17.9-4.8-16.2 8.7"/></svg>';
+const SKEL_ADD = '<svg class="skel-status" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="M440-280h80v-160h160v-80H520v-160h-80v160H280v80h160v160Zm40 200q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Z"/></svg>';
+const SKEL_ERROR = '<svg class="skel-status" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="m336-280 144-144 144 144 56-56-144-144 144-144-56-56-144 144-144-144-56 56 144 144-144 144 56 56ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>';
+const SKEL_OK = '<svg class="skel-status" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="m424-296 282-282-56-56-226 226-114-114-56 56 170 170Zm56 216q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>';
 
 const MESH_HULL_HELP = "Draw each selected region's mesh silhouette in blue over the preview. The saved image stays unchanged.";
 

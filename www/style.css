@@ -274,7 +274,8 @@ body.mode-modify.advance-mode-on #sidebar-head {
      The divider is now an absolutely-positioned ::before in this column-gap,
      so wrap width never changes when the line-start class toggles. */
   column-gap: 17px;
-  row-gap: 6px;
+  /* Each <li> is already 34px tall; extra row gap spreads wrapped lines apart. */
+  row-gap: 0;
   list-style: none;
   margin: 0;
   display: flex;
@@ -624,46 +625,38 @@ button {
   cursor: not-allowed;
 }
 
-/* .skel picker — shorter than the 35px options row so it reads as a
-   chip inside the bar, not a full-height control. */
+/* .skel picker: the Settings chip's shape, "Skeleton | status value". */
 .skel-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 26px;
   min-height: 22px;
-  min-width: 48px;
-  max-width: 160px;
-  padding: 0 8px;
-  font-size: 11px;
+  max-width: 260px;
+  padding: 0 10px;
+  font-size: 12px;
   align-self: center;
-  /* The row wraps whole <li> groups instead of shrinking children. This
-     button may still ellipsis when its own group is wider than the row
-     (max-width:100% on the <li>) -- that is the only shrink path. */
+  /* The row wraps whole <li> groups instead of shrinking children; only the
+     file name ellipsizes when this group alone is wider than the row. */
   flex-shrink: 1;
+  min-width: 0;
   border-radius: 3px;
   border: 1px solid #555;
   background-color: #2f2f2f;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #e3e3e3;
   white-space: nowrap;
+  cursor: pointer;
 }
-.skel-picker-btn:hover {
-  border-color: #6a6a6a;
-  background-color: #3a3a3a;
-}
-/* No .skel picked yet. */
-.skel-picker-btn.skel-missing {
-  color: #ffc107;
-  border-color: #806400;
-}
-/* .skel picked but unusable (wrong version / parse error / no Mesh attachments). */
-.skel-picker-btn.skel-invalid {
-  color: #f44336;
-  border-color: #7a2620;
-}
-/* .skel picked and usable. */
-.skel-picker-btn.skel-ok {
-  color: #4caf50;
-  border-color: #2d6930;
-}
+.skel-picker-btn:hover:not(:disabled) { border-color: #6a6a6a; background-color: #3a3a3a; }
+.skel-picker-btn:disabled { opacity: .55; cursor: not-allowed; }
+.skel-picker-btn .skel-icon { width: 15px; height: 15px; flex-shrink: 0; }
+.skel-picker-btn .skel-status { width: 15px; height: 15px; flex-shrink: 0; }
+.skel-picker-btn .chip-sep { width: 1px; align-self: stretch; margin: 5px 2px; background: #555; flex-shrink: 0; }
+.skel-picker-btn .skel-value { color: #aaa; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.skel-picker-btn.skel-none .skel-value, .skel-picker-btn.skel-missing .skel-value, .skel-picker-btn.skel-missing .skel-status { color: #999; }
+.skel-picker-btn.skel-invalid { border-color: #7a2620; }
+.skel-picker-btn.skel-invalid .skel-value, .skel-picker-btn.skel-invalid .skel-status { color: #f48771; }
+.skel-picker-btn.skel-ok .skel-status { color: #4caf50; }
 
 #btn-options-collapse {
   position: absolute;
@@ -701,7 +694,8 @@ button {
 
 #opt-help-popover {
   position: fixed;
-  z-index: 40;
+  /* Above every panel and modal: it explains whatever is under the pointer. */
+  z-index: 4600;
   max-width: min(320px, calc(100vw - 16px));
   padding: 8px 10px;
   font-size: 12px;
@@ -1745,13 +1739,19 @@ body.mode-extract #advance-toolbar {
 }
 
   #btn-pack-chip { height: 26px; min-height: 22px; padding: 0 10px; font-size: 12px; white-space: nowrap; border-radius: 3px; border: 1px solid #555; background-color: #2f2f2f; color: #e3e3e3; cursor: pointer; }
-  #pack-panel { position: fixed; z-index: 41; width: 300px; padding: 10px 12px; background: #2d2d2d; border: 1px solid #555; border-radius: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  #pack-panel { position: fixed; z-index: 41; width: min(600px, calc(100vw - 16px)); padding: 10px 12px; background: #2d2d2d; border: 1px solid #555; border-radius: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  /* Sections flow into a second column instead of one long list; a narrow
+     panel falls back to one column (column width 250px). */
+  /* Wide panel: packer list | options by topic, split by a faint rule. */
+  .pack-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .pack-col + .pack-col { margin-left: 14px; padding-left: 14px; border-left: 1px solid #3c3c3c; }
+  #pack-panel .sec { padding: 0 0 10px; }
+  #pack-panel .sec + .sec { padding-top: 10px; border-top: 1px solid #3c3c3c; }
+  .pack-sub { font-size: 12px; color: #bbb; }
+  .opt-gap { height: 10px; }
   #btn-pack-chip { display: inline-flex; align-items: center; gap: 6px; }
   #btn-pack-chip .chip-sep { width: 1px; align-self: stretch; margin: 5px 2px; background: #555; }
   #btn-pack-chip .chip-value { color: #aaa; }
-  #pack-panel .sec { padding: 10px 0; border-top: 1px solid #444; }
-  #pack-panel .sec:first-child { padding-top: 0; border-top: 0; }
-  #pack-panel .sec:last-child { padding-bottom: 0; }
   #pack-panel .sec .toggle-label + .toggle-label { margin-top: 8px; }
   .pk-menu { display: flex; flex-direction: column; margin: 0 -4px; }
   #pack-panel .sec .toggle-label { display: flex; }
@@ -1762,10 +1762,28 @@ body.mode-extract #advance-toolbar {
   .pk-item:disabled { opacity: .4; cursor: not-allowed; }
   .pk-item small { display: block; color: #888; font-size: 11px; }
   .pk-check { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-  .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .sec-head { display: flex; align-items: center; gap: 2px; margin-bottom: 4px; }
   .sec-head .pack-heading { margin: 0; }
-  #pack-panel .hint { margin: 3px 0 0; font-size: 11px; color: #888; line-height: 1.35; }
-  .is-locked { opacity: .55; pointer-events: none; }
+  .sec-head #btn-pad-reset { margin-left: auto; }
+  /* Indent = switch width (32px) + gap (8px): the hint lines up with the label text. */
+  #pack-panel .hint { margin: 4px 0 0 40px; font-size: 11px; color: #999; line-height: 1.45; }
+  #pack-panel .hint.hint-flush { margin: 0 0 6px; }
+  #pack-panel .hint[hidden] { display: none; }
+  #pack-panel .opt + .opt { margin-top: 8px; }
+  .opt-line { display: flex; align-items: center; gap: 2px; }
+  .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #888; cursor: pointer; flex-shrink: 0; }
+  .info-btn:hover { color: #ddd; background: #3a3d41; }
+  .info-btn[aria-expanded="true"] { color: #4fc1ff; }
+  /* Locked toggles keep pointer events so their data-help reason can show. */
+  .is-locked { opacity: .55; cursor: not-allowed; }
+  .pack-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; border-top: 1px solid #3c3c3c; }
+  /* A close attempt with unsaved changes: the panel outline flashes 3 times (100 ms on, 100 ms off). */
+  #pack-panel.pack-attention { animation: packAttention .2s steps(1, end) 3; }
+  @keyframes packAttention { 0% { box-shadow: 0 0 0 2px #d7ba7d, 0 8px 24px rgba(0,0,0,.45); } 50% { box-shadow: 0 8px 24px rgba(0,0,0,.45); } }
+  .pack-foot .btn-primary, .pack-foot .btn-secondary { padding: 5px 16px; font-size: 12px; }
+  .pack-foot .btn-primary:disabled { opacity: .45; cursor: default; background-color: #0e639c; }
+  .pack-dirty { margin-right: auto; font-size: 11px; color: #d7ba7d; }
+  .pack-dirty[hidden] { display: none; }
 #pack-panel { box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; }
 .pack-heading { margin: 0 0 6px; font-size: 12px; color: #ccc; }
 .padding-controls { display:flex; gap:8px; }
@@ -1773,9 +1791,14 @@ body.mode-extract #advance-toolbar {
 #p-num { width:52px; background:#3c3c3c; color:#ddd; border:1px solid #555; }
 #s-alpha { width:100%; background:#3c3c3c; color:#ddd; }
 #pack-backdrop { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.55); }
-#pack-panel.is-touch-modal { left:50% !important; top:50% !important; transform:translate(-50%,-50%); }
-#pack-close { display:none; }
-#pack-panel.is-touch-modal #pack-close { display:block; margin-top:10px; width:100%; }
+/* Phone / narrow: a full-screen modal whose whole card scrolls (the card
+   moves up), not a box with its own scroll area. */
+#pack-panel.is-touch-modal { left:0 !important; top:0 !important; width:100%; height:100%; max-width:none; max-height:none; padding:16px; background:transparent; border:0; border-radius:0; box-shadow:none; overflow-y:auto; display:flex; }
+#pack-panel.is-touch-modal .pack-inner { margin:auto; width:min(420px, 100%); box-sizing:border-box; padding:14px; background:#2d2d2d; border:1px solid #555; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.5); }
+#pack-panel.is-touch-modal .pack-dirty { display:none; }
+/* One column: the rule between the two groups turns horizontal. */
+#pack-panel.is-touch-modal .pack-cols { grid-template-columns: minmax(0, 1fr); }
+#pack-panel.is-touch-modal .pack-col + .pack-col { margin: 0; padding: 10px 0 0; border-left: 0; border-top: 1px solid #3c3c3c; }
 
   #btn-pad-reset { width: 22px; height: 22px; min-height: 0; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 3px; color: #bbb; cursor: pointer; }
   #btn-pad-reset:hover { background: #3a3d41; color: #fff; }
@@ -1783,6 +1806,32 @@ body.mode-extract #advance-toolbar {
 /* Keep an open panel on screen during the viewport resize itself, before
    the resize listener updates its modal state and anchored coordinates. */
 @media (max-width: 600px) {
-  #pack-panel { left: 50% !important; top: 50% !important; transform: translate(-50%, -50%); }
-  #pack-panel #pack-close { display: block; margin-top: 10px; width: 100%; }
+  #pack-panel { left: 0 !important; top: 0 !important; width: 100%; height: 100%; max-height: none; padding: 16px; background: transparent; border: 0; box-shadow: none; overflow-y: auto; display: flex; }
+  #pack-panel .pack-inner { margin: auto; width: min(420px, 100%); box-sizing: border-box; padding: 14px; background: #2d2d2d; border: 1px solid #555; border-radius: 8px; }
+  #pack-panel .pack-cols { grid-template-columns: minmax(0, 1fr); }
+  #pack-panel .pack-col + .pack-col { margin: 0; padding: 10px 0 0; border-left: 0; border-top: 1px solid #3c3c3c; }
+}
+/* Not enough room on one line: the chips drop their "Skeleton" / "Settings" words (the | stays). */
+#options-row.compact-chips .chip-label { display: none; }
+
+/* About the packers: above the settings panel, same chrome as #modal-box. */
+/* The overlay scrolls, so a tall modal moves up as a whole; margin:auto centres a short one. */
+#packer-info-overlay { position: fixed; inset: 0; z-index: 4500; display: flex; align-items: flex-start; padding: 16px; box-sizing: border-box; overflow-y: auto; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
+#packer-info-overlay.hidden { display: none; }
+#packer-info { margin: auto; background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); width: min(640px, 100%); box-sizing: border-box; padding: 20px 22px; animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+#packer-info h3 { margin: 0 0 4px; font-size: 18px; color: #ddd; }
+#packer-info .pi-lead { margin: 0 0 10px; color: #aaa; font-size: 12.5px; line-height: 1.5; }
+.pi-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #999; margin-bottom: 6px; }
+.pi-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.pi-legend i { width: 12px; height: 9px; display: inline-block; border-radius: 2px; }
+.pi-region { background: #3d7fb8; } .pi-same { background: #5a5a5a; } .pi-edit { background: #d08a2e; } .pi-add { background: #4caf50; }
+.pi-card { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid #3c3c3c; align-items: start; }
+.pi-card svg { width: 170px; height: 112px; display: block; }
+.pi-card h4 { margin: 0 0 4px; font-size: 13.5px; color: #e3e3e3; display: flex; gap: 8px; align-items: center; }
+.pi-card p { margin: 0; font-size: 12px; color: #bbb; line-height: 1.5; }
+.pi-pill { font-size: 10px; font-weight: 400; padding: 1px 7px; border-radius: 999px; border: 1px solid #806400; color: #ffc107; }
+#packer-info .modal-buttons { margin-top: 10px; }
+@media (max-width: 560px) {
+  .pi-card { grid-template-columns: 1fr; }
+  .pi-card svg { width: 100%; height: auto; max-width: 260px; }
 }
