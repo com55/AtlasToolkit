@@ -284,17 +284,15 @@ accept non-boolean `rotate` values, so `nestPack`'s full 4-way rotation search
 - The deliberate differences from the JS engine are listed in `CHANGELOG.md`
   under "Differences from the app's engine". Keep new ones out of parity
   cases and pin them with their own tests.
-- **Pack modes:** `atlas_toolkit/packer.py`'s `resolve_packer` turns
-  `packer` / `PackerOptions` into the session's existing switches, plus two
-  Python-only `pack_pending` keywords (`shelf_padding`, `mesh_footprint`) that
-  `_pack_page` adds to a copy of `get_nest_options()`. That dict itself stays
-  the JS port. Modes that cannot be expressed this way (`grid`, `*_in_place`)
-  need the modifier to dispatch on the mode itself: `grid` needs a new packer
-  function, and `*_in_place` needs the original placements plus a per-region
-  fit check with a fallback, so the session would hold one pack config and
-  `_pack_and_emit` would dispatch on `Packer`.
-  `tests/python/gen_packer_refactor_golden.py` pins the
-  pre-refactor layouts at the session layer.
+- **Pack settings:** `atlas_toolkit/packer.py`'s `resolve_packer` validates a
+  `PackOptions` and resolves it completely into a frozen `ResolvedPack` --
+  every switch the session already has, plus two Python-only `pack_pending`
+  keywords (`shelf_padding`, `mesh_footprint`) that `_pack_page` adds to a
+  copy of `get_nest_options()`. That dict itself stays the JS port. The
+  `ResolvedPack` is also the build cache key, so `packer="auto"` and the
+  packer it picks are one entry, and a bleed left auto is resolved at this
+  point rather than in `api.py`. `tests/python/gen_packer_refactor_golden.py`
+  pins the pre-refactor layouts at the session layer.
 
 ### Python tests
 

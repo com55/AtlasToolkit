@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 from tests.python.pma_cases import (
     GLOW_IN, GLOW_OUT, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow,
 )
@@ -103,7 +103,7 @@ def test_mesh_crop_force_resize_masks_the_scaled_image(monkeypatch):
 def test_packing_keeps_owned_glow_and_clears_the_rest(monkeypatch, packer, options):
     atlas = load(monkeypatch)
     atlas.replace({"N": img(with_glow(with_glow(premultiplied_pattern(16, 8, 7), *IN, GLOW_IN), *OUT, GLOW_OUT))})
-    built = atlas.build(packer=packer, packer_options=options)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     for name in ("G", "N", "K"):
         cropped = px(built.extract(name, mesh_crop=True))
         assert cropped[IN[1], IN[0]].tolist() == list(GLOW_IN), name
@@ -121,7 +121,7 @@ def test_gate_guard_no_glow_outside_hull_on_the_sheet(monkeypatch, packer, optio
     # modded N alike.
     atlas = load(monkeypatch)
     atlas.replace({"N": img(with_glow(premultiplied_pattern(16, 8, 7), *OUT, GLOW_OUT))})
-    built = atlas.build(packer=packer, packer_options=options)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     for name in ("G", "N"):
         raw = px(built.extract(name))
         assert raw[OUT[1], OUT[0]].tolist() == [0, 0, 0, 0], name
@@ -131,7 +131,7 @@ def test_gate_guard_no_glow_outside_hull_on_the_sheet(monkeypatch, packer, optio
 def test_polygons_interlocks_and_neighbours_stay_untouched(monkeypatch):
     atlas = load(monkeypatch)
     atlas.replace({"N": img(premultiplied_pattern(16, 8, 7))})
-    built = atlas.build(packer="polygons", packer_options=PackerOptions(padding=2))
+    built = atlas.build(options=PackOptions(packer="polygons", padding=2, try_keep_layout=False))
     boxes = {}
     for r in built.regions:
         x, y, w, h = r.bounds
@@ -158,7 +158,7 @@ def test_untouched_region_keeps_its_glow_with_mesh(monkeypatch, packer, options)
     atlas = load(monkeypatch)
     atlas.replace({"N": img(premultiplied_pattern(16, 8, 7))})
     before = px(atlas.extract("G", mesh_crop=True))
-    built = atlas.build(packer=packer, packer_options=options)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     assert np.array_equal(px(built.extract("G", mesh_crop=True)), before)
 
 
@@ -167,7 +167,7 @@ def test_untouched_region_keeps_its_whole_rect_without_mesh(monkeypatch, packer)
     atlas = load(monkeypatch, skeleton=False)
     atlas.replace({"N": img(premultiplied_pattern(16, 8, 7))})
     before = px(atlas.extract("G"))
-    built = atlas.build(packer=packer)
+    built = atlas.build(options=PackOptions(packer=packer, try_keep_layout=False))
     assert np.array_equal(px(built.extract("G")), before)
 
 

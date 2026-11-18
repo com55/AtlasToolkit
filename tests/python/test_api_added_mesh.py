@@ -7,7 +7,7 @@ from PIL import Image
 
 import atlas_toolkit.api as api
 import atlas_toolkit.engine.modifier as modifier_module
-from atlas_toolkit import PackerOptions, SpineAtlas
+from atlas_toolkit import PackOptions, SpineAtlas
 
 UPPER_LEFT = {"type": "Mesh", "uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 1, 2], "hull_length": 3}
 MESH = {"X": UPPER_LEFT}
@@ -38,37 +38,40 @@ def cut(image):
     return image.getpixel((1, 1))[3] == 255 and image.getpixel((11, 11))[3] == 0
 
 
+REPACK = {"try_keep_layout": False}
+
+
 @pytest.mark.parametrize("packer", ["shelf", "rectangles", "polygons"])
 def test_added_mesh_region_is_cut_in_a_repack(monkeypatch, packer):
     atlas = load(monkeypatch)
     atlas.add_region("X", opaque())
-    built = atlas.build(packer=packer, packer_options=PackerOptions(repack="always"))
+    built = atlas.build(options=PackOptions(packer=packer, **REPACK))
     assert cut(built.extract("X"))
 
 
 def test_mesh_aware_off_keeps_the_added_region_whole(monkeypatch):
     atlas = load(monkeypatch)
     atlas.add_region("X", opaque())
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=False, repack="always"))
+    built = atlas.build(options=PackOptions(mesh_aware=False, **REPACK))
     assert built.extract("X").getpixel((11, 11))[3] == 255
 
 
 def test_a_cut_never_touches_the_added_source(monkeypatch):
     atlas = load(monkeypatch)
     atlas.add_region("X", opaque())
-    first = atlas.build(packer_options=PackerOptions(repack="always"))
+    first = atlas.build(options=PackOptions(**REPACK))
     assert cut(first.extract("X"))
-    second = atlas.build(packer_options=PackerOptions(mesh_aware=False, repack="always"))
+    second = atlas.build(options=PackOptions(mesh_aware=False, **REPACK))
     assert second.extract("X").getpixel((11, 11))[3] == 255
 
 
 def test_a_child_atlas_finds_the_mesh_of_a_new_add(monkeypatch):
     atlas = load(monkeypatch, TEXT_WITH_X)
     atlas.rename_region("X", "Old")
-    child = atlas.build(packer_options=PackerOptions(repack="always"))
+    child = atlas.build(options=PackOptions(**REPACK))
     assert child._allowed is not None and "X" not in child._allowed
     child.add_region("X", opaque())
-    grandchild = child.build(packer_options=PackerOptions(repack="always"))
+    grandchild = child.build(options=PackOptions(**REPACK))
     assert cut(grandchild.extract("X"))
     assert "X" in grandchild._allowed
 
@@ -77,7 +80,7 @@ def test_looked_up_by_label_when_the_key_differs(monkeypatch):
     atlas = load(monkeypatch, TEXT_WITH_X)
     atlas.rename_region("X", "Old")
     atlas.add_region("X", opaque())  # internal key "X_2", label "X"
-    built = atlas.build(packer_options=PackerOptions(repack="always"))
+    built = atlas.build(options=PackOptions(**REPACK))
     assert cut(built.extract("X"))
 
 
@@ -85,7 +88,7 @@ def test_looked_up_by_label_after_renaming_the_added_key(monkeypatch):
     atlas = load(monkeypatch)
     atlas.add_region("Y", opaque())
     atlas.rename_region("Y", "X")
-    built = atlas.build(packer_options=PackerOptions(repack="always"))
+    built = atlas.build(options=PackOptions(**REPACK))
     assert cut(built.extract("X"))
 
 
@@ -100,7 +103,7 @@ def test_polygons_nests_the_added_region_by_its_hull(monkeypatch):
     monkeypatch.setattr(modifier_module, "nest_pack", recording)
     atlas = load(monkeypatch)
     atlas.add_region("X", opaque())
-    atlas.build(packer="polygons", packer_options=PackerOptions(repack="always"))
+    atlas.build(options=PackOptions(packer="polygons", **REPACK))
     added = [item for item in seen if item["name"] == "X"]
     assert added and 0 in set(added[0]["footprint"])
 
@@ -109,7 +112,7 @@ def test_polygons_nests_the_added_region_by_its_hull(monkeypatch):
 def test_added_mesh_label_joins_allowed(monkeypatch, mesh_aware):
     atlas = load(monkeypatch)
     atlas.add_region("X", opaque())
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=mesh_aware, repack="always"))
+    built = atlas.build(options=PackOptions(mesh_aware=mesh_aware, **REPACK))
     assert "X" in built._allowed
     assert cut(built.extract("X", mesh_crop=True))
 
@@ -118,7 +121,7 @@ def test_label_collision_masks_both_but_only_the_added_one_is_allowed(monkeypatc
     atlas = load(monkeypatch, TEXT_WITH_X)
     atlas.rename_region("X", "Old")
     atlas.add_region("X", opaque())
-    built = atlas.build(packer_options=PackerOptions(repack="always"))
+    built = atlas.build(options=PackOptions(**REPACK))
     assert cut(built.extract("Old")) and cut(built.extract("X"))
     assert "X" in built._allowed and "Old" not in built._allowed
 
@@ -126,5 +129,5 @@ def test_label_collision_masks_both_but_only_the_added_one_is_allowed(monkeypatc
 def test_added_mesh_region_is_cut_on_a_pma_page(monkeypatch):
     atlas = load(monkeypatch, pma=True)
     atlas.add_region("X", opaque(colour=(100, 80, 60, 255)), alpha_mode="premultiplied")
-    built = atlas.build(packer_options=PackerOptions(repack="always"))
+    built = atlas.build(options=PackOptions(**REPACK))
     assert built.extract("X").getpixel((11, 11)) == (0, 0, 0, 0)

@@ -6,6 +6,7 @@ import pytest
 import atlas_toolkit.api as api
 
 from atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
+from atlas_toolkit.packer import PackOptions
 from .host_fixtures import decode, one_page, two_pages, page_bytes
 
 
@@ -32,15 +33,22 @@ def test_replace_follows_a_rename_of_the_add():
     assert atlas.build().extract('renamed').size == (4, 5)
 
 
-@pytest.mark.parametrize('packer', ['shelf', 'rectangles', 'polygons', 'rectangles_in_place', 'polygons_in_place'])
-def test_composite_over_a_pristine_region_and_a_pending_add(packer, monkeypatch):
+# (packer, try_keep_layout): the old in-place packers were each base packer
+# with the layout kept; every case shares the composite image (each region
+# gets the whole image, which is what the assertions read back).
+@pytest.mark.parametrize('packer, keep_layout', [
+    ('shelf', True), ('rectangles', True), ('polygons', True),
+    ('rectangles', False), ('polygons', False),
+])
+def test_composite_over_a_pristine_region_and_a_pending_add(packer, keep_layout, monkeypatch):
     atlas = atlas_with_adds('n1')
     mesh = {"type": "Mesh", "uvs": [0, 0, 1, 0, 1, 1, 0, 1],
             "triangles": [0, 1, 2, 0, 2, 3], "hull_length": 4}
     monkeypatch.setattr(api, '_parse_skeleton', lambda data: {"attachments": {"b": mesh}})
     atlas.set_skeleton(b'mesh')
     atlas.replace_composite(['a', 'n1'], decode(page_bytes(3, 2)))
-    built = atlas.build(packer=packer)
+    built = atlas.build(options=PackOptions(
+        packer=packer, try_keep_layout=keep_layout, share_composite_image=True))
     assert built.extract('n1').tobytes() == decode(page_bytes(3, 2)).tobytes()
     assert built.extract('a').size == (3, 2)
 

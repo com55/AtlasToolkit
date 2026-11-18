@@ -1,29 +1,25 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Patch mode and the in-place packers agree, byte for byte, on add-only pages.
+"""Add-only pages keep their layout, byte for byte, over the patch-mode corpus.
 
-Spec 2026-11-18 "Engine clean-up": `patch()` is `place_in_place` with no mods
-and no removes, so the add-only corpus both paths were built for must give one
-answer. This lands on the current API, before the patch path is deleted, over
-the cases of tests/python/test_api_patch_mode.py and test_api_added_mesh.py.
+Spec 2026-11-18 "Engine clean-up": patch mode was `place_in_place` with no
+mods and no removes, so the add-only corpus both paths were built for must
+give one answer. The digest pins below are that answer: captured from the old
+patch path with bleed=False, per the spec's "the old bytes win" rule. The
+two-sided patched-vs-in-place comparison is gone with the patch path; the
+pins are what guards the one keep-layout path now.
 
-Bleed is off on both sides: with auto bleed the in-place packers force a split
-and so bleed on, patch mode does not, and the pixels differ for a reason that
-is not the placement. Bleed is a later pass over a packed page anyway.
-
-Once the patch path is gone (Tasks 3-4) the two-sided comparison compares the
-one path with itself; the pinned SHA-256 digests are what keeps guarding then.
-They were captured from the patch path of the current code with bleed=False,
-per the spec's "the old bytes win" rule.
+Bleed is off: with auto bleed a composite split bleeds, and the pins predate
+that being the default. Bleed is a later pass over a packed page anyway.
 
 Mutation sweep, 2026-11-18 (8 mutations on place_in_place, all red): gap off
 by one, paste at origin, no sprite rotation, size ignores growth, base pixels
 truncated, no hull cut, dedup off, and "do not clear covered pixels". The
-last two live in code both paths share, so the two-sided comparison passes
-them -- only the pins catch those, which is why the corpus carries
-identical_adds and add_over_cleared_pixels.
+last two live in code every path shares, so only the pins catch those, which
+is why the corpus carries identical_adds and add_over_cleared_pixels.
 """
 import hashlib
+import dataclasses
 from dataclasses import dataclass
 from typing import Callable
 
@@ -32,7 +28,7 @@ import pytest
 from PIL import Image
 
 import atlas_toolkit.api as api
-from atlas_toolkit import PackerOptions, SpineAtlas
+from atlas_toolkit import PackOptions, SpineAtlas
 from tests.python import test_api_added_mesh as added_mesh
 from tests.python import test_api_patch_mode as patch_mode
 
@@ -170,8 +166,8 @@ def _mesh_atlas_mesh_aware_off(monkeypatch):
 class Case:
     build: Callable
     padding: int = 2
-    mesh: bool = False   # also compare polygons vs polygons_in_place
-    options: tuple = ()  # extra PackerOptions fields, e.g. (("mesh_aware", False),)
+    mesh: bool = False   # also run the polygons family
+    options: tuple = ()  # extra PackOptions fields, e.g. (("mesh_aware", False),)
 
 
 CASES = {
@@ -188,29 +184,24 @@ CASES = {
     "add_over_cleared_pixels": Case(_add_over_cleared_pixels, mesh=True),
     "add_two_remove_one": Case(_add_two_remove_one),
     "pma_page_add": Case(_pma_page_add),
-    # mesh_aware=False forbids polygons, so only the rectangles pair applies.
+    # mesh_aware=False forbids polygons, so only the rectangles family applies.
     "mesh_atlas_mesh_aware_off": Case(_mesh_atlas_mesh_aware_off, options=(("mesh_aware", False),)),
 }
 
 
-def _options(case: Case) -> PackerOptions:
-    return PackerOptions(padding=case.padding, bleed=False, **dict(case.options))
+def _options(case: Case) -> PackOptions:
+    return PackOptions(try_keep_layout=True, padding=case.padding, bleed=False, **dict(case.options))
 
 
-def _pairs(case: Case) -> tuple[tuple[str, str], ...]:
-    """(patch path, in-place path) per packer family: a plain packer with the
-    default repack="auto" patches add-only pages, its _in_place twin keeps
-    the layout on every edited page."""
-    pairs = (("rectangles", "rectangles_in_place"),)
-    if case.mesh:
-        pairs += (("polygons", "polygons_in_place"),)
-    return pairs
+def _packers(case: Case) -> tuple[str, ...]:
+    """One entry per packer family the case can run."""
+    return ("rectangles", "polygons") if case.mesh else ("rectangles",)
 
 
 PARAMS = [
-    pytest.param(name, pair, id=f"{name}-{pair[0]}")
+    pytest.param(name, packer, id=f"{name}-{packer}")
     for name, case in CASES.items()
-    for pair in _pairs(case)
+    for packer in _packers(case)
 ]
 
 
@@ -225,17 +216,6 @@ def digests(built):
     }
 
 
-def assert_same(left, right):
-    """Equal text, equal page names, equal decoded RGBA per page."""
-    assert left.atlas_text == right.atlas_text
-    assert left.pages.keys() == right.pages.keys()
-    for name in left.pages:
-        assert np.array_equal(
-            np.asarray(left.pages[name].convert("RGBA")),
-            np.asarray(right.pages[name].convert("RGBA")),
-        ), name
-
-
 def assert_layout_kept(atlas, built):
     """Every pristine region is where it was, so this case really took the
     keep-the-layout path -- a page that fell back to a repack would place
@@ -247,23 +227,9 @@ def assert_layout_kept(atlas, built):
         assert (tuple(region.bounds), region.rotate) == (bounds, rotate), name
 
 
-@pytest.mark.parametrize("case, packers", PARAMS)
-def test_add_only_patch_equals_in_place(monkeypatch, case, packers):
-    spec = CASES[case]
-    patch_packer, in_place_packer = packers
-    atlas = spec.build(monkeypatch)
-    options = _options(spec)
-    patched = atlas.build(packer=patch_packer, packer_options=options)
-    in_place = atlas.build(packer=in_place_packer, packer_options=options)
-    assert_same(patched, in_place)
-    assert_layout_kept(atlas, patched)
-    assert_layout_kept(atlas, in_place)
-
-
 # Captured once from the patch path of the code as of 2026-11-18
-# (PackerOptions(bleed=False), padding as in CASES). Spec: if the in-place
-# path ever disagrees, these old bytes win -- fix the in-place path, do not
-# re-pin.
+# (bleed=False, padding as in CASES). Spec: if the keep-layout path ever
+# disagrees, these old bytes win -- fix place_in_place, do not re-pin.
 PINS = {
     ("plain_add", "rectangles"): {
         "atlas": "74a26c0bc8b0dcdde3afde5a3b1f6841aa89d8d4060b93afea1cb1a41d7b2077",
@@ -371,8 +337,10 @@ PINS = {
 }
 
 
-@pytest.mark.parametrize("case, packers", PARAMS)
-def test_add_only_bytes_pinned(monkeypatch, case, packers):
+@pytest.mark.parametrize("case, packer", PARAMS)
+def test_add_only_bytes_pinned(monkeypatch, case, packer):
     spec = CASES[case]
-    built = spec.build(monkeypatch).build(packer=packers[0], packer_options=_options(spec))
-    assert digests(built) == PINS[(case, packers[0])]
+    atlas = spec.build(monkeypatch)
+    built = atlas.build(options=dataclasses.replace(_options(spec), packer=packer))
+    assert digests(built) == PINS[(case, packer)]
+    assert_layout_kept(atlas, built)

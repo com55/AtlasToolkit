@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
 """alpha_mode on the SpineAtlas edit and extract methods (spec 2026-10-28-alpha-mode)."""
+import dataclasses
 import pickle
 
 import numpy as np
@@ -9,7 +10,7 @@ from PIL import Image
 
 from atlas_toolkit import AlphaMode, MixedAlphaGroup
 from atlas_toolkit.api import AtlasError, SpineAtlas
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 from tests.python.pma_cases import GLOW_IN, premultiplied_pattern, with_glow
 
@@ -19,7 +20,8 @@ MIXED = (
     "pma.png\nsize: 8,8\npma: true\nP\n bounds: 0,0,8,8\n"
     "\nst.png\nsize: 8,8\nS\n bounds: 0,0,8,8\n"
 )
-NO_MESH = PackerOptions(mesh_aware=False)
+# The old build defaults: always repack, composite shared.
+NO_MESH = PackOptions(mesh_aware=False, try_keep_layout=False, share_composite_image=True)
 
 
 def straight_pattern(width, height, seed):
@@ -61,7 +63,7 @@ def load(text):
 
 
 def built(atlas, **kwargs):
-    return atlas.build(packer_options=NO_MESH, **kwargs)
+    return atlas.build(options=dataclasses.replace(NO_MESH, **kwargs))
 
 
 # -- same space is a no-op (spec §3.3, review I-1) ---------------------------
@@ -238,7 +240,7 @@ def test_all_pma_group_converts_once_and_round_trips():
     straight = straight_pattern(8, 8, 6)
     atlas = load(PMA)
     atlas.replace_composite(["A", "B"], img(straight), alpha_mode="straight")
-    out = built(atlas, split_composite=True)
+    out = built(atlas, share_composite_image=False)
     assert np.array_equal(arr(out.extract_composite(["A", "B"])), premultiply(straight))
     assert np.array_equal(
         arr(out.extract_composite(["A", "B"], alpha_mode="straight")), unpremultiply(premultiply(straight)),

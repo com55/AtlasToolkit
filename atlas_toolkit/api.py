@@ -28,7 +28,7 @@ from atlas_toolkit.domain.packing import CanvasTooLargeError
 from atlas_toolkit.domain.region_ops import scaled_region_geometry
 from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
 from atlas_toolkit.engine.extraction import hull_polyline
-from atlas_toolkit.packer import Packer, PackerOptions, ResolvedPack, resolve_packer
+from atlas_toolkit.packer import PackOptions, Packer, ResolvedPack, resolve_packer
 from atlas_toolkit.mesh.lookup import build_mesh_lookup
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
@@ -47,21 +47,6 @@ _BUILD_CACHE_SIZE = 8
 # ... and at most this many bytes of those edited pages' pixels, so large
 # atlases keep fewer packs. The newest pack is always kept.
 _BUILD_CACHE_BYTES = 512 * 1024 * 1024
-
-
-def _auto_bleed(split: bool) -> bool:
-    """PackerOptions(bleed=None): bleed when the pack splits composites,
-    where cut pieces meet edge to edge."""
-    return split
-
-
-def _pack_options(resolved: ResolvedPack, split_composite: bool) -> tuple[ResolvedPack, bool]:
-    """The build cache key: in-place modes always split (spec 2026-11-05
-    R5) and an auto bleed is resolved, so equivalent settings share one entry."""
-    split = bool(split_composite) or resolved.in_place
-    if resolved.bleed is None:
-        resolved = dataclasses.replace(resolved, bleed=_auto_bleed(split))
-    return resolved, split
 
 
 class AtlasError(Exception):
@@ -638,16 +623,15 @@ class SpineAtlas:
         self._build_cache = None
         self._refresh_names()
 
-    def _cache_hit(self, options: tuple) -> tuple | None:
+    def _cache_hit(self, options: ResolvedPack) -> tuple | None:
         """The cached pack for `options`: same options, or a pack that never
         used its padding (key stored with padding 0) with the rest equal."""
-        resolved, split = options
-        padding_free = (dataclasses.replace(resolved, padding=0), split)
+        padding_free = dataclasses.replace(options, padding=0)
         return next(
             (entry for entry in self._build_cache or () if entry[0] in (options, padding_free)), None,
         )
 
-    def _cached_pack(self, options: tuple) -> tuple:
+    def _cached_pack(self, options: ResolvedPack) -> tuple:
         """(text, pages, allowed) for the current edits packed with `options`.
 
         The last _BUILD_CACHE_SIZE packs are kept (within _BUILD_CACHE_BYTES
@@ -660,10 +644,10 @@ class SpineAtlas:
         hit = self._cache_hit(options)
         if hit is None:
             report: dict = {}
-            text, pages = self._pack(*options, share_untouched=True, report=report)
+            text, pages = self._pack(options, share_untouched=True, report=report)
             key = options
             if not report.get("padding_used", True):
-                key = (dataclasses.replace(options[0], padding=0), options[1])
+                key = dataclasses.replace(options, padding=0)
             hit = (key, text, pages, self._child_allowed())
         if not entries or entries[-1] is not hit:
             kept = tuple(entry for entry in entries if entry is not hit)
@@ -749,29 +733,29 @@ class SpineAtlas:
     ) -> None:
         """Replace several regions with one image.
 
-        By default each region's whole canvas becomes the image at the image's
-        own size (offsets are dropped), as in the app; the regions share that
-        one sprite. With build(split_composite=True) the image is instead
+        By default (PackOptions(share_composite_image=False)) the image is
         taken as the inverse of extract_composite(force_resize=True): it is
-        stored at its own size and cut into one piece per region.
-        build(packer="rectangles_in_place" / "polygons_in_place") always splits,
-        and draws each piece into its region's own slot when the image is
-        exactly that region's canvas size and the page's other edits fit
-        (otherwise that page is repacked). When the
-        build is mesh-aware (packer "polygons", or PackerOptions mesh_aware
-        on, which is the default whenever the atlas has usable mesh data), a
-        region with mesh owns its mesh hull; otherwise each region owns its
-        whole rect (its offsets canvas scaled to the image).
+        stored at its own size and cut into one piece per region, and with
+        try_keep_layout each piece is drawn into its region's own slot when
+        the image is exactly that region's canvas size and the page's other
+        edits fit. With share_composite_image=True each region's whole canvas
+        becomes the image at the image's own size instead (offsets are
+        dropped), as in the app: the regions share that one sprite, and a page
+        holding such a replace is repacked, never kept. When the build is
+        mesh-aware (packer "polygons", or PackOptions mesh_aware on, which is
+        the default whenever the atlas has usable mesh data), a region with
+        mesh owns its mesh hull; otherwise each region owns its whole rect
+        (its offsets canvas scaled to the image).
         Pixels outside every owner are dropped. A semi-transparent pixel
         several owners cover has its alpha split between them, so drawing
         them all gives the image back; a region drawn on its own looks
         fainter there, and rects overlap far more than hulls. A group keeps
         the default behaviour when any of its regions is a nine-patch or has
         malformed offsets (a zero-size canvas). Regions on several pages
-        work: each page gets its own copy, or with split_composite=True its
-        own pieces, stored at the image's resolution. On pma pages the image
-        is read premultiplied. A group whose regions all live on pma pages,
-        built with split_composite=True, comes back from extract_composite
+        work: each page gets its own pieces, or its own copy of the whole
+        image, stored at the image's resolution. On pma pages the image is
+        read premultiplied. A group whose regions all live on pma pages, built
+        with share_composite_image=False, comes back from extract_composite
         exactly as long as it is extracted with the same names in the same
         order, no region is resized (force_resize over differing canvas sizes
         is lossy) and mesh_crop matches the build (True after a mesh-aware
@@ -879,8 +863,16 @@ class SpineAtlas:
             )
         return frozenset(allowed)
 
+    def _resolve(self, options: PackOptions | None) -> ResolvedPack:
+        """Validate `options` for this atlas and resolve it fully, raising
+        SkeletonUnavailable when the pack needs mesh data it does not have."""
+        resolved, needs_mesh = resolve_packer(options, mesh_ready=self._mesh_reason is None)
+        if needs_mesh:
+            self._require_mesh()
+        return resolved
+
     def _pack(
-        self, resolved: ResolvedPack, split_composite: bool, *, share_untouched: bool = False,
+        self, resolved: ResolvedPack, *, share_untouched: bool = False,
         report: dict | None = None,
     ) -> tuple[str, dict]:
         session = self._session
@@ -891,12 +883,12 @@ class SpineAtlas:
             # Repack masking -- not set_mesh_mask_enabled, which is mesh_crop.
             session.set_mesh_aware_repack_enabled(resolved.mesh_aware)
             return session.pack_pending(
-                split_composite=split_composite,  # by keyword: tests patch pack_pending(self, **kw)
+                split_composite=resolved.split,  # by keyword: tests patch pack_pending(self, **kw)
                 shelf_padding=0 if resolved.nest else resolved.padding,
                 mesh_footprint=resolved.mesh_footprint,
-                patch_adds=resolved.patch_adds, patch_padding=resolved.padding,
+                patch_adds=False, patch_padding=resolved.padding,
                 added_mesh_lookup=self._added_mesh_lookup(resolved),
-                in_place=resolved.in_place,
+                in_place=resolved.keep_layout,
                 share_untouched=share_untouched,
                 report=report,
                 bleed=resolved.bleed,
@@ -908,92 +900,62 @@ class SpineAtlas:
             session.set_nest_gap_distance(4)
             session.set_mesh_aware_repack_enabled(False)
 
-    def pack(
-        self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
-        split_composite: bool = False,
-    ) -> tuple[str, dict[str, Image.Image]]:
+    def pack(self, *, options: PackOptions | None = None) -> tuple[str, dict[str, Image.Image]]:
         """Pack edits without creating a child atlas.
 
         Returned images must not be mutated: untouched pages are the pristine
         images; edited pages are shared with the build cache.
         """
-        resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
-        if needs_mesh:
-            self._require_mesh()
+        resolved = self._resolve(options)
         if not self.has_changes:
             return self._text, {
                 name: self._session._raster.view(handle)
                 for name, handle in self._session._page_images.items()
             }
-        text, pages, _ = self._cached_pack(_pack_options(resolved, split_composite))
+        text, pages, _ = self._cached_pack(resolved)
         return text, pages
 
-    def pack_is_cached(
-        self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
-        split_composite: bool = False,
-    ) -> bool:
+    def pack_is_cached(self, *, options: PackOptions | None = None) -> bool:
         """True when pack() with these settings returns without packing: the
         atlas has no edits, or the result is cached (see pack). Raises like
         pack() for invalid settings, SkeletonUnavailable included."""
-        resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
-        if needs_mesh:
-            self._require_mesh()
+        resolved = self._resolve(options)
         if not self.has_changes:
             return True
-        return self._cache_hit(_pack_options(resolved, split_composite)) is not None
+        return self._cache_hit(resolved) is not None
 
-    def build(
-        self, *, packer: Packer | str = Packer.SHELF, packer_options: PackerOptions | None = None,
-        split_composite: bool = False,
-    ) -> "SpineAtlas":
+    def build(self, *, options: PackOptions | None = None) -> "SpineAtlas":
         """Pack the recorded edits once and return a new SpineAtlas.
 
-        `packer`: "shelf" (default), "rectangles" (nest packing, solid
-        rects), "polygons" (nest packing on mesh silhouettes; needs mesh
-        data), or "rectangles_in_place" / "polygons_in_place": a page whose
-        edits fit keeps its layout -- removed regions leave empty space, a
-        replaced region whose new pixels fit its old slot is drawn there
-        (its rect and offsets unchanged), additions go into free space --
-        and any other edited page is repacked with "rectangles" /
-        "polygons". These two always split replace_composite images
-        (split_composite is ignored) and refuse PackerOptions(repack="always").
-        "grid" raises NotImplementedError for now.
-        `packer_options` is a PackerOptions:
-        `padding` (pixels between images, default 2) and `mesh_aware`
-        (default auto: on when the atlas has usable mesh data, which
-        SpineAtlas.open picks up from a sibling .skel file).
-        `PackerOptions.repack`: "auto" (default) places additions into the free
-        space of a page whose only edits are adds and renames, growing it
-        right/down only when they do not fit. Existing regions keep their
-        place and every pixel Spine renders. "always" repacks every edited
-        page.
+        `options` is a PackOptions; see its docstring for every field:
+        `packer` (default "auto": "polygons" when the atlas has usable mesh
+        data, otherwise "rectangles"), `padding` (default 2), `mesh_aware`,
+        `try_keep_layout` (default True: an edited page whose edits fit
+        keeps its layout; a page that cannot, or that holds a shared-image
+        composite replace, is repacked), `bleed`, and
+        `share_composite_image` (default False: a replace_composite image is
+        cut into one piece per region).
+
         Mesh-aware cuts each region's pixels outside its mesh hull on repacked
-        pages. On patched pages it cuts only added regions; never-rendered
+        pages. On kept pages it cuts only added regions; never-rendered
         pixels outside an existing mesh hull may be cleared where a new region
         lands. Untouched and rename-only pages keep their pixels.
         An unedited atlas is returned as is, never repacked or masked, but its
         settings are still checked."""
-        resolved, needs_mesh = resolve_packer(packer, packer_options, mesh_ready=self._mesh_reason is None)
-        if needs_mesh:
-            self._require_mesh()
+        resolved = self._resolve(options)
         if not self.has_changes:
             return SpineAtlas._create(
                 self._text, self._session.export_pages(), self._skeleton, self._allowed,
                 (self._mesh_reason, self._mesh_lookup),
             )
-        # Spec 2026-11-05 R5: in-place modes always split composites, so both
-        # split_composite values share one cache entry.
-        text, pages, allowed = self._cached_pack(_pack_options(resolved, split_composite))
+        text, pages, allowed = self._cached_pack(resolved)
         return SpineAtlas._create(text, pages, self._skeleton, allowed, (self._mesh_reason, self._mesh_lookup))
 
-    def save(
-        self, atlas_path: str | os.PathLike, *, packer: Packer | str = Packer.SHELF,
-        packer_options: PackerOptions | None = None, split_composite: bool = False,
-    ) -> None:
+    def save(self, atlas_path: str | os.PathLike, *, options: PackOptions | None = None) -> None:
         """build() with the same arguments, then write the .atlas text and its
-        page PNGs next to it. The pack settings (and the auto mesh_aware
-        default) are build()'s."""
-        target = self.build(packer=packer, packer_options=packer_options, split_composite=split_composite)
+        page PNGs next to it. The pack settings (and the auto defaults) are
+        build()'s."""
+        target = self.build(options=options)
         text, pngs = target._session.save()
         path = Path(atlas_path)
         root = path.parent.resolve()

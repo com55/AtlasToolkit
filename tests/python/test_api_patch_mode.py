@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""SpineAtlas.build() patches pages whose only edits are adds and renames (spec 2026-10-31)."""
+"""SpineAtlas.build() keeps the layout of a page whose edits fit: adds go into
+free space (spec 2026-10-31's patch mode, spec 2026-11-18's try_keep_layout)."""
 import time
 
 import numpy as np
@@ -8,7 +9,7 @@ import pytest
 from PIL import Image
 
 import atlas_toolkit.api as api
-from atlas_toolkit import CanvasTooLarge, PackerOptions, SpineAtlas
+from atlas_toolkit import CanvasTooLarge, PackOptions, SpineAtlas
 from atlas_toolkit.document import AtlasDocument
 from atlas_toolkit.domain.converter import auto_convert_atlas
 
@@ -53,17 +54,17 @@ def test_adds_only_patches():
     assert patched(built) and bounds(built, "N") == (36, 0, 10, 10, 0)
 
 
-def test_always_repacks():
+def test_try_keep_layout_false_repacks():
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
-    assert not patched(atlas.build(packer_options=PackerOptions(repack="always")))
+    assert not patched(atlas.build(options=PackOptions(try_keep_layout=False)))
 
 
 @pytest.mark.parametrize("packer", ["shelf", "rectangles"])
 def test_every_packer_patches(packer):
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
-    assert patched(atlas.build(packer=packer))
+    assert patched(atlas.build(options=PackOptions(packer=packer)))
 
 
 def test_add_and_rename_patches():
@@ -74,18 +75,32 @@ def test_add_and_rename_patches():
     assert patched(built) and bounds(built, "A2") == (0, 0, 16, 16, 0)
 
 
-def test_add_and_replace_pristine_repacks():
+def test_add_and_replace_pristine_keeps_the_layout_when_it_fits():
+    atlas = SpineAtlas.load(TEXT, {"p.png": page()})
+    atlas.add_region("N", img(10, 10))
+    atlas.replace({"A": img(16, 16, 9)})   # A's own slot: drawn there
+    assert patched(atlas.build())
+
+
+def test_add_and_replace_pristine_repacks_without_keep_layout():
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
     atlas.replace({"A": img(16, 16, 9)})
-    assert not patched(atlas.build())
+    assert not patched(atlas.build(options=PackOptions(try_keep_layout=False)))
 
 
-def test_add_and_remove_pristine_repacks():
+def test_add_and_remove_pristine_keeps_the_layout():
+    atlas = SpineAtlas.load(TEXT + "C\n bounds: 32,0,8,8\n", {"p.png": page(rects=((0, 0, 16, 16), (16, 0, 16, 16), (32, 0, 8, 8)))})
+    atlas.add_region("N", img(10, 10))
+    atlas.remove_region("C")               # removed: its space stays empty
+    assert patched(atlas.build())
+
+
+def test_add_and_remove_pristine_repacks_without_keep_layout():
     atlas = SpineAtlas.load(TEXT + "C\n bounds: 32,0,8,8\n", {"p.png": page(rects=((0, 0, 16, 16), (16, 0, 16, 16), (32, 0, 8, 8)))})
     atlas.add_region("N", img(10, 10))
     atlas.remove_region("C")
-    assert not patched(atlas.build())
+    assert not patched(atlas.build(options=PackOptions(try_keep_layout=False)))
 
 
 def test_add_two_remove_one_patches_the_survivor():
@@ -102,20 +117,34 @@ def test_renames_only_keep_the_single_page_image():
     atlas.rename_region("A", "A2")
     built = atlas.build()
     assert built.pages["p.png"].tobytes() == atlas.pages["p.png"].tobytes()
-    assert not patched(atlas.build(packer_options=PackerOptions(repack="always")))
+    assert not patched(atlas.build(options=PackOptions(try_keep_layout=False)))
 
 
-def test_three_pages_patch_repack_and_keep():
-    text = (TEXT + "\nq.png\nsize: 64,32\nC\n bounds: 0,0,16,16\nD\n bounds: 16,0,16,16\n"
-            "\nr.png\nsize: 64,32\nE\n bounds: 0,0,16,16\n")
-    pages = {"p.png": page(), "q.png": page(seed=2), "r.png": page(rects=((0, 0, 16, 16),), seed=3)}
-    atlas = SpineAtlas.load(text, pages)
+THREE_PAGES = (TEXT + "\nq.png\nsize: 64,32\nC\n bounds: 0,0,16,16\nD\n bounds: 16,0,16,16\n"
+               "\nr.png\nsize: 64,32\nE\n bounds: 0,0,16,16\n")
+THREE_PAGE_IMAGES = {
+    "p.png": page(), "q.png": page(seed=2), "r.png": page(rects=((0, 0, 16, 16),), seed=3),
+}
+
+
+def _three_pages():
+    atlas = SpineAtlas.load(THREE_PAGES, dict(THREE_PAGE_IMAGES))
     atlas.add_region("N", img(10, 10), page="p.png")
     atlas.replace({"C": img(16, 16, 9)})
-    built = atlas.build()
+    return atlas
+
+
+def test_three_pages_all_keep_their_layout():
+    built = _three_pages().build()
     assert patched(built)
+    assert bounds(built, "D")[:2] == (16, 0)      # kept in place too
+    assert built.pages["r.png"].tobytes() == THREE_PAGE_IMAGES["r.png"].tobytes()
+
+
+def test_three_pages_repacked_when_the_layout_is_not_kept():
+    built = _three_pages().build(options=PackOptions(try_keep_layout=False))
+    assert not patched(built)
     assert bounds(built, "D")[:2] != (16, 0)
-    assert built.pages["r.png"].tobytes() == pages["r.png"].tobytes()
 
 
 def test_image_size_unlike_declared_size_repacks():
@@ -158,14 +187,14 @@ def test_pristine_lines_equal_the_canonical_form():
 def test_padding_reaches_the_patch(padding, x, packer):
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
-    assert bounds(atlas.build(packer=packer, packer_options=PackerOptions(padding=padding)), "N")[0] == x
+    assert bounds(atlas.build(options=PackOptions(packer=packer, padding=padding)), "N")[0] == x
 
 
 def test_many_adds_keep_padding_between_everything():
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     for i in range(20):
         atlas.add_region(f"N{i}", img(5 + i % 3, 4, seed=i))
-    built = atlas.build(packer_options=PackerOptions(padding=2))
+    built = atlas.build(options=PackOptions(padding=2))
     assert bounds(built, "B")[:2] == (16, 0)
 
     def rect(reg):
@@ -190,7 +219,7 @@ def test_shelf_patch_may_rotate_180(monkeypatch):
     text = "p.png\nsize: 40,40\nA\n bounds: 0,0,8,8\n"
     atlas = SpineAtlas.load(text, {"p.png": Image.fromarray(rgba, "RGBA")}, skeleton=b"x")
     atlas.add_region("T", img(12, 12))
-    built = atlas.build(packer_options=PackerOptions(padding=1))
+    built = atlas.build(options=PackOptions(padding=1))
     assert bounds(built, "T") == (16, 16, 12, 12, 180)
 
 
@@ -201,7 +230,7 @@ def test_renamed_pristine_region_keeps_its_hull(monkeypatch):
                             {"p.png": Image.fromarray(pattern(32, 32), "RGBA")}, skeleton=b"x")
     atlas.rename_region("M", "Z")
     atlas.add_region("N", img(6, 6))
-    assert atlas.build(packer_options=PackerOptions(padding=1)).pages["p.png"].size == (32, 32)
+    assert atlas.build(options=PackOptions(padding=1)).pages["p.png"].size == (32, 32)
 
 
 def test_renamed_pristine_region_keeps_its_hull_under_polygons(monkeypatch):
@@ -211,7 +240,7 @@ def test_renamed_pristine_region_keeps_its_hull_under_polygons(monkeypatch):
                             {"p.png": Image.fromarray(pattern(32, 32), "RGBA")}, skeleton=b"x")
     atlas.rename_region("M", "Z")
     atlas.add_region("N", img(6, 6))
-    assert atlas.build(packer="polygons", packer_options=PackerOptions(padding=1)).pages["p.png"].size == (32, 32)
+    assert atlas.build(options=PackOptions(packer="polygons", padding=1)).pages["p.png"].size == (32, 32)
 
 
 def test_pma_pristine_regions_extract_unchanged():
@@ -234,13 +263,13 @@ def test_too_large_names_the_page():
 
 def test_unedited_build_still_validates_repack():
     with pytest.raises(ValueError):
-        SpineAtlas.load(TEXT, {"p.png": page()}).build(packer_options=PackerOptions(repack="never"))
+        SpineAtlas.load(TEXT, {"p.png": page()}).build(options=PackOptions(packer="never"))
 
 
-def test_auto_and_always_do_not_share_the_cache():
+def test_keep_layout_and_repack_do_not_share_the_cache():
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
-    assert atlas.build().atlas_text != atlas.build(packer_options=PackerOptions(repack="always")).atlas_text
+    assert atlas.build().atlas_text != atlas.build(options=PackOptions(try_keep_layout=False)).atlas_text
 
 
 def test_patch_on_a_large_page_is_not_slow():
@@ -258,7 +287,7 @@ def test_patch_on_a_large_page_is_not_slow():
     assert time.monotonic() - start < 120  # ~12 s for the search alone on the Pi when planned
 
 
-def test_always_after_auto_packs_again(monkeypatch):
+def test_repack_then_keep_layout_hits_the_first_entry(monkeypatch):
     from atlas_toolkit.engine.session import AtlasSession
     calls = []
     original = AtlasSession.pack_pending
@@ -266,7 +295,7 @@ def test_always_after_auto_packs_again(monkeypatch):
     atlas = SpineAtlas.load(TEXT, {"p.png": page()})
     atlas.add_region("N", img(10, 10))
     atlas.build()
-    atlas.build(packer_options=PackerOptions(repack="always"))
+    atlas.build(options=PackOptions(try_keep_layout=False))
     atlas.build()
-    # auto and always are separate cache entries; the second auto is a hit.
-    assert [kw["patch_adds"] for kw in calls] == [True, False]
+    # keeping the layout and repacking are separate cache entries; the second keep is a hit.
+    assert [kw["in_place"] for kw in calls] == [True, False]

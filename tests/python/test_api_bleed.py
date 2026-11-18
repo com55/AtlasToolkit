@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""build/pack(packer_options=PackerOptions(bleed=True)): Spine's packer Bleed
-on every page the pack writes that is not pma."""
+"""build/pack(PackOptions(bleed=True)): Spine's packer Bleed on every page the
+pack writes that is not pma."""
+import dataclasses
+
 import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit import PackerOptions, SpineAtlas
+from atlas_toolkit import PackOptions, SpineAtlas
 from atlas_toolkit.domain.bleed import color_bleed
 
 TEXT = (
@@ -38,10 +40,12 @@ def atlas(pma=False):
     return built
 
 
-@pytest.mark.parametrize("packer", ["shelf", "rectangles", "rectangles_in_place"])
-def test_bleed_colours_only_transparent_pixels_of_written_straight_pages(packer):
-    plain = atlas().build(packer=packer, packer_options=PackerOptions(bleed=False))
-    bled = atlas().build(packer=packer, packer_options=PackerOptions(bleed=True))
+@pytest.mark.parametrize("packer, keep_layout", [
+    ("shelf", True), ("rectangles", True), ("rectangles", False),
+])
+def test_bleed_colours_only_transparent_pixels_of_written_straight_pages(packer, keep_layout):
+    plain = atlas().build(options=PackOptions(packer=packer, try_keep_layout=keep_layout, bleed=False))
+    bled = atlas().build(options=PackOptions(packer=packer, try_keep_layout=keep_layout, bleed=True))
     assert bled.atlas_text == plain.atlas_text
     before = np.asarray(plain.pages["p.png"])
     after = np.asarray(bled.pages["p.png"])
@@ -52,34 +56,42 @@ def test_bleed_colours_only_transparent_pixels_of_written_straight_pages(packer)
 
 
 def test_bleed_skips_pma_pages():
-    plain = atlas(pma=True).build()
-    bled = atlas(pma=True).build(packer_options=PackerOptions(bleed=True))
+    plain = atlas(pma=True).build(options=PackOptions(bleed=False))
+    bled = atlas(pma=True).build(options=PackOptions(bleed=True))
     assert np.asarray(bled.pages["p.png"]).tobytes() == np.asarray(plain.pages["p.png"]).tobytes()
 
 
 @pytest.mark.parametrize("packer, split, expected", [
     ("shelf", False, False), ("shelf", True, True), ("rectangles", True, True),
-    ("rectangles_in_place", False, True),  # in-place always splits
 ])
 def test_default_bleed_follows_composite_splitting(packer, split, expected):
     a = atlas()
-    auto = a.pack(packer=packer, split_composite=split)
-    explicit = a.pack(packer=packer, packer_options=PackerOptions(bleed=expected), split_composite=split)
+    keeping = PackOptions(packer=packer, share_composite_image=not split)
+    auto = a.pack(options=keeping)
+    explicit = a.pack(options=dataclasses.replace(keeping, bleed=expected))
     assert np.asarray(auto[1]["p.png"]).tobytes() == np.asarray(explicit[1]["p.png"]).tobytes()
-    other = a.pack(packer=packer, packer_options=PackerOptions(bleed=not expected), split_composite=split)
+    other = a.pack(options=dataclasses.replace(keeping, bleed=not expected))
     assert np.asarray(other[1]["p.png"]).tobytes() != np.asarray(auto[1]["p.png"]).tobytes()
 
 
-def test_bleed_defaults_off_and_is_cached_separately():
+def test_explicit_bleed_off_is_the_same_auto_entry_when_the_pack_is_shared():
+    # A shared composite image does not split, so auto bleed is off there too.
     a = atlas()
-    off = a.pack()
-    on = a.pack(packer_options=PackerOptions(bleed=True))
-    assert a.pack(packer_options=PackerOptions(bleed=False))[1] is off[1]
+    auto = a.pack(options=PackOptions(share_composite_image=True))
+    explicit = a.pack(options=PackOptions(share_composite_image=True, bleed=False))
+    assert auto[1] is explicit[1]
+
+
+def test_bleed_defaults_on_with_the_default_split_and_is_cached_separately():
+    a = atlas()
+    on = a.pack()
+    off = a.pack(options=PackOptions(bleed=False))
+    assert a.pack(options=PackOptions(bleed=True))[1] is on[1]
     assert np.asarray(on[1]["p.png"]).tobytes() != np.asarray(off[1]["p.png"]).tobytes()
 
 
 def test_bleed_survives_save(tmp_path):
     a = atlas()
-    a.save(tmp_path / "out.atlas", packer_options=PackerOptions(bleed=True))
+    a.save(tmp_path / "out.atlas", options=PackOptions(bleed=True))
     saved = np.asarray(Image.open(tmp_path / "p.png").convert("RGBA"))
-    assert (saved == np.asarray(a.build(packer_options=PackerOptions(bleed=True)).pages["p.png"])).all()
+    assert (saved == np.asarray(a.build(options=PackOptions(bleed=True)).pages["p.png"])).all()

@@ -6,28 +6,51 @@ the full notes and screenshots.
 
 ## [Unreleased] - Python engine
 
+### Breaking: `PackOptions`
+- `build()`, `save()`, `pack()` and `pack_is_cached()` take one
+  `options=PackOptions(...)` instead of `packer=`, `packer_options=` and
+  `split_composite=`. `PackerOptions` is gone; the old keywords raise
+  `TypeError`.
+- `PackOptions` fields: `packer` (`"auto"` default, `"shelf"`, `"rectangles"`,
+  `"polygons"`), `padding`, `mesh_aware`, `try_keep_layout` (default True),
+  `bleed`, `share_composite_image` (default False).
+  `"grid"`, `"rectangles_in_place"` and `"polygons_in_place"` are no longer
+  packer names: keep the layout with `try_keep_layout=True` and any packer.
+  `PackerOptions(repack="always")` is `try_keep_layout=False`;
+  `split_composite=True` is the new default, and `split_composite=False` is
+  `share_composite_image=True`.
+- Default packer is `"auto"`: `"polygons"` when the atlas has usable mesh
+  data, otherwise `"rectangles"` (it was `"shelf"`).
+- Default output changes: pages with a replace or remove now try to keep their
+  layout instead of being repacked; a `replace_composite` image is cut into
+  pieces per region by default (it used to be shared whole); auto bleed is now
+  on by default, since it follows the split.
+- One old combination has no equivalent: `repack="auto"` used to patch an
+  add-only page in the same build that repacked a page with a replace or
+  remove. `try_keep_layout` is one switch for every page.
+
 A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
 desktop and web apps are unchanged and still run the JavaScript engine.
 
 ### Breaking
-- Mesh-aware packing now applies to `pma: true` pages. `PackerOptions(mesh_aware=None)`
+- Mesh-aware packing now applies to `pma: true` pages. `mesh_aware=None`
   (the default) masks them to their mesh hulls whenever mesh data is usable;
-  opt out with `PackerOptions(mesh_aware=False)`. `packer="polygons"` now
+  opt out with `PackOptions(mesh_aware=False)`. `packer="polygons"` now
   nests and masks pma pages by their mesh hulls too; it always uses the mesh,
   so the only opt-out there is another packer. `mesh_crop=True` now crops
   regions on pma pages too, clearing all four channels outside the hull.
 
 ### Added
-- `PackerOptions(bleed=...)`: Spine's packer Bleed. On every page a build
+- `PackOptions(bleed=...)`: Spine's packer Bleed. On every page a build
   writes that is not pma, transparent pixels within 2 px of an image take the
   mean colour of their visible neighbours (alpha stays 0), so linear texture
   filtering draws no dark edges. `None` (default) bleeds when the build
-  splits composites (`split_composite=True` and both in-place packers);
+  splits composites (with `share_composite_image=False`, the default);
   `True` / `False` force it. Untouched and rename-only pages keep their pixels.
 - `SpineAtlas.pack()` returns the packed text and page images without
   creating a child atlas; `pack_is_cached()` tells whether a pack with the
   given settings would return at once.
-- `packer="rectangles_in_place"` / `"polygons_in_place"`: a page whose edits
+- `PackOptions(try_keep_layout=True)` (default): a page whose edits
   fit keeps its layout. Removed regions leave empty space; a replaced region
   whose new pixels fit its old slot (the canvas size `extract()` gives,
   nothing visible outside the old trimmed rect, pixels shared with an
@@ -36,24 +59,20 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   its region's slot when the image is that region's canvas size and the
   piece meets the same rules; additions go into free space. Any other
   edited page is repacked with "rectangles" /
-  "polygons". `split_composite` is ignored and
-  `PackerOptions(repack="always")` is refused for these modes. In-place
-  pages are not deduplicated afresh: regions that become pixel-identical
+  "polygons". `PackOptions(try_keep_layout=False)` repacks every edited page.
+  Kept-layout pages are not deduplicated afresh: regions that become pixel-identical
   keep their own rects. Vacating a rect or pasting a mod can clear
   never-rendered pixels of an overlapping hulled region, so its extract()
   without mesh_crop may change; what Spine renders does not. Python engine
   only; the JavaScript apps have no in-place modes.
-- `PackerOptions(repack=...)`: `"auto"` (default) places additions into a
-  page's free space instead of repacking it; `"always"` keeps the old
-  behaviour.
 - `SpineAtlas`: open an atlas from disk (`open`) or memory (`load`), list
   regions, extract single, all or composite sprites (with Forced Resizing and
   Mesh Cropping), record edits (`replace`, `replace_composite`, `add_region`,
   `rename_region`, `remove_region`) and pack them once with `build()` /
-  `save()` (packer `"shelf"`, `"rectangles"` or `"polygons"`, with
-  `PackerOptions` padding and mesh-aware).
-- `build(split_composite=True)`: a `replace_composite` image is cut back into
-  one piece per region, the inverse of `extract_composite(force_resize=True)`.
+  `save()` (`PackOptions`: packer, padding, mesh-aware, keep-layout, bleed).
+- `PackOptions(share_composite_image=False)` (default): a `replace_composite`
+  image is cut back into one piece per region, the inverse of
+  `extract_composite(force_resize=True)`.
   When the build is mesh-aware (the default with mesh data) each meshed region
   keeps its mesh hull; a semi-transparent pixel shared by several regions has
   its alpha split between them, so drawing them all gives the image back.
@@ -82,23 +101,24 @@ desktop and web apps are unchanged and still run the JavaScript engine.
   strip empty.
 - The build cache keeps the last 8 packs of the current edits (within 512 MB
   of edited page pixels) instead of one, so switching settings back is
-  instant. A pack that never used its padding (in place, no repack, no
-  addition) is reused for any padding.
-- `build(split_composite=True)` on straight pages: each piece keeps the
+  instant. A pack that never used its padding (kept layout, no repack, no
+  addition) is reused for any padding. `"auto"` and the packer it resolves to
+  share one entry.
+- A split composite on straight pages: each piece keeps the
   composite's colour under its alpha-0 pixels instead of black, so the seam
   between pieces filters cleanly where the piece is drawn in place.
 - A page whose only edits are additions and renames is no longer repacked by
-  default (pass `repack="always"`).
+  default (pass `PackOptions(try_keep_layout=False)`).
 - Removing a region added in the same atlas undoes the add; a single-page
   atlas used to repack every region.
-- With `repack="auto"`, a single-page atlas with only renames keeps its image.
+- A single-page atlas with only renames keeps its image.
 - Added regions with mesh data are cut to their hull when mesh-aware is on,
   nest by hull under `polygons`, and stay mesh regions in the built atlas.
 - Patch placement may store new regions rotated 180/270 under every packer,
   shelf included, and may clear never-rendered pixels outside an existing mesh
   hull where a new region lands.
-- `build()` / `save()` take `packer=` and `packer_options=PackerOptions(...)`
-  instead of `nest`, `gap` and `mesh_aware`, which are removed.
+- `build()` / `save()` take `options=PackOptions(...)` instead of `nest`,
+  `gap` and `mesh_aware`, which are removed.
 - `padding` (formerly the Smart Packing gap) follows the Spine Texture Packer:
   pixels between images, default 2 for every packer (the Smart Packing gap
   was 4). The shelf packer now leaves this padding too; before, it packed
@@ -106,8 +126,8 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - `mesh_aware` defaults to on when the atlas has usable mesh data, and
   `SpineAtlas.open()` reads a `.skel` next to the atlas. So a default
   `build()` masks repacked pages to the mesh hulls, and
-  `build(split_composite=True)` gives each meshed region its hull.
-  `PackerOptions(mesh_aware=False)` turns the masking off (the shelf layout
+  a split composite gives each meshed region its hull.
+  `PackOptions(mesh_aware=False)` turns the masking off (the shelf layout
   still has at least 1 px padding; the old edge-to-edge layout is gone).
   Untouched and rename-only pages keep their pixels.
 - `packer="rectangles"` can be combined with `mesh_aware`: pixels are cut to
@@ -115,7 +135,7 @@ desktop and web apps are unchanged and still run the JavaScript engine.
 - `pma: true` pages keep additive colour (RGB on alpha-0 pixels) through
   every repack, extract and split. A composite whose regions all live on pma
   pages round-trips exactly through `extract_composite` / `replace_composite`
-  / `build(split_composite=True)` when it is extracted with the same names in
+  / a split `build()` when it is extracted with the same names in
   the same order, no region is resized and `mesh_crop` matches the build's
   ownership; additive colour goes to the topmost region
   covering it. In a group that mixes pma and non-pma pages, the pma pieces

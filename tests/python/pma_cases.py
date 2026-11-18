@@ -7,15 +7,15 @@ from __future__ import annotations
 import numpy as np
 
 import atlas_toolkit.api as api
-from atlas_toolkit.packer import PackerOptions
 
 QUAD = [0, 1, 2, 0, 2, 3]
 GLOW_IN = (90, 60, 30, 0)     # additive alpha-0 pixel inside a hull
 GLOW_OUT = (70, 50, 20, 0)    # additive alpha-0 pixel outside a hull
+# (packer, PackOptions fields): a repack with mesh-aware on, composites split.
 PACKERS = [
-    ("shelf", PackerOptions(mesh_aware=True)),
-    ("rectangles", PackerOptions(mesh_aware=True)),
-    ("polygons", PackerOptions(padding=2)),
+    ("shelf", {"mesh_aware": True, "try_keep_layout": False}),
+    ("rectangles", {"mesh_aware": True, "try_keep_layout": False}),
+    ("polygons", {"padding": 2, "try_keep_layout": False}),
 ]
 
 

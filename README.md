@@ -63,7 +63,7 @@ Open an atlas, look at it, edit it, and save the result:
 
 ```python
 from PIL import Image
-from atlas_toolkit import SpineAtlas, CanvasTooLarge, Packer, PackerOptions
+from atlas_toolkit import SpineAtlas, CanvasTooLarge, PackOptions, Packer
 
 atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
 for region in atlas.regions:
@@ -78,7 +78,7 @@ atlas.rename_region("arm", "left_arm")
 atlas.remove_region("tail")
 
 try:
-    atlas.save("out/hero.atlas", packer=Packer.RECTANGLES, packer_options=PackerOptions(padding=4))  # + page PNGs
+    atlas.save("out/hero.atlas", options=PackOptions(packer=Packer.RECTANGLES, padding=4))  # + page PNGs
 except CanvasTooLarge as error:
     print("too big:", error.page, error)
 ```
@@ -91,58 +91,54 @@ atlas = SpineAtlas.load(text, {"hero.png": page_one, "hero_2.png": page_two})
 sheet = atlas.extract_composite(["head", "arm"], force_resize=True)
 # ... edit `sheet` in an image editor ...
 atlas.replace_composite(["head", "arm"], sheet)
-built = atlas.build(split_composite=True)       # a new SpineAtlas; `atlas` is unchanged
+built = atlas.build()                           # a new SpineAtlas; `atlas` is unchanged
 ```
 
 - Edits are only recorded. `build()` packs them once and returns a new
-  `SpineAtlas`; `save()` builds and writes. Both take:
-  - `packer`: `"shelf"` (default), `"rectangles"` (Smart Packing on solid
-    rects) or `"polygons"` (Smart Packing on mesh silhouettes, needs mesh
-    data; `PackerOptions(mesh_aware=False)` with it raises `ValueError`). A
-    string or a `Packer` member. `"grid"` is reserved and raises
-    `NotImplementedError`. With `"polygons"`, a region's rect can contain
-    pixels of neighbours nested into its empty corners; extract with
-    `mesh_crop=True` to see only the region.
-    `"rectangles_in_place"` / `"polygons_in_place"` keep a page's layout when
-    every edit on it fits: removed regions leave empty space; a replacement
-    fits when it is the size `extract()` returns for that region (its full
-    canvas), shows nothing outside the region's trimmed rect (outside its
-    mesh hull is ignored when mesh-aware), and leaves pixels it shares with
-    an overlapping neighbour unchanged; regions that share one rect must be
-    replaced alike; a `replace_composite` image fits the regions whose canvas
-    is exactly its size, and its pieces meet the same rules; additions go into
-    free space and may grow the page.
-    A page with any other edit, or whose image is not the size its text
-    declares, is repacked with `"rectangles"` / `"polygons"`.
-    `"polygons_in_place"` needs mesh data. Composite images are always split
-    into region pieces; `split_composite` is ignored and
-    `PackerOptions(repack="always")` is refused.
-  - `packer_options`: a `PackerOptions`:
-    - `padding` is the pixels between images, default 2, 1 to 256.
-    - `mesh_aware` cuts each region outside its mesh hull before packing. It
-      defaults to on whenever the atlas has usable mesh data, so a `.skel`
-      next to the atlas changes the default output.
-    - `repack`: `"auto"` (default) or `"always"`. With `"auto"`, a page whose
-      only edits are additions (and renames) is not repacked: the new regions
-      go into its free space, existing regions keep their place and every
-      pixel Spine renders (never-rendered pixels outside a mesh hull may be
-      cleared where a new region lands), and the page grows right or down
-      only when they do not fit (both sides stay multiples of 4). Free space
-      is everything outside existing regions' rects and visible pixels; with
-      mesh data, outside their mesh hulls. Any packer works; new regions may
-      be stored rotated 90/180/270.
-      `"always"` repacks every edited page.
-  - `split_composite`.
+  `SpineAtlas`; `save()` builds and writes. Both take `options=PackOptions(...)`:
+  - `packer`: `"auto"` (default), `"shelf"`, `"rectangles"` or `"polygons"`.
+    A string or a `Packer` member. `"auto"` picks `"polygons"` when the atlas
+    has usable mesh data (a `.skel` next to it, or a skeleton passed to
+    `load()`), otherwise `"rectangles"`. `"shelf"` puts one row of images, no
+    nesting; `"rectangles"` is Smart Packing on solid rects; `"polygons"` is
+    Smart Packing on mesh silhouettes and needs mesh data
+    (`PackOptions(mesh_aware=False)` with it raises `ValueError`). With
+    `"polygons"`, a region's rect can contain pixels of neighbours nested into
+    its empty corners; extract with `mesh_crop=True` to see only the region.
+  - `padding`: pixels between packed images, default 2, 1 to 256.
+  - `mesh_aware`: cut each region's pixels outside its mesh hull before
+    packing. Default on whenever the atlas has usable mesh data, so a `.skel`
+    next to the atlas changes the default output.
+  - `try_keep_layout` (default on): an edited page first tries to keep its
+    layout. Removed regions leave empty space; a replacement fits when it is
+    the size `extract()` returns for that region (its full canvas), shows
+    nothing outside the region's trimmed rect (outside its mesh hull is
+    ignored when mesh-aware), and leaves pixels it shares with an overlapping
+    neighbour unchanged; regions that share one rect must be replaced alike;
+    additions go into its free space and may grow the page right/down.
+    Free space is everything outside existing regions' rects and visible
+    pixels; with mesh data, outside their mesh hulls. New regions may be
+    stored rotated 90/180/270. A page with any other edit, whose image is not
+    the size its text declares, or that holds a shared-image composite
+    replace is repacked with `packer`. `try_keep_layout=False` repacks every
+    edited page.
+  - `bleed`: Spine's packer Bleed. On every page the pack writes that is not
+    pma, transparent pixels within 2 px of an image take its colour (alpha
+    stays 0) so linear filtering draws no dark edges. Default: on when the
+    pack splits composite images (the default), off when it shares them.
+  - `share_composite_image`: `replace_composite` only. Off (default) cuts the
+    image back into one piece per region: the inverse of
+    `extract_composite(force_resize=True)`. On, every region of the group uses
+    the whole image at the image's own size (offsets dropped), as the app
+    does, and a page holding such a replace is repacked.
 
-  `atlas.build(packer="polygons", packer_options=PackerOptions(padding=4))`
-- With `split_composite=True`, a `replace_composite` image is cut back into one
-  piece per region: the inverse of `extract_composite(force_resize=True)`.
+  `atlas.build(options=PackOptions(packer="polygons", padding=4))`
+- `mesh_crop=True` on the extract methods and `packer="polygons"` or
+  `PackOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
+  the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
 - Removing a region added since the atlas was loaded or built undoes the add.
   An added region whose name has a mesh in the `.skel` is cut to its hull when
   `mesh_aware` is on, and stays a mesh region in the built atlas.
-- `mesh_crop=True` on the extract methods and `packer="polygons"` or
-  `PackerOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
-  the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
 - On a `pma: true` page, images are read and written premultiplied: extracts
   return premultiplied pixels, additive colour on alpha-0 pixels included, and
   `replace` / `replace_composite` take premultiplied images. Mesh Cropping and

@@ -41,8 +41,8 @@ def test_polygon_packers_force_mesh_aware_and_pass_none(packer, mesh, calls):
     assert state['settings']['meshAware'] is True
     assert state['settings']['meshAwareLocked'] is True
     host.enter_edit()
-    assert calls[-1]['packer_options'].mesh_aware is None
-    assert calls[-1]['packer'] == packer
+    assert calls[-1]['options'].mesh_aware is None
+    assert calls[-1]['options'].packer == packer.removesuffix('_in_place')
 
 
 @pytest.mark.parametrize('packer', ['rectangles_in_place', 'polygons_in_place'])
@@ -53,12 +53,12 @@ def test_in_place_packers_lock_split_and_keep_layout(packer, mesh, calls):
     for key in ['splitComposite', 'keepLayout']:
         assert settings[key] is True and settings[key + 'Locked'] is True
     host.enter_edit()
-    assert calls[-1]['split_composite'] is True
-    assert calls[-1]['packer_options'].repack is None
+    assert calls[-1]['options'].share_composite_image is False   # the shim splits
+    assert calls[-1]['options'].try_keep_layout is True
     settings = host.set_settings({'packer': 'shelf'})['state']['settings']
     assert settings['splitComposite'] is False and settings['keepLayout'] is False
-    assert calls[-1]['split_composite'] is False
-    assert calls[-1]['packer_options'].repack == 'always'
+    assert calls[-1]['options'].share_composite_image is True
+    assert calls[-1]['options'].try_keep_layout is False
 
 
 def test_mesh_aware_is_off_and_locked_without_mesh(calls):
@@ -66,7 +66,7 @@ def test_mesh_aware_is_off_and_locked_without_mesh(calls):
     settings = host._state()['settings']
     assert settings['meshAware'] is False and settings['meshAwareLocked'] is True
     host.enter_edit()
-    assert calls[-1]['packer_options'].mesh_aware is False
+    assert calls[-1]['options'].mesh_aware is False
 
 
 @pytest.mark.parametrize('packer', ['polygons', 'polygons_in_place'])
@@ -76,21 +76,21 @@ def test_fallback_is_undone_by_late_skeleton(packer, mesh, calls):
     assert state['settings']['packer'] == packer.replace('polygons', 'rectangles')
     assert state['settings']['fallbackFrom'] == packer
     host.enter_edit()
-    assert calls[-1]['packer'] == packer.replace('polygons', 'rectangles')
-    assert calls[-1]['packer_options'].mesh_aware is False
+    assert calls[-1]['options'].packer == 'rectangles'
+    assert calls[-1]['options'].mesh_aware is False
     result = host.set_skeleton('sample.skel', b'mesh')
     assert result['state']['settings']['packer'] == packer
     assert result['state']['settings']['fallbackFrom'] is None
-    assert calls[-1]['packer'] == packer
+    assert calls[-1]['options'].packer == packer.removesuffix('_in_place')
 
 
 def test_keep_layout_off_and_padding_reach_engine(calls):
     host = loaded()
     host.set_settings({'keepLayout': False, 'padding': 19, 'splitComposite': True})
     host.enter_edit()
-    assert calls[-1]['packer_options'].repack == 'always'
-    assert calls[-1]['packer_options'].padding == 19
-    assert calls[-1]['split_composite'] is True
+    assert calls[-1]['options'].try_keep_layout is False
+    assert calls[-1]['options'].padding == 19
+    assert calls[-1]['options'].share_composite_image is False
 
 
 @pytest.mark.parametrize('settings', [
@@ -170,7 +170,7 @@ def test_late_skeleton_edit_rebuilds_and_failure_restores(mesh, monkeypatch, cal
     before = host.modify(['a'], page_bytes(12, 8), 'straight')
     after = host.set_skeleton('first.skel', b'first')
     assert after['image'] != before['image']
-    assert calls[-1]['packer_options'].mesh_aware is True
+    assert calls[-1]['options'].mesh_aware is True
     host.mark_saved()
     state, packed, preview = host._state(), host._packed, host.page_preview(0)
     def fail(self, **kwargs):
@@ -189,10 +189,10 @@ def test_requested_mesh_flag_is_used_when_mesh_is_usable(mesh, calls):
     state = host.set_settings({'meshAware': False})
     assert state['settings']['meshAwareLocked'] is False
     host.enter_edit()
-    assert calls[-1]['packer_options'].mesh_aware is False
+    assert calls[-1]['options'].mesh_aware is False
     result = host.set_settings({'meshAware': True})
     assert result['state']['settings']['meshAware'] is True
-    assert calls[-1]['packer_options'].mesh_aware is True
+    assert calls[-1]['options'].mesh_aware is True
 
 
 def test_view_settings_do_not_pack(calls):
@@ -273,6 +273,9 @@ def test_real_overflow_setting_restores_everything():
     )
     host = AppHost()
     host.load('big.atlas', text, {'big.png': page_bytes(side, side)}, None, None)
+    # A pad of 256 only reaches the packers when the page is repacked, which
+    # keeping the layout (the default) avoids for a replacement that fits.
+    host.set_settings({'keepLayout': False})
     host.enter_edit()
     host.modify(['r0'], page_bytes(1, 1), 'straight')
     host.save_output()
@@ -343,9 +346,9 @@ def test_bleed_defaults_on_and_reaches_the_packer(calls):
     assert host._state()['settings']['bleedLocked'] is False
     host.enter_edit()
     host.modify(['a'], page_bytes(12, 8), 'straight')
-    assert calls[-1]['packer_options'].bleed is True
+    assert calls[-1]['options'].bleed is True
     host.set_settings({'bleed': False})
-    assert calls[-1]['packer_options'].bleed is False
+    assert calls[-1]['options'].bleed is False
     with pytest.raises(ValueError, match='bleed'):
         host.set_settings({'bleed': 'yes'})
 

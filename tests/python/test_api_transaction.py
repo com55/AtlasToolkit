@@ -6,7 +6,7 @@ from PIL import Image
 
 import atlas_toolkit.api as api
 from atlas_toolkit.api import CanvasTooLarge, InvalidRegionName, SpineAtlas
-from atlas_toolkit.packer import Packer
+from atlas_toolkit.packer import PackOptions, Packer
 
 
 def pattern(seed=1):
@@ -110,22 +110,22 @@ def test_reset_clears_edits_and_the_next_edit_sees_no_old_sprite():
     assert atlas.build().extract('a').tobytes() == two_region_atlas().extract('a').tobytes()
 
 
-@pytest.mark.parametrize('packer', [p for p in Packer if p != Packer.GRID])
+@pytest.mark.parametrize('packer', list(Packer))
 def test_pack_returns_same_result_as_build(packer, monkeypatch):
     mesh = {'type': 'Mesh', 'uvs': [0, 0, 1, 0, 1, 1, 0, 1],
             'triangles': [0, 1, 2, 0, 2, 3], 'hull_length': 4}
     monkeypatch.setattr(api, '_parse_skeleton', lambda data: {'attachments': {'a': mesh, 'b': mesh}})
     atlas = SpineAtlas.load(TEXT, two_region_atlas().pages, skeleton=b'x')
     atlas.replace({'a': PATTERN})
-    packed = atlas.pack(packer=packer)
+    packed = atlas.pack(options=PackOptions(packer=packer))
     cache = atlas._build_cache
-    built = atlas.build(packer=packer)
+    built = atlas.build(options=PackOptions(packer=packer))
     assert atlas._build_cache is cache
     assert packed_bytes(packed) == packed_bytes((built.atlas_text, built.pages))
     atlas._build_cache = None
-    built = atlas.build(packer=packer)
+    built = atlas.build(options=PackOptions(packer=packer))
     cache = atlas._build_cache
-    assert packed_bytes(atlas.pack(packer=packer)) == packed_bytes((built.atlas_text, built.pages))
+    assert packed_bytes(atlas.pack(options=PackOptions(packer=packer))) == packed_bytes((built.atlas_text, built.pages))
     assert atlas._build_cache is cache
 
 
@@ -221,13 +221,13 @@ def test_pack_validates_settings_like_build(edited):
         atlas.replace({'a': PATTERN})
     for packer in ('grid', 'polygons', 'unknown'):
         with pytest.raises(Exception) as expected:
-            atlas.build(packer=packer)
+            atlas.build(options=PackOptions(packer=packer))
         with pytest.raises(type(expected.value)) as actual:
-            atlas.pack(packer=packer)
+            atlas.pack(options=PackOptions(packer=packer))
         assert str(actual.value) == str(expected.value)
 
 
-@pytest.mark.parametrize('packer', [p for p in Packer if p != Packer.GRID])
+@pytest.mark.parametrize('packer', list(Packer))
 def test_build_shares_cache_without_changing_output(packer, monkeypatch):
     from atlas_toolkit.packer import resolve_packer
 
@@ -239,13 +239,13 @@ def test_build_shares_cache_without_changing_output(packer, monkeypatch):
                                  'p2.png': pattern(3)}, skeleton=b'x')
     pristine = atlas.pack()[1]['p2.png']
     atlas.replace({'a': PATTERN})
-    resolved, _ = resolve_packer(packer, None, mesh_ready=True)
-    expected = packed_bytes(atlas._pack(resolved, resolved.in_place))
-    built = atlas.build(packer=packer)
+    resolved, _ = resolve_packer(PackOptions(packer=packer), mesh_ready=True)
+    expected = packed_bytes(atlas._pack(resolved))
+    built = atlas.build(options=PackOptions(packer=packer))
     assert packed_bytes((built.atlas_text, built.pages)) == expected
     assert built._session._raster.view(built._session._page_images['p2.png']) is not pristine
     assert atlas._build_cache[-1][2]['p2.png'] is pristine
-    assert atlas.pack(packer=packer)[1] is atlas._build_cache[-1][2]
+    assert atlas.pack(options=PackOptions(packer=packer))[1] is atlas._build_cache[-1][2]
 
 
 def test_rollback_after_a_successful_pack_inside_the_block():

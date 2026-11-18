@@ -6,7 +6,7 @@ from io import BytesIO
 from PIL import Image
 
 from atlas_toolkit.api import (
-    AtlasError, InvalidRegionName, PackerOptions, RegionNotFound, SpineAtlas,
+    AtlasError, InvalidRegionName, PackOptions, RegionNotFound, SpineAtlas,
     _file_name, _from_page, _page_filenames,
 )
 from atlas_toolkit.alpha_mode import parse_alpha_mode
@@ -71,15 +71,20 @@ class AppHost:
 
     def _pack_arguments(self) -> dict:
         settings = self._settings()
+        # Task 3 shim: the in-place packers are gone from the API, so map them
+        # to their base packer with keep-layout forced on and composites split
+        # (what "rectangles_in_place" / "polygons_in_place" used to mean).
+        packer = settings["packer"]
+        in_place = packer.endswith("_in_place")
         return {
-            "packer": settings["packer"],
-            "packer_options": PackerOptions(
+            "options": PackOptions(
+                packer=packer.removesuffix("_in_place"),
                 padding=settings["padding"],
                 mesh_aware=None if settings["packer"].startswith("polygons") else settings["meshAware"],
-                repack=None if settings["keepLayout"] else "always",
+                try_keep_layout=True if in_place else settings["keepLayout"],
                 bleed=settings["bleed"],
+                share_composite_image=False if in_place else not settings["splitComposite"],
             ),
-            "split_composite": settings["splitComposite"],
         }
 
     @staticmethod

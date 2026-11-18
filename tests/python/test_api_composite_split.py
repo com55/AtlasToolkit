@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""build(split_composite=True): replace_composite is the inverse of
-extract_composite(force_resize=True) inside the mesh hulls (spec 2026-10-13).
+"""build(share_composite_image=False), the default: replace_composite is the
+inverse of extract_composite(force_resize=True) inside the mesh hulls
+(spec 2026-10-13; the old split_composite=True argument became this default
+in spec 2026-11-18).
 All meshes are axis-aligned rectangles whose edges land on whole pixels, so
 the expected hulls are written by hand, never taken from the product."""
 import warnings
@@ -14,7 +16,7 @@ import atlas_toolkit.api as api
 from atlas_toolkit.api import SpineAtlas
 from atlas_toolkit.domain.alpha_split import SPLIT
 from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 
 QUAD = [0, 1, 2, 0, 2, 3]
 
@@ -98,8 +100,8 @@ def test_fixture_hulls_are_whole_pixels(monkeypatch):
 
 
 @pytest.mark.parametrize("packer, options", [
-    ("shelf", PackerOptions(mesh_aware=True)),
-    ("polygons", PackerOptions(padding=4)),
+    ("shelf", {"mesh_aware": True}),
+    ("polygons", {"padding": 4}),
 ])
 def test_same_canvas_round_trip(monkeypatch, packer, options):
     atlas = load(monkeypatch, SAME, SAME_MESH)
@@ -107,7 +109,7 @@ def test_same_canvas_round_trip(monkeypatch, packer, options):
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
     # polygons padding=4 is the old nest gap; at <=2 polygons nests a neighbour inside
     # a rect and the rect-only composite below picks up its pixels.
-    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     inside = union(32, 16, SAME_HULLS)
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True, mesh_crop=True), want, inside)
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
@@ -126,7 +128,7 @@ def _mixed_round_trip(monkeypatch, w, h):
     atlas = load(monkeypatch, MIXED, MIXED_MESH)
     want = pattern(w, h)
     atlas.replace_composite(["D", "E"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     hulls = [(int(u0 * w), int(v0 * h), int(u1 * w), int(v1 * h)) for u0, v0, u1, v1 in MIXED_HULLS]
     assert_round_trip(built.extract_composite(["D", "E"], force_resize=True, mesh_crop=True), want, union(w, h, hulls))
     assert built.region("D").offsets[2:] == (w, h) and built.region("E").offsets[2:] == (w, h)
@@ -145,7 +147,7 @@ def test_later_replace_on_one_member(monkeypatch):
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
     own = Image.new("RGBA", (16, 10), (9, 9, 9, 255))
     atlas.replace({"A": own})
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     assert built.region("B").offsets == (8, 0, 32, 16)      # B, C still split
     assert built.region("C").bounds[2:] == (12, 10)
     a = np.asarray(built.extract("A").convert("RGBA"))
@@ -153,8 +155,8 @@ def test_later_replace_on_one_member(monkeypatch):
 
 
 @pytest.mark.parametrize("packer, options", [
-    ("shelf", PackerOptions(mesh_aware=True)),
-    ("polygons", PackerOptions(padding=4)),
+    ("shelf", {"mesh_aware": True}),
+    ("polygons", {"padding": 4}),
 ])
 def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, packer, options):
     # In game the mesh maps the whole canvas around the packed rect via the
@@ -165,7 +167,7 @@ def test_empty_piece_keeps_its_rect_and_samples_nothing(monkeypatch, packer, opt
     want[6:16, 4:12, 3] = 0                                   # C's whole hull is transparent
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
     # polygons padding=4: the old nest default gap.
-    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     assert built.region("C").bounds[2:] == (12, 10)
     assert built.region("C").offsets == (2, 0, 32, 16)
     # C's hull lies inside its rect, so every texel it samples is in its bounds.
@@ -178,7 +180,7 @@ def test_unrelated_structural_edit_keeps_the_group(monkeypatch, edit):
     want = pattern(32, 16)
     plain = load(monkeypatch, SAME, SAME_MESH)
     plain.replace_composite(names, Image.fromarray(want, "RGBA"))
-    ref = plain.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    ref = plain.build(options=PackOptions(mesh_aware=True))
     other = load(monkeypatch, SAME, SAME_MESH)
     other.replace_composite(names, Image.fromarray(want, "RGBA"))
     if edit == "rename":
@@ -187,7 +189,7 @@ def test_unrelated_structural_edit_keeps_the_group(monkeypatch, edit):
         other.add_region("New", Image.new("RGBA", (3, 3), (1, 2, 3, 255)))
     else:
         other.remove_region("Other")
-    got = other.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    got = other.build(options=PackOptions(mesh_aware=True))
     for name in names:
         assert got.region(name).offsets == ref.region(name).offsets
     a = np.asarray(got.extract_composite(names, force_resize=True, mesh_crop=True))
@@ -200,7 +202,7 @@ def test_member_removed_or_renamed(monkeypatch):
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
     atlas.rename_region("B", "B2")
     atlas.remove_region("C")
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     assert built.region("B2").offsets == (8, 0, 32, 16)
     assert built.region("B2").bounds[2:] == (24, 12)
     assert "C" not in [r.name for r in built.regions]
@@ -210,13 +212,13 @@ def test_member_removed_or_renamed(monkeypatch):
 SAME_RECTS = [(0, 0, 16, 10), (8, 4, 32, 16), (2, 6, 14, 16)]
 
 
-@pytest.mark.parametrize("packer, options", [("shelf", None), ("rectangles", PackerOptions(padding=4))])
+@pytest.mark.parametrize("packer, options", [("shelf", {}), ("rectangles", {"padding": 4})])
 def test_split_without_mesh_cuts_rects(packer, options):
     atlas = SpineAtlas.load(SAME, page())
-    assert atlas.build(split_composite=True).atlas_text == atlas.atlas_text   # unedited: no error
+    assert atlas.build(options=PackOptions()).atlas_text == atlas.atlas_text   # unedited: no error
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer=packer, packer_options=options, split_composite=True)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, union(32, 16, SAME_RECTS))
     assert built.region("A").offsets == (0, 6, 32, 16)
     assert built.region("B").offsets == (8, 0, 32, 16)
@@ -231,7 +233,7 @@ def test_split_mixes_hulls_and_rects(monkeypatch):
     atlas = load(monkeypatch, SAME, {"A": SAME_MESH["A"]})
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     inside = union(32, 16, [SAME_HULLS[0], *SAME_RECTS[1:]])
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
     assert want[2, 13, 3] > 0 and built.extract("A").getpixel((13, 2))[3] == 0   # in A's rect, outside its hull
@@ -242,7 +244,7 @@ def test_split_ignores_meshes_without_mesh_aware(monkeypatch):
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
     # No-mask control: the old default was mesh_aware off; auto is on when a mesh is loaded.
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=False), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=False))
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, union(32, 16, SAME_RECTS))
     assert built.extract("A").getpixel((13, 2))[3] == want[2, 13, 3] > 0
 
@@ -253,9 +255,9 @@ def test_switch_is_part_of_the_build_cache(monkeypatch):
     calls = []
     original = AtlasSession.pack_pending
     monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))
-    off = atlas.build(packer_options=PackerOptions(mesh_aware=True))
-    on = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
-    atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    off = atlas.build(options=PackOptions(mesh_aware=True, share_composite_image=True))
+    on = atlas.build(options=PackOptions(mesh_aware=True))
+    atlas.build(options=PackOptions(mesh_aware=True))
     assert len(calls) == 2
     assert off.atlas_text != on.atlas_text
 
@@ -263,22 +265,22 @@ def test_switch_is_part_of_the_build_cache(monkeypatch):
 def test_save_passes_the_switch(monkeypatch, tmp_path):
     atlas = load(monkeypatch, SAME, SAME_MESH)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
-    atlas.save(tmp_path / "o.atlas", packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    atlas.save(tmp_path / "o.atlas", options=PackOptions(mesh_aware=True))
     text = (tmp_path / "o.atlas").read_text(encoding="utf-8")
-    assert text == atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True).atlas_text
+    assert text == atlas.build(options=PackOptions(mesh_aware=True)).atlas_text
 
 
 def test_force_resize_masks_at_the_target_size(monkeypatch):
     # A region stored at a lower scale is resized first and masked with its
     # mesh at the target size, so nothing spills past its hull (masking
     # first and then resizing let Lanczos smear the edge outside it), and
-    # the composite round-trips through split_composite with no loss.
+    # the composite round-trips through the default split with no loss.
     atlas = load(monkeypatch, MIXED, MIXED_MESH)
     comp = atlas.extract_composite(["D", "E"], force_resize=True, mesh_crop=True)
     inside = union(32, 16, [(0, 0, 16, 8), (8, 4, 24, 16)])
     assert np.array_equal(np.asarray(comp)[..., 3] > 0, inside)
     atlas.replace_composite(["D", "E"], comp)
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     assert_round_trip(built.extract_composite(["D", "E"], force_resize=True, mesh_crop=True), np.asarray(comp), inside)
 
 
@@ -297,7 +299,7 @@ def test_pma_split_renders_back_premultiplied():
     atlas = SpineAtlas.load(SAME_PMA, page())
     want = premultiplied(pattern(32, 16))
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(split_composite=True)
+    built = atlas.build(options=PackOptions())
     assert "pma: true" in built.atlas_text
     out = np.zeros((16, 32, 4))
     for name in "CBA":                                              # A is the top holder
@@ -317,7 +319,7 @@ def test_pma_extract_composite_round_trips():
     image = Image.fromarray(want, "RGBA")
     for cycle in range(6):
         atlas.replace_composite(["A", "B", "C"], image)
-        image = atlas.build(split_composite=True).extract_composite(["A", "B", "C"])
+        image = atlas.build(options=PackOptions()).extract_composite(["A", "B", "C"])
         got = np.asarray(image).astype(int)
         assert np.array_equal(got[inside], want[inside].astype(int)), cycle
         assert not got[~inside].any(), cycle
@@ -399,14 +401,14 @@ def test_pma_rect_round_trip_is_exact_for_six_cycles(k):
     image = Image.fromarray(want, "RGBA")
     for cycle in range(6):
         atlas.replace_composite(names, image)
-        atlas = atlas.build(split_composite=True, packer="shelf", packer_options=PackerOptions(mesh_aware=False))
+        atlas = atlas.build(options=PackOptions(packer="shelf", mesh_aware=False))
         image = atlas.extract_composite(names)
         assert np.array_equal(np.asarray(image), want), cycle
 
 
 @pytest.mark.parametrize("packer, options, crop", [
-    ("polygons", PackerOptions(padding=4), True),
-    ("shelf", PackerOptions(mesh_aware=True), False),
+    ("polygons", {"padding": 4}, True),
+    ("shelf", {"mesh_aware": True}, False),
 ])
 def test_pma_hull_round_trip_is_exact_for_six_cycles(monkeypatch, packer, options, crop):
     text = SAME.replace("size: 64,32\n", "size: 64,32\npma: true\n", 1)
@@ -416,7 +418,7 @@ def test_pma_hull_round_trip_is_exact_for_six_cycles(monkeypatch, packer, option
     image = Image.fromarray(want, "RGBA")
     for cycle in range(6):
         atlas.replace_composite(["A", "B", "C"], image)
-        atlas = atlas.build(split_composite=True, packer=packer, packer_options=options)
+        atlas = atlas.build(options=PackOptions(packer=packer, **options))
         image = atlas.extract_composite(["A", "B", "C"], mesh_crop=crop)
         got = np.asarray(image).astype(int)
         assert np.array_equal(got[inside], want[inside].astype(int)), cycle
@@ -446,7 +448,7 @@ def test_cross_page_split_round_trips(monkeypatch, mesh_aware):
     atlas = load_two(monkeypatch, TWO_PAGE_SAME, SAME_MESH)
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=mesh_aware), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=mesh_aware))
     assert built.region("B").page == "second.png"
     inside = union(32, 16, SAME_HULLS if mesh_aware else SAME_RECTS)
     # mesh_crop must match mesh_aware (spec §3.7, r2 I2)
@@ -459,7 +461,7 @@ def test_mixed_pma_composite_warns_and_still_splits(monkeypatch):
     atlas = load_two(monkeypatch, text, SAME_MESH)
     with pytest.warns(UserWarning, match="pma"):
         atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
-    built = atlas.build(split_composite=True)
+    built = atlas.build(options=PackOptions())
     assert built.region("B").offsets == (8, 0, 32, 16)
 
 
@@ -478,7 +480,7 @@ def test_cross_page_split_mixes_hulls_and_rects(monkeypatch):
     atlas = load_two(monkeypatch, TWO_PAGE_SAME, {"A": SAME_MESH["A"], "C": SAME_MESH["C"]})
     want = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(want, "RGBA"))
-    built = atlas.build(packer_options=PackerOptions(mesh_aware=True), split_composite=True)
+    built = atlas.build(options=PackOptions(mesh_aware=True))
     inside = union(32, 16, [SAME_HULLS[0], SAME_RECTS[1], SAME_HULLS[2]])
     assert_round_trip(built.extract_composite(["A", "B", "C"], force_resize=True), want, inside)
     assert want[2, 13, 3] > 0 and built.extract("A").getpixel((13, 2))[3] == 0     # in A's rect, outside its hull
@@ -491,8 +493,8 @@ def test_cross_page_nine_patch_member_falls_back(monkeypatch):
     text = TWO_PAGE_SAME.replace(" rotate: 90\n", " rotate: 90\n split: 1,1,1,1\n")
     atlas = load_two(monkeypatch, text, SAME_MESH)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(pattern(32, 16), "RGBA"))
-    # Bleed defaults on with split_composite; match it so only the split differs.
-    split, plain = atlas.build(split_composite=True), atlas.build(packer_options=PackerOptions(bleed=True))
+    # The default pack rides on the split's auto bleed; match it so only the split differs.
+    split, plain = atlas.build(options=PackOptions()), atlas.build(options=PackOptions(packer="shelf", bleed=True))
     assert split.atlas_text == plain.atlas_text
     for name in ("A", "B", "C"):
         assert split.extract(name).tobytes() == plain.extract(name).tobytes(), name
@@ -507,7 +509,7 @@ def test_straight_pieces_keep_the_composite_colour_under_alpha_zero(monkeypatch)
     atlas = load(monkeypatch, SAME, SAME_MESH)
     image = pattern(32, 16)
     atlas.replace_composite(["A", "B", "C"], Image.fromarray(image, "RGBA"))
-    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(bleed=False))
+    built = atlas.build(options=PackOptions(try_keep_layout=True, share_composite_image=False, bleed=False))
     pages = [np.asarray(page) for page in built.pages.values()]
     clear = [page[page[..., 3] == 0] for page in pages]
     assert any(len(c) for c in clear)

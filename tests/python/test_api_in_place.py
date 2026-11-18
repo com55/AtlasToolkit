@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""SpineAtlas.build(packer="*_in_place") keeps a page's layout when its edits fit (spec 2026-11-05)."""
+"""PackOptions(try_keep_layout=True) keeps a page's layout when its edits fit
+(spec 2026-11-05; the in-place packers became this switch in spec 2026-11-18)."""
 import numpy as np
 import pytest
 from PIL import Image
 
 import atlas_toolkit.api as api
-from atlas_toolkit import PackerOptions, SpineAtlas
+from atlas_toolkit import PackOptions, SpineAtlas
 
 
 def pattern(w, h, seed=1):
@@ -44,14 +45,22 @@ def same_build(a, b):
         assert a.pages[name].tobytes() == b.pages[name].tobytes(), name
 
 
-def base_of(packer):
-    return packer.removesuffix("_in_place")
+def keeping(**fields):
+    """The old "*_in_place" build: keep the layout, composites split."""
+    return PackOptions(**{"packer": "rectangles", "try_keep_layout": True,
+                          "share_composite_image": False, **fields})
 
 
-def refused(atlas, packer="rectangles_in_place", options=None):
-    """The in-place build equals the base packer's build with split forced."""
-    same_build(atlas.build(packer=packer, packer_options=options),
-               atlas.build(packer=base_of(packer), packer_options=options, split_composite=True))
+def repacking(**fields):
+    """The old in-place packers' always-repack counterpart, composites split."""
+    return PackOptions(**{"packer": "rectangles", "try_keep_layout": False,
+                          "share_composite_image": False, **fields})
+
+
+def refused(atlas, packer="rectangles", **fields):
+    """The kept-layout build equals the packer's build with keep-layout off."""
+    same_build(atlas.build(options=keeping(packer=packer, **fields)),
+               atlas.build(options=repacking(packer=packer, **fields)))
 
 
 def mesh(monkeypatch, attachments):
@@ -70,47 +79,52 @@ def two():
 
 
 
-def test_split_composite_is_forced_and_shares_the_cache(monkeypatch):
+def _counted(monkeypatch):
     from atlas_toolkit.engine.session import AtlasSession
     calls = []
     original = AtlasSession.pack_pending
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))
+
+    def counted(self, **kw):
+        calls.append(kw)
+        return original(self, **kw)
+
+    monkeypatch.setattr(AtlasSession, "pack_pending", counted)
+    return calls
+
+
+def test_keeping_the_layout_passes_keep_layout_and_the_split(monkeypatch):
+    calls = _counted(monkeypatch)
     atlas = two()
     atlas.replace({"A": img(16, 16, 9)})
-    atlas.build(packer="rectangles_in_place", split_composite=False)
-    atlas.build(packer="rectangles_in_place", split_composite=True)
-    assert len(calls) == 1
+    atlas.build(options=keeping())
     assert calls[0]["split_composite"] is True and calls[0]["in_place"] is True
 
 
-def test_in_place_and_base_do_not_share_the_cache(monkeypatch):
-    from atlas_toolkit.engine.session import AtlasSession
-    calls = []
-    original = AtlasSession.pack_pending
-    monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))
+def test_keep_layout_and_repack_are_one_cache_key_apart(monkeypatch):
+    calls = _counted(monkeypatch)
     atlas = two()
     atlas.replace({"A": img(16, 16, 9)})
-    atlas.build(packer="rectangles", split_composite=True)
-    atlas.build(packer="rectangles_in_place")
+    atlas.build(options=repacking())
+    atlas.build(options=keeping())
     assert [kw["in_place"] for kw in calls] == [False, True]
 
 
-def test_polygons_in_place_needs_mesh():
+def test_polygons_keeping_the_layout_needs_mesh():
     atlas = two()
     atlas.replace({"A": img(16, 16, 9)})
     with pytest.raises(api.SkeletonUnavailable):
-        atlas.build(packer="polygons_in_place")
+        atlas.build(options=keeping(packer="polygons"))
 
 
-def test_repack_always_with_in_place_raises_even_unedited():
-    with pytest.raises(ValueError, match="keeps the layout"):
-        two().build(packer="rectangles_in_place", packer_options=PackerOptions(repack="always"))
+def test_polygons_keeping_the_layout_refuses_mesh_aware_false_even_unedited():
+    with pytest.raises(ValueError, match="polygons"):
+        two().build(options=keeping(packer="polygons", mesh_aware=False))
 
 
 def test_remove_only_keeps_the_layout():
     atlas = two()
     atlas.remove_region("B")
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built)["A"] == layout(atlas)["A"]
     assert built.pages["p.png"].size == (32, 16)
     assert built.extract("A").tobytes() == atlas.extract("A").tobytes()
@@ -120,7 +134,7 @@ def test_remove_then_add_reuses_the_space():
     atlas = two()
     atlas.remove_region("B")
     atlas.add_region("N", img(6, 6))
-    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(padding=1))
+    built = atlas.build(options=keeping(padding=1))
     assert built.pages["p.png"].size == (32, 16)
     assert layout(built)["A"] == layout(atlas)["A"]
 
@@ -131,7 +145,7 @@ def test_every_region_removed_gives_the_empty_page():
     atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)]),
                                    "q.png": page(8, 8, [(0, 0, 8, 8)])})
     atlas.remove_region("C")
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert built.pages["q.png"].size == (10, 10)
     assert built.pages["p.png"].tobytes() == atlas.pages["p.png"].tobytes()
 
@@ -142,8 +156,8 @@ def test_multi_page_one_in_place_one_refused():
                                    "q.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)], seed=2)})
     atlas.remove_region("B")
     atlas.replace({"C": img(20, 20, 9)})          # wrong size: q.png refuses (any mod refuses in Task 2)
-    built = atlas.build(packer="rectangles_in_place")
-    base = atlas.build(packer="rectangles", split_composite=True)
+    built = atlas.build(options=keeping())
+    base = atlas.build(options=repacking())
     assert layout(built)["A"] == layout(atlas)["A"]
     q_built = [line for line in built.atlas_text.split("\n\n") if line.startswith("q.png")]
     q_base = [line for line in base.atlas_text.split("\n\n") if line.startswith("q.png")]
@@ -185,7 +199,7 @@ def test_extract_edit_replace_goes_in_place(rotate):
     atlas = trimmed(rotate)
     want = edited_a(atlas)
     atlas.replace({"A": Image.fromarray(want, "RGBA")})
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
     assert built.pages["p.png"].size == (48, 16)
     assert (np.asarray(built.extract("A")) == want).all()
@@ -231,7 +245,7 @@ def test_aliases_with_the_same_window_go_in_place():
     atlas = aliases()
     want = edited_a(atlas)
     atlas.replace({"A": Image.fromarray(want, "RGBA"), "A2": Image.fromarray(want, "RGBA")})
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
     assert (np.asarray(built.extract("A2")) == want).all()
 
@@ -250,8 +264,8 @@ def test_mod_then_remove_equals_a_remove_only_build():
     atlas.remove_region("A")
     other = trimmed()
     other.remove_region("A")
-    same_build(atlas.build(packer="rectangles_in_place"), other.build(packer="rectangles_in_place"))
-    assert layout(atlas.build(packer="rectangles_in_place"))["B"] == layout(trimmed())["B"]
+    same_build(atlas.build(options=keeping()), other.build(options=keeping()))
+    assert layout(atlas.build(options=keeping()))["B"] == layout(trimmed())["B"]
 
 
 def test_modded_alias_with_its_partner_removed_goes_in_place():
@@ -259,7 +273,7 @@ def test_modded_alias_with_its_partner_removed_goes_in_place():
     want = edited_a(atlas)
     atlas.replace({"A": Image.fromarray(want, "RGBA")})
     atlas.remove_region("A2")
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built)["A"] == layout(atlas)["A"]
     assert (np.asarray(built.extract("A")) == want).all()
 
@@ -271,7 +285,7 @@ def test_transparent_part_of_an_unhulled_mod_is_not_free():
     arr[:, 8:] = 0
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
     atlas.add_region("N", img(3, 3))
-    built = atlas.build(packer="rectangles_in_place", packer_options=PackerOptions(padding=1))
+    built = atlas.build(options=keeping(padding=1))
     assert layout(built)["A"] == layout(atlas)["A"]
     nx, ny = next(r.bounds[:2] for r in built.regions if r.name == "N")
     assert not (nx < 16 and ny < 16)
@@ -281,7 +295,7 @@ def test_pma_round_trip_is_byte_exact():
     atlas = trimmed(pma=True)
     want = edited_a(atlas)
     atlas.replace({"A": Image.fromarray(want, "RGBA")})
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
     assert (np.asarray(built.extract("A")) == want).all()
 
@@ -299,7 +313,7 @@ def test_straight_alpha_zero_pixel_outside_the_window_is_ignored():
     arr = edited_a(atlas)
     arr[0, 0] = (40, 0, 0, 0)
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
-    assert layout(atlas.build(packer="rectangles_in_place")) == layout(atlas)
+    assert layout(atlas.build(options=keeping())) == layout(atlas)
 
 
 OVERLAP = "p.png\nsize: 24,24\nA\n bounds: 0,0,16,16\nB\n bounds: 4,4,16,16\n"
@@ -315,7 +329,7 @@ def test_mod_inside_its_hull_keeps_the_neighbour(monkeypatch):
     atlas = overlap(monkeypatch, LOWER_RIGHT)
     before_b = np.asarray(atlas.extract("B", mesh_crop=True)).copy()
     atlas.replace({"A": img(16, 16, 9)})
-    built = atlas.build(packer="polygons_in_place")
+    built = atlas.build(options=keeping(packer="polygons"))
     assert layout(built) == layout(atlas)
     after_b = np.asarray(built.extract("B", mesh_crop=True))
     visible = before_b[..., 3] > 0
@@ -327,7 +341,7 @@ def test_mod_inside_its_hull_keeps_the_neighbour(monkeypatch):
 def test_mod_onto_a_neighbours_hull_refuses(monkeypatch):
     atlas = overlap(monkeypatch, UPPER_LEFT)    # B's hull reaches into A's hull
     atlas.replace({"A": img(16, 16, 9)})
-    refused(atlas, packer="polygons_in_place")
+    refused(atlas, packer="polygons")
 
 
 def test_pma_additive_pixel_onto_a_neighbours_hull_refuses(monkeypatch):
@@ -350,9 +364,9 @@ def test_refused_attempt_leaves_nothing_behind():
     atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)]),
                                    "q.png": page(32, 16, [(0, 0, 16, 16), (16, 0, 16, 16)], seed=2)})
     atlas.replace({"A": img(16, 16, 9), "C": img(20, 20, 9)})
-    first = atlas.build(packer="rectangles_in_place")
-    atlas.build(packer="rectangles")                       # evicts the one-slot cache
-    same_build(first, atlas.build(packer="rectangles_in_place"))
+    first = atlas.build(options=keeping())
+    atlas.build(options=repacking())                        # evicts the one-slot cache
+    same_build(first, atlas.build(options=keeping()))
     assert layout(first)["A"] == layout(atlas)["A"]
 
 
@@ -404,7 +418,7 @@ def test_pma_mod_inside_its_hull_keeps_the_neighbour_byte_exact(monkeypatch):
     atlas = overlap(monkeypatch, LOWER_RIGHT, pma=True)
     before_b = np.asarray(atlas.extract("B", mesh_crop=True)).copy()
     atlas.replace({"A": img(16, 16, 9)})
-    built = atlas.build(packer="polygons_in_place")
+    built = atlas.build(options=keeping(packer="polygons"))
     assert layout(built) == layout(atlas)
     assert (np.asarray(built.extract("B", mesh_crop=True)) == before_b).all()
 
@@ -431,9 +445,9 @@ def test_composite_at_canvas_size_goes_in_place():
     assert arr.shape == (16, 16, 4)
     arr[6:12, 3:14] = pattern(11, 6, 9)            # straddles both windows
     atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
-    built = atlas.build(packer="rectangles_in_place", split_composite=False)
+    built = atlas.build(options=keeping(packer="rectangles", share_composite_image=False))
     assert layout(built) == layout(atlas)
-    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B", "C"])
+    same_extracts(built, atlas.build(options=repacking()), ["A", "B", "C"])
     assert built.extract("C").tobytes() == atlas.extract("C").tobytes()
 
 
@@ -457,7 +471,7 @@ def test_single_nine_patch_composite_is_a_plain_mod():
     arr = np.asarray(atlas.extract("A")).copy()
     arr[5:13, 2:12] = pattern(10, 8, 9)
     atlas.replace_composite(["A"], Image.fromarray(arr, "RGBA"))
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
     assert "split" in built.atlas_text
     assert (np.asarray(built.extract("A")) == arr).all()
@@ -476,8 +490,8 @@ def test_composite_over_two_pages_goes_in_place_only_where_it_fits():
     atlas = SpineAtlas.load(text, {"p.png": page(32, 16, [(0, 0, 10, 8)]),
                                    "q.png": page(32, 32, [(0, 0, 12, 12)], seed=2)})
     atlas.replace_composite(["A", "B"], img(16, 16, 9))
-    built = atlas.build(packer="rectangles_in_place")
-    base = atlas.build(packer="rectangles", split_composite=True)
+    built = atlas.build(options=keeping())
+    base = atlas.build(options=repacking())
     assert layout(built)["A"] == layout(atlas)["A"]
     assert built.pages["p.png"].size == (32, 16)
     same_extracts(built, base, ["A", "B"])
@@ -498,12 +512,12 @@ def test_rotated_composite_piece_goes_in_place_in_stored_orientation(rotate):
     assert arr.shape == (16, 16, 4)
     arr[4:13, 3:13] = pattern(10, 9, 9)            # straddles A's window (x 2..12, y 5..13) and B's
     atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
     want_a = np.zeros((16, 16, 4), np.uint8)
     want_a[5:13, 2:12] = arr[5:13, 2:12]
     assert (np.asarray(built.extract("A")) == want_a).all()
-    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B"])
+    same_extracts(built, atlas.build(options=repacking()), ["A", "B"])
 
 
 @pytest.mark.parametrize("offsets", ["30,0,32,16", "0,10,32,16"])
@@ -524,7 +538,7 @@ def test_mod_that_erases_pixels_shared_with_a_neighbours_hull_refuses(monkeypatc
     arr[:3, :10] = (200, 10, 10, 255)          # inside A's hull only
     arr[4:, 4:] = 0                             # everything over B's rect
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
-    refused(atlas, packer="polygons_in_place")
+    refused(atlas, packer="polygons")
 
 
 def test_mod_that_keeps_pixels_shared_with_a_neighbours_hull_goes_in_place(monkeypatch):
@@ -533,9 +547,9 @@ def test_mod_that_keeps_pixels_shared_with_a_neighbours_hull_goes_in_place(monke
     arr = np.asarray(atlas.extract("A")).copy()
     arr[:3, :10] = (200, 10, 10, 255)          # inside A's hull only; the shared pixels are kept
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
-    built = atlas.build(packer="polygons_in_place")
+    built = atlas.build(options=keeping(packer="polygons"))
     assert layout(built) == layout(atlas)
-    base = atlas.build(packer="polygons", split_composite=True)
+    base = atlas.build(options=repacking(packer="polygons"))
     got, want = np.asarray(built.extract("A", mesh_crop=True)), np.asarray(base.extract("A", mesh_crop=True))
     assert (got[..., 3] == want[..., 3]).all()
     assert (got[got[..., 3] > 0] == want[want[..., 3] > 0]).all()
@@ -565,7 +579,7 @@ def test_refused_meshed_attempt_releases_its_handles(monkeypatch):
 
     monkeypatch.setattr(AtlasModifier, "place_in_place", spy_place)
     monkeypatch.setattr(AtlasSession, "_pack_page", spy_pack)
-    atlas.build(packer="polygons_in_place")
+    atlas.build(options=keeping(packer="polygons"))
     assert seen["refused"]
     assert seen["fallback"] == seen["before"]
 
@@ -579,9 +593,9 @@ def test_semi_transparent_composite_goes_in_place_alpha_split():
     semi[..., 3] = 120
     arr[6:12, 3:14] = semi
     atlas.replace_composite(["A", "B"], Image.fromarray(arr, "RGBA"))
-    built = atlas.build(packer="rectangles_in_place")
+    built = atlas.build(options=keeping())
     assert layout(built) == layout(atlas)
-    same_extracts(built, atlas.build(packer="rectangles", split_composite=True), ["A", "B", "C"])
+    same_extracts(built, atlas.build(options=repacking()), ["A", "B", "C"])
     a, b = np.asarray(built.extract("A")), np.asarray(built.extract("B"))
     assert (a[6:12, 8:12, 3] < 120).all() and (b[6:12, 8:12, 3] < 120).all()     # split, not copied
     back = np.asarray(built.extract_composite(["A", "B"]))
@@ -598,7 +612,7 @@ def test_clearing_rgb_under_a_shared_transparent_pixel_goes_in_place(monkeypatch
     arr = np.asarray(atlas.extract("A")).copy()
     arr[6, 6] = 0
     atlas.replace({"A": Image.fromarray(arr, "RGBA")})
-    assert layout(atlas.build(packer="polygons_in_place")) == layout(atlas)
+    assert layout(atlas.build(options=keeping(packer="polygons"))) == layout(atlas)
 
 
 # --- padding that the pack never used shares its cache entry ------------------
@@ -618,33 +632,33 @@ def _pad_atlas(monkeypatch):
 def test_in_place_fit_ignores_padding(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.replace({"A": img(10, 8)})  # fits its slot: no repack, no add
-    first = atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
-    again = atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=9))
+    first = atlas.pack(options=keeping(padding=2))
+    again = atlas.pack(options=keeping(padding=9))
     assert len(calls) == 1 and again[0] is first[0] and again[1] is first[1]
-    assert atlas.pack_is_cached(packer="rectangles_in_place", packer_options=PackerOptions(padding=30))
-    assert not atlas.pack_is_cached(packer="rectangles", packer_options=PackerOptions(padding=30))
+    assert atlas.pack_is_cached(options=keeping(padding=30))
+    assert not atlas.pack_is_cached(options=repacking(padding=30))
 
 
 def test_in_place_add_or_repack_keeps_padding_in_the_key(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.add_region("N", img(3, 3))  # placed into free space with the padding as gap
-    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
-    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=3))
+    atlas.pack(options=keeping(padding=2))
+    atlas.pack(options=keeping(padding=3))
     assert len(calls) == 2
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.replace({"A": img(20, 14)})  # does not fit: the page repacks
-    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=2))
-    atlas.pack(packer="rectangles_in_place", packer_options=PackerOptions(padding=3))
+    atlas.pack(options=keeping(padding=2))
+    atlas.pack(options=keeping(padding=3))
     assert len(calls) == 2
 
 
 def test_pack_is_cached_without_edits_and_after_a_pack(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
-    assert atlas.pack_is_cached(packer="rectangles", packer_options=PackerOptions(padding=7))
+    assert atlas.pack_is_cached(options=repacking(padding=7))
     atlas.replace({"A": img(20, 14)})
     assert not atlas.pack_is_cached()
     atlas.pack()
-    assert atlas.pack_is_cached() and not atlas.pack_is_cached(packer="rectangles")
+    assert atlas.pack_is_cached(options=keeping()) and not atlas.pack_is_cached(options=repacking())
     assert len(calls) == 1
-    with pytest.raises(ValueError):
-        atlas.pack_is_cached(packer="rectangles_in_place", packer_options=PackerOptions(repack="always"))
+    with pytest.raises(TypeError):
+        atlas.pack_is_cached(packer="rectangles")

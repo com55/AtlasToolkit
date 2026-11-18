@@ -97,8 +97,8 @@ def untrimmed_nest(monkeypatch):
 
 @pytest.fixture
 def no_auto_bleed(monkeypatch):
-    """PackerOptions(bleed=None) stays off with split_composite, as before
-    bleed existed. For fixtures pinned to older commits."""
-    import atlas_toolkit.api as api
+    """PackOptions(bleed=None) stays off with a split pack, as before bleed
+    existed. For fixtures pinned to older commits."""
+    import atlas_toolkit.packer as packer_module
 
-    monkeypatch.setattr(api, "_auto_bleed", lambda split: False)
+    monkeypatch.setattr(packer_module, "_auto_bleed", lambda split: False)

@@ -27,7 +27,7 @@ from PIL import Image
 import atlas_toolkit.api as api
 from atlas_toolkit.api import SpineAtlas
 from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 
 FIXTURE = Path(__file__).with_name("fixtures") / "pma_straight_baseline.json"
 BASELINE_COMMIT = "54b9ace"
@@ -99,7 +99,7 @@ def page_section(text: str, filename: str) -> str:
     return AtlasDocument([p for p in doc.pages if p.filename == filename]).serialize()
 
 
-def multi_straight_page(packer: str, options: PackerOptions, skeleton: bool) -> dict:
+def multi_straight_page(packer: str, options: dict, skeleton: bool) -> dict:
     pages = {"pma.png": pattern(32, 8, 1, True), "st.png": pattern(32, 8, 2, False)}
     if skeleton:
         with fake_skeleton():
@@ -107,7 +107,9 @@ def multi_straight_page(packer: str, options: PackerOptions, skeleton: bool) -> 
     else:
         atlas = SpineAtlas.load(MULTI, pages)
     atlas.replace({"G": pattern(16, 8, 3, True), "S1": pattern(16, 8, 4, False)})
-    built = atlas.build(packer=packer, packer_options=options)
+    # The baseline predates keep-layout and the split default: pin both.
+    built = atlas.build(options=PackOptions(
+        packer=packer, try_keep_layout=False, share_composite_image=True, **options))
     return {"text": page_section(built.atlas_text, "st.png"), "page": digest(built.pages["st.png"])}
 
 
@@ -130,15 +132,15 @@ def mixed_split_rect() -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         atlas.replace_composite(["P", "S"], pattern(16, 8, 9, False))
-    built = atlas.build(split_composite=True, packer="shelf", packer_options=PackerOptions(mesh_aware=False))
+    built = atlas.build(options=PackOptions(packer="shelf", mesh_aware=False, try_keep_layout=False))
     return {"text": page_section(built.atlas_text, "st.png"), "page": digest(built.pages["st.png"])}
 
 
 CASES = {
-    "multi_shelf_mesh": lambda: multi_straight_page("shelf", PackerOptions(mesh_aware=True), True),
-    "multi_rectangles_mesh": lambda: multi_straight_page("rectangles", PackerOptions(mesh_aware=True), True),
-    "multi_polygons_mesh": lambda: multi_straight_page("polygons", PackerOptions(padding=2), True),
-    "multi_shelf_rect": lambda: multi_straight_page("shelf", PackerOptions(mesh_aware=False), False),
+    "multi_shelf_mesh": lambda: multi_straight_page("shelf", {"mesh_aware": True}, True),
+    "multi_rectangles_mesh": lambda: multi_straight_page("rectangles", {"mesh_aware": True}, True),
+    "multi_polygons_mesh": lambda: multi_straight_page("polygons", {"padding": 2}, True),
+    "multi_shelf_rect": lambda: multi_straight_page("shelf", {"mesh_aware": False}, False),
     "straight_mesh_crop_extract": straight_mesh_crop_extract,
     "mixed_force_resize": mixed_force_resize,
     "mixed_split_rect": mixed_split_rect,

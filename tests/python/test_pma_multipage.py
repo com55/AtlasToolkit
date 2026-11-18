@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 from tests.python.pma_cases import GLOW_IN, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow
 
 TWO = (
@@ -33,7 +33,7 @@ def test_pma_page_keeps_glow_next_to_a_straight_page(monkeypatch, packer, option
     # repack mask through a plain extract (mesh_crop would hide it).
     assert not np.asarray(atlas.extract("G", mesh_crop=True))[:, 8:].any()
     atlas.replace({"N": img(premultiplied_pattern(16, 8, 3)), "S1": img(premultiplied_pattern(16, 8, 4))})
-    built = atlas.build(packer=packer, packer_options=options)
+    built = atlas.build(options=PackOptions(packer=packer, **options))
     for crop in (False, True):
         g = np.asarray(built.extract("G", mesh_crop=crop))
         assert g[3, 2].tolist() == list(GLOW_IN), crop
@@ -47,7 +47,7 @@ def test_cross_page_all_pma_composite_is_exact():
     image = img(want)
     for _ in range(6):
         atlas.replace_composite(["P", "Q"], image)
-        atlas = atlas.build(split_composite=True, packer_options=PackerOptions(mesh_aware=False))
+        atlas = atlas.build(options=PackOptions(mesh_aware=False))
         image = atlas.extract_composite(["P", "Q"])
         assert np.array_equal(np.asarray(image), want)
 

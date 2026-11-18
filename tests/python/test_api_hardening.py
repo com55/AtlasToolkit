@@ -12,6 +12,7 @@ from PIL import Image
 import atlas_toolkit
 import atlas_toolkit.api as api
 from atlas_toolkit.api import DuplicatePage, SpineAtlas
+from atlas_toolkit.packer import PackOptions
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from tests.python.pma_cases import mesh
 
@@ -74,17 +75,17 @@ def test_built_atlases_reuse_the_parsed_skeleton(monkeypatch):
     atlas = SpineAtlas.load(text, {"p.png": page()}, skeleton=b"x")
     unchanged = atlas.build()
     atlas.replace({"B": page(4, 4)})
-    built = atlas.build(packer="polygons")
+    built = atlas.build(options=PackOptions(packer="polygons"))
     assert len(calls) == 1
     for child in (unchanged, built):
         assert child.extract("A", mesh_crop=True).size == (4, 4)
-        assert child.build(packer="polygons") is not None
+        assert child.build(options=PackOptions(packer="polygons")) is not None
 
 
 def test_package_lists_its_lazy_api_names():
     assert "DuplicatePage" in api.__all__
     assert atlas_toolkit.__all__ == sorted(atlas_toolkit._API_NAMES)
-    assert set(atlas_toolkit.__all__) <= set(api.__all__) | {"Packer", "PackerOptions", "AlphaMode"}
+    assert set(atlas_toolkit.__all__) <= set(api.__all__) | {"Packer", "PackOptions", "AlphaMode"}
     listed = dir(atlas_toolkit)
     assert "SpineAtlas" in listed and "DuplicatePage" in listed and "__getattr__" in listed
     assert atlas_toolkit.DuplicatePage is DuplicatePage

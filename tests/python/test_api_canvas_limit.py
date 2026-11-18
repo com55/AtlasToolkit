@@ -8,7 +8,7 @@ from PIL import Image
 import atlas_toolkit
 from atlas_toolkit.api import AtlasError, CanvasTooLarge, SpineAtlas
 from atlas_toolkit.domain import packing
-from atlas_toolkit.packer import PackerOptions
+from atlas_toolkit.packer import PackOptions
 
 ATLAS = (
     "page.png\nsize: 16,8\n"
@@ -24,11 +24,20 @@ def page():
     )
 
 
-@pytest.mark.parametrize("options", [{}, {"packer": "rectangles", "packer_options": PackerOptions(padding=3)}])
+REPACK = {"try_keep_layout": False}
+RECT = PackOptions(packer="rectangles", padding=4, **REPACK)
+
+
+# try_keep_layout=False: a replacement that fits its own slot needs no repack,
+# and the packers' canvas limit is only reached by one.
+@pytest.mark.parametrize("options", [
+    {"options": PackOptions(try_keep_layout=False)},
+    {"options": PackOptions(packer="rectangles", padding=3, **REPACK)},
+])
 def test_too_large_is_a_public_error_and_changes_nothing(monkeypatch, options):
     atlas = SpineAtlas.load(ATLAS, page())
     atlas.replace({"Head": Image.new("RGBA", (6, 5), (9, 8, 7, 255))})
-    good = atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4))
+    good = atlas.build(options=RECT)
     cache = atlas._build_cache
     names = [r.name for r in atlas.regions]
     monkeypatch.setattr(packing, "MAX_CANVAS", 8)  # 93 px² of sprites cannot fit in 8x8
@@ -43,7 +52,7 @@ def test_too_large_is_a_public_error_and_changes_nothing(monkeypatch, options):
     assert (snap.nest_regions_enabled, snap.nest_gap_distance, snap.mesh_aware_repack_enabled) == (False, 4, False)
     monkeypatch.setattr(packing, "MAX_CANVAS", 10000)
     assert atlas.build(**options).atlas_text
-    assert atlas.build(packer="rectangles", packer_options=PackerOptions(padding=4)).atlas_text == good.atlas_text
+    assert atlas.build(options=RECT).atlas_text == good.atlas_text
 
 
 def test_save_raises_before_writing(tmp_path, monkeypatch):
@@ -51,7 +60,7 @@ def test_save_raises_before_writing(tmp_path, monkeypatch):
     atlas.replace({"Head": Image.new("RGBA", (6, 5), (9, 8, 7, 255))})
     monkeypatch.setattr(packing, "MAX_CANVAS", 8)
     with pytest.raises(CanvasTooLarge):
-        atlas.save(tmp_path / "out" / "a.atlas")
+        atlas.save(tmp_path / "out" / "a.atlas", options=PackOptions(try_keep_layout=False))
     assert not (tmp_path / "out").exists()
 
 
@@ -67,7 +76,7 @@ def test_too_large_names_the_page_of_a_multi_page_atlas(monkeypatch):
     atlas.replace({"Tail": Image.new("RGBA", (8, 8), (9, 8, 7, 255))})
     monkeypatch.setattr(packing, "MAX_CANVAS", 7)
     with pytest.raises(CanvasTooLarge) as raised:
-        atlas.build()
+        atlas.build(options=PackOptions(try_keep_layout=False))
     assert raised.value.page == "second.png"
     assert "'second.png'" in str(raised.value) and "7 px per side" in str(raised.value)
 
@@ -77,7 +86,7 @@ def test_single_page_too_large_has_no_page(monkeypatch):
     atlas.replace({"Head": Image.new("RGBA", (6, 5), (9, 8, 7, 255))})
     monkeypatch.setattr(packing, "MAX_CANVAS", 8)
     with pytest.raises(CanvasTooLarge) as raised:
-        atlas.build()
+        atlas.build(options=PackOptions(try_keep_layout=False))
     assert raised.value.page is None
 
 

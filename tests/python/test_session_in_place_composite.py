@@ -2,25 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Keeping the layout with a shared composite image (spec 2026-11-18).
 
-`split_composite=False` gives every region of a `replace_composite` group the
-whole image, so a page holding such a group cannot keep its layout:
-`place_in_place`'s composite fit rule assumes one piece per region. That page
-is repacked unsplit instead, while every other page still tries to keep its
-layout.
+`share_composite_image=True` gives every region of a `replace_composite`
+group the whole image, so a page holding such a group cannot keep its
+layout: `place_in_place`'s composite fit rule assumes one piece per region.
+That page is repacked unsplit instead, while every other page still tries to
+keep its layout.
 
-The public API still forces a split whenever it keeps the layout (spec
-2026-11-05 R5; Task 3 removes that), so these tests drop the forcing and drive
-the engine through `SpineAtlas.build`, as the app will once the setting is its
-own.
+Since spec 2026-11-18 the API no longer forces a split when it keeps the
+layout, so these drive the unsplit build directly.
 """
-import dataclasses
-from contextlib import contextmanager
-
 import numpy as np
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit import SpineAtlas
+from atlas_toolkit import PackOptions, SpineAtlas
 from tests.python import test_api_in_place as in_place
 
 # Aliased survivors: A and B name one stored 10x8 rect with one offsets
@@ -37,20 +31,15 @@ PLAIN = ("p.png\nsize: 48,16\nA\n bounds: 0,0,10,8\n offsets: 2,3,16,16\n"
          "B\n bounds: 16,0,6,12\n offsets: 8,1,16,16\nC\n bounds: 32,0,12,12\n")
 
 
-def _unforced(resolved, split_composite):
-    """Today's `_pack_options` forces a split whenever the layout is kept;
-    this is the same cache key and auto-bleed rule without the forcing."""
-    split = bool(split_composite)
-    if resolved.bleed is None:
-        resolved = dataclasses.replace(resolved, bleed=api._auto_bleed(split))
-    return resolved, split
+def kept_unsplit(**fields):
+    """Keep the layout, every region of a composite group uses the whole image
+    unless a test overrides it."""
+    return PackOptions(**{"try_keep_layout": True, "share_composite_image": True, **fields})
 
 
-@contextmanager
-def unforced_split(monkeypatch):
-    with monkeypatch.context() as patch:
-        patch.setattr(api, "_pack_options", _unforced)
-        yield
+def repacked_unsplit(**fields):
+    """The same pack with every edited page repacked."""
+    return PackOptions(**{"try_keep_layout": False, "share_composite_image": True, **fields})
 
 
 def aliased_rects():
@@ -98,24 +87,22 @@ def page_block(built, filename):
     return [block for block in built.atlas_text.split("\n\n") if block.startswith(filename)]
 
 
-def test_shared_composite_page_repacks_unsplit(monkeypatch):
+def test_shared_composite_page_repacks_unsplit():
     atlas = aliased()
-    with unforced_split(monkeypatch):
-        kept = atlas.build(packer="rectangles_in_place", split_composite=False)
-    repacked = aliased().build(packer="rectangles", split_composite=False)
+    kept = atlas.build(options=kept_unsplit())
+    repacked = aliased().build(options=repacked_unsplit())
     in_place.same_build(kept, repacked)                    # text and pixels, unsplit
     layout = in_place.layout(kept)
     assert layout["A"] == layout["B"]                      # one sprite, one rect: shared image
     assert layout["A"] != ("p.png", (0, 0, 10, 8), 0, (2, 3, 16, 16))   # not the pristine slot
 
 
-def test_shared_composite_other_page_keeps_layout(monkeypatch):
+def test_shared_composite_other_page_keeps_layout():
     # Review Focus 2: the composite is on page 1 only; page 2 keeps its layout.
     atlas = two_pages()
-    with unforced_split(monkeypatch):
-        kept = atlas.build(packer="rectangles_in_place", split_composite=False)
+    kept = atlas.build(options=kept_unsplit())
     assert page_block(kept, "p.png") == page_block(
-        two_pages().build(packer="rectangles", split_composite=False), "p.png")
+        two_pages().build(options=repacked_unsplit()), "p.png")
     assert in_place.layout(kept)["A"] == in_place.layout(kept)["B"]
 
     layout = in_place.layout(kept)
@@ -128,25 +115,23 @@ def test_shared_composite_other_page_keeps_layout(monkeypatch):
         assert (before[y:y + h, x:x + w] == after[y:y + h, x:x + w]).all()
 
 
-def test_split_composite_in_place_unchanged(monkeypatch):
-    # Control: with the image split, both regions still go back into their
-    # own slots, i.e. the layout is kept exactly as today.
-    today = plain().build(packer="rectangles_in_place")    # the API still forces the split
-    with unforced_split(monkeypatch):
-        explicit = plain().build(packer="rectangles_in_place", split_composite=True)
-    in_place.same_build(today, explicit)
-    assert in_place.layout(explicit) == in_place.layout(plain())
-    assert explicit.pages["p.png"].size == (48, 16)
+def test_split_composite_keeps_the_layout():
+    # Control: with the image split (the default), both regions still go back
+    # into their own slots.
+    kept = plain().build(options=kept_unsplit(share_composite_image=False))
+    repacked = plain().build(options=repacked_unsplit(share_composite_image=False))
+    assert kept.atlas_text != repacked.atlas_text
+    assert in_place.layout(kept) == in_place.layout(plain())
+    assert kept.pages["p.png"].size == (48, 16)
 
 
-def test_single_survivor_composite_still_in_place(monkeypatch):
+def test_single_survivor_composite_still_in_place():
     # A one-region group is a plain mod: its page still tries in place.
     atlas = SpineAtlas.load(PLAIN, {"p.png": in_place.page(48, 16, plain_rects())})
     arr = np.asarray(atlas.extract("A")).copy()
     arr[5:13, 2:12] = in_place.pattern(10, 8, 9)
     atlas.replace_composite(["A"], Image.fromarray(arr, "RGBA"))
-    with unforced_split(monkeypatch):
-        kept = atlas.build(packer="rectangles_in_place", split_composite=False)
+    kept = atlas.build(options=kept_unsplit())
     assert in_place.layout(kept) == in_place.layout(atlas)
     assert kept.pages["p.png"].size == (48, 16)
     assert (np.asarray(kept.extract("A")) == arr).all()
