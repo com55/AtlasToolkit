@@ -1795,7 +1795,6 @@ body.mode-extract #advance-toolbar {
    moves up), not a box with its own scroll area. */
 #pack-panel.is-touch-modal { left:0 !important; top:0 !important; width:100%; height:100%; max-width:none; max-height:none; padding:16px; background:transparent; border:0; border-radius:0; box-shadow:none; overflow-y:auto; display:flex; }
 #pack-panel.is-touch-modal .pack-inner { margin:auto; width:min(420px, 100%); box-sizing:border-box; padding:14px; background:#2d2d2d; border:1px solid #555; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.5); }
-#pack-panel.is-touch-modal .pack-dirty { display:none; }
 /* One column: the rule between the two groups turns horizontal. */
 #pack-panel.is-touch-modal .pack-cols { grid-template-columns: minmax(0, 1fr); }
 #pack-panel.is-touch-modal .pack-col + .pack-col { margin: 0; padding: 10px 0 0; border-left: 0; border-top: 1px solid #3c3c3c; }
@@ -1821,12 +1820,8 @@ body.mode-extract #advance-toolbar {
 #packer-info { margin: auto; background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); width: min(640px, 100%); box-sizing: border-box; padding: 20px 22px; animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
 #packer-info h3 { margin: 0 0 4px; font-size: 18px; color: #ddd; }
 #packer-info .pi-lead { margin: 0 0 10px; color: #aaa; font-size: 12.5px; line-height: 1.5; }
-.pi-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #999; margin-bottom: 6px; }
-.pi-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.pi-legend i { width: 12px; height: 9px; display: inline-block; border-radius: 2px; }
-.pi-region { background: #3d7fb8; }
 .pi-card { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid #3c3c3c; align-items: start; }
-.pi-card svg { width: 170px; height: 112px; display: block; }
+.pi-card svg { width: 170px; height: 128px; display: block; }
 .pi-card h4 { margin: 0 0 4px; font-size: 13.5px; color: #e3e3e3; display: flex; gap: 8px; align-items: center; }
 .pi-card p { margin: 0; font-size: 12px; color: #bbb; line-height: 1.5; }
 .pi-pill { font-size: 10px; font-weight: 400; padding: 1px 7px; border-radius: 999px; border: 1px solid #806400; color: #ffc107; }

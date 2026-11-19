@@ -248,8 +248,7 @@ function showPackerInfo() {
     overlay.innerHTML = `<div id="packer-info" role="dialog" aria-modal="true" aria-labelledby="packer-info-title">
       <h3 id="packer-info-title">Packers</h3>
       <p class="pi-lead">A packer decides where regions go on the atlas page when you save edits.</p>
-      <div class="pi-legend"><span><i class="pi-region"></i>region</span></div>
-      <div class="pi-list">${PACKER_INFO.map(([title, body, svg, skel]) => `<div class="pi-card"><svg viewBox="0 0 170 112" aria-hidden="true"><rect x="1" y="1" width="168" height="110" fill="#1e1e1e" stroke="#555"/>${svg}</svg><div><h4>${title}${skel ? ' <span class="pi-pill">needs .skel</span>' : ''}</h4><p>${body}</p></div></div>`).join('')}</div>
+      <div class="pi-list">${PACKER_INFO.map(([title, body, svg, skel]) => `<div class="pi-card"><svg viewBox="0 0 170 128" aria-hidden="true"><rect x="1" y="1" width="168" height="126" fill="#1e1e1e" stroke="#555"/>${svg}</svg><div><h4>${title}${skel ? ' <span class="pi-pill">needs .skel</span>' : ''}</h4><p>${body}</p></div></div>`).join('')}</div>
       <p>Try to Keep Layout works with any packer.</p>
       <div class="modal-buttons"><button type="button" class="btn-primary" id="packer-info-ok">OK</button></div>
     </div>`;
@@ -305,19 +304,56 @@ export function initSettingsPanel() {
   renderSettings(AtlasAPI.get_settings());
 }
 
-const SHELF = [[6,6,44,38],[54,6,36,32],[94,6,30,26],[128,6,34,22],[6,48,40,28],[50,48,48,24],[102,48,26,20],[132,48,22,18],[6,80,56,20],[66,80,30,16]];
-const RECTS = [[6,6,44,38],[54,6,36,32],[94,6,30,26],[128,6,34,22],[128,32,26,20],[94,36,30,18],[54,42,36,24],[6,48,44,28],[94,58,40,16],[138,56,24,20],[6,80,56,20],[66,70,24,18],[94,78,30,16]];
-const rects = (list, fill) => list.map(([x,y,w,h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`).join('');
-const POLY = '<path d="M8 8 L52 8 L52 22 L30 44 L8 44 Z"/><path d="M34 46 L56 24 L56 60 L34 60 Z"/><path d="M60 8 L96 8 L84 40 L60 40 Z"/><path d="M88 42 L100 10 L132 10 L132 42 Z"/><circle cx="150" cy="26" r="14"/><path d="M8 50 L30 50 L30 96 L8 96 Z"/><path d="M60 46 L110 46 L110 62 L60 62 Z"/><path d="M114 48 L160 48 L137 92 Z"/><path d="M36 66 L106 66 L90 100 L36 100 Z"/>';
+// Sample regions packed by the real packers (shelf_pack / nest_pack, gap 2;
+// rectangles with solid footprints, polygons with the shapes). Name: [w, h, outline].
+const SHAPES = {
+  rounded: [29, 15, '<rect width="28.17" height="14.04" rx="2.25"/>'],
+  triangle: [10, 17, '<path d="M0.0 0.0 L0.0 16.34 L9.24 16.34 Z"/>'],
+  angle: [60, 34, '<path d="M0.0 0.0 L59.7 0.0 L59.7 34.0 L54.8 34.0 L54.8 8.3 L0.0 8.3 Z"/>'],
+  square: [9, 9, '<path d="M0.0 0.0 L8.28 0.0 L8.28 8.28 L0.0 8.28 Z"/>'],
+  circle: [9, 9, '<circle cx="4.4" cy="4.4" r="4.4"/>'],
+  diamond: [12, 8, '<path d="M0.0 3.6 L5.6 0.0 L11.12 3.6 L5.6 7.36 Z"/>'],
+  uframe: [32, 17, '<path d="M0.0 0.0 L6.5 0.0 L6.5 12.0 L24.7 12.0 L24.7 0.0 L31.2 0.0 L31.2 17.0 L0.0 17.0 Z"/>'],
+  parallelogram: [21, 27, '<path d="M4.96 0.0 L20.24 0.0 L15.28 26.64 L0.0 26.64 Z"/>'],
+  trapezoid: [13, 7, '<path d="M1.6 0.0 L10.84 0.0 L12.43 6.44 L0.0 6.44 Z"/>'],
+  chevron: [10, 12, '<path d="M0.0 0.0 L3.8 0.0 L9.24 5.78 L3.8 11.61 L0.0 11.61 L5.45 5.78 Z"/>'],
+  sliver: [17, 5, '<path d="M0.0 4.95 L16.28 0.0 L16.28 4.95 Z"/>'],
+  bird: [72, 60, '<path d="M0.0 47.6 L7.7 37.4 L25.8 39.1 L36.3 45.0 L52.8 31.6 L62.9 21.4 L43.6 14.8 L51.5 7.9 L58.8 7.7 L63.3 0.0 L65.3 4.1 L71.3 19.5 L66.3 40.4 L52.6 54.8 L22.5 59.4 L24.5 46.7 Z"/>'],
+  small1: [14, 13, '<path d="M13.8 6.7 L13.1 11.4 L8.2 12.8 L2.1 10.0 L0.0 8.4 L3.5 3.0 L5.5 0.0 L10.1 2.9 Z"/>'],
+  small2: [5, 7, '<path d="M4.4 3.1 L5.0 6.8 L1.2 5.6 L0.0 3.2 L1.4 1.2 L3.4 0.0 Z"/>'],
+  small3: [8, 8, '<path d="M8.0 3.5 L4.6 7.5 L0.0 7.0 L0.7 0.0 L5.3 0.0 Z"/>'],
+  small4: [12, 12, '<path d="M11.2 5.1 L9.3 11.5 L0.0 9.1 L3.2 3.9 L6.8 0.0 Z"/>'],
+  small5: [9, 10, '<path d="M7.8 6.8 L8.3 10.0 L5.0 8.9 L0.0 9.8 L0.4 4.9 L0.7 1.8 L3.7 0.0 L8.0 3.2 Z"/>'],
+  small6: [13, 13, '<path d="M12.1 8.0 L8.6 12.3 L4.6 11.2 L1.9 9.8 L0.0 6.5 L1.3 1.6 L4.5 0.0 L9.0 4.7 Z"/>'],
+};
+// Per packer: page size and [name, x, y, rotate] (rotate as stored on the page).
+const LAYOUTS = {
+  shelf: {page: [140, 100], items: [['bird',0,0,0], ['angle',74,0,0], ['uframe',0,62,0], ['rounded',34,62,0], ['parallelogram',65,62,90], ['triangle',94,62,0], ['sliver',106,62,0], ['small1',125,62,0], ['trapezoid',0,85,0], ['small6',15,85,0], ['diamond',30,85,0], ['chevron',44,85,0], ['small4',56,85,0], ['small5',70,85,0], ['square',81,85,0], ['circle',92,85,0], ['small3',103,85,0], ['small2',113,85,0]]},
+  rectangles: {page: [132, 92], items: [['bird',0,0,0], ['angle',76,0,90], ['uframe',112,0,90], ['rounded',112,36,90], ['parallelogram',0,64,0], ['triangle',24,64,0], ['sliver',36,64,0], ['small1',56,64,0], ['trapezoid',72,64,0], ['small6',88,64,0], ['diamond',104,68,0], ['chevron',120,68,0], ['small4',36,72,0], ['small5',72,76,0], ['square',52,80,0], ['circle',84,80,0], ['small3',96,80,0], ['small2',64,80,0]]},
+  polygons: {page: [96, 88], items: [['bird',0,0,0], ['angle',0,52,180], ['uframe',0,0,0], ['rounded',0,20,0], ['parallelogram',72,8,0], ['triangle',36,0,270], ['sliver',72,0,0], ['small1',32,16,0], ['trapezoid',68,40,0], ['small6',80,44,90], ['diamond',60,48,0], ['chevron',8,52,0], ['small4',52,56,0], ['small5',12,0,0], ['square',32,60,0], ['circle',68,56,0], ['small3',32,32,0], ['small2',48,20,0]]},
+};
+
+// rotate:90 is stored 90 CCW (as rotate_grid_for_pack maps it).
+const turn = (deg, w, h) => ({0: [1,0,0,1,0,0], 90: [0,-1,1,0,0,w], 180: [-1,0,0,-1,w,h], 270: [0,1,-1,0,h,0]})[deg].join(' ');
+const SCALE = 1.15;  // the largest page (shelf, 140x100) fits the 170x128 frame
+// Each region with its rectangle as a faint dashed line, on its page.
+const layout = name => {
+  const {page: [pw, ph], items} = LAYOUTS[name];
+  return `<g transform="translate(3 3) scale(${SCALE})"><rect width="${pw}" height="${ph}" fill="#262626"/>` + items.map(([key, x, y, deg]) => {
+    const [w, h, shape] = SHAPES[key];
+    return `<g transform="translate(${x} ${y}) matrix(${turn(deg, w, h)})"><g fill="#3d7fb8">${shape}</g><rect width="${w}" height="${h}" fill="none" stroke="#9cc6ea" stroke-width=".6" stroke-dasharray="2 2" opacity=".4"/></g>`;
+  }).join('') + '</g>';
+};
+const POLYGONS = layout('polygons');
 const PACKER_INFO = [
   ['Auto', 'Uses Polygons when a .skel is loaded, otherwise Rectangles.',
-    `<g fill="#3d7fb8">${POLY}</g><rect x="34" y="24" width="22" height="36" fill="none" stroke="#9cc6ea" stroke-dasharray="2 2" opacity=".8"/>`],
+    POLYGONS],
   ['Shelf', 'Lays regions out in rows, tallest first. The fastest packer; leaves empty space above shorter regions in a row.',
-    rects(SHELF, '#3d7fb8') + '<g stroke="#888" stroke-dasharray="3 3"><line x1="4" y1="46" x2="166" y2="46"/><line x1="4" y1="78" x2="166" y2="78"/></g>'],
+    layout('shelf')],
   ['Rectangles', 'Puts each region into the first gap its rectangle fits, including gaps between regions already placed. Smaller pages than Shelf.',
-    rects(RECTS, '#3d7fb8')],
+    layout('rectangles')],
   ['Polygons', "Packs by each region's mesh outline instead of its rectangle, so shapes nest into each other's empty corners. The smallest pages. A region's rectangle may then hold parts of its neighbours (dashed); Spine draws only inside the mesh.",
-    `<g fill="#3d7fb8">${POLY}</g><rect x="34" y="24" width="22" height="36" fill="none" stroke="#9cc6ea" stroke-dasharray="2 2" opacity=".8"/>`, true],
+    POLYGONS, true],
 ];
 const INFO = '<svg xmlns="http://www.w3.org/2000/svg" height="15" width="15" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="M440-280h80v-240h-80v240Zm40-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Z"/></svg>';
 const CHECK = '<svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg>';

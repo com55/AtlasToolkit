@@ -741,9 +741,9 @@ try {
   if (!await settingsPage.locator('#options-row').evaluate(el => el.classList.contains('compact-chips'))) throw new Error('Chips keep their words on a narrow row');
   if (await settingsPage.locator('#btn-pack-chip .chip-label').isVisible()) throw new Error('Settings word shown on a narrow row');
   if (!await settingsPage.locator('#btn-pack-chip .chip-sep').isVisible()) throw new Error('Chip divider hidden on a narrow row');
-  // Phone: a full modal; its own buttons decide, so no unsaved note.
+  // Phone: a full modal with the same unsaved note.
   if (!await settingsPage.locator('#pack-panel').evaluate(el => el.classList.contains('is-touch-modal'))) throw new Error('Narrow settings is not a modal');
-  if (await settingsPage.locator('.pack-dirty').isVisible()) throw new Error('Unsaved note shown in the phone modal');
+  if (!await settingsPage.locator('.pack-dirty').isVisible()) throw new Error('Unsaved note missing in the phone modal');
   await settingsPage.locator('#btn-packer-info').click();
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
   const infoTop = await settingsPage.evaluate(() => [document.getElementById('packer-info-overlay').scrollTop, document.getElementById('packer-info-title').getBoundingClientRect().top]);
