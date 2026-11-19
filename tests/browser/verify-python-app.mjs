@@ -275,7 +275,7 @@ try {
   await app.evaluate(() => { window.showSaveFilePicker = undefined; window.showDirectoryPicker = undefined; });
   const downloaded = app.waitForEvent('download');
   await app.locator('#btn-extract-all').click();
-  await app.locator('#modal-overlay').waitFor({state:'visible'});
+  await app.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   await app.locator('#btn-modal-confirm').click();
   const download = await downloaded;
   if (!download.suggestedFilename().endsWith('.zip')) throw new Error('Extract All did not download a zip');
@@ -312,7 +312,7 @@ try {
       new File([duplicate], 'duplicate.atlas'), ...window.testPages,
     ]);
   });
-  await app.locator('#modal-overlay').waitFor({state:'visible'});
+  await app.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   const message = await app.locator('#modal-message').innerText();
   if (!message.includes('atlas has duplicate region names: a')) throw new Error('DuplicateRegionName message missing: ' + message);
   if (await app.locator('#modal-title').innerText() !== 'Cannot open atlas') throw new Error('Wrong error title');
@@ -389,16 +389,16 @@ try {
   if (!imageBytes.equals(Buffer.from(expectedImage))) throw new Error('Save Image differs from active page PNG');
   const beforeError = await app.locator('#preview-img').getAttribute('src');
   await app.evaluate(() => { window.tooLarge = window.makeMod(10001,4).then(file => window.testAPI.process_mod_image(file, ['a'])); });
-  await app.locator('#modal-overlay').waitFor({state:'visible'});
+  await app.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   await app.locator('#btn-modal-confirm').click();
   await app.evaluate(() => window.tooLarge);
   if (await app.locator('#preview-img').getAttribute('src') !== beforeError) throw new Error('Failed edit changed preview');
   await app.locator('#mode-extract').click();
-  await app.locator('#modal-overlay').waitFor({state:'visible'});
+  await app.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   if (!(await app.locator('#modal-message').innerText()).includes('unsaved')) throw new Error('Unsaved prompt missing');
   await app.locator('#btn-modal-cancel').click();
   await app.locator('#btn-reset-mod').click();
-  await app.locator('#modal-overlay').waitFor({state:'visible'});
+  await app.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   await app.locator('#btn-modal-confirm').click();
   await app.waitForFunction(() => !window.testAPI.has_pending_modifications(), null, {polling:500});
   await app.waitForFunction(() => document.querySelectorAll('.region-item').length === 2, null, {polling:500});
@@ -473,7 +473,7 @@ try {
     window.recoveryAPI = AtlasAPI;
     window.__atlasToolkitTestHooks.killEngine();
   });
-  await recovery.locator('#modal-overlay').waitFor({state:'visible'});
+  await recovery.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
   if (!(await recovery.locator('#modal-message').innerText()).includes('edits were lost')) throw new Error('Engine death alert missing');
   await recovery.locator('#btn-modal-confirm').click();
   await recovery.waitForFunction(() => document.body.classList.contains('mode-extract') && document.querySelector('.region-item')?.textContent === 'a', null, {timeout:120000,polling:500});
@@ -535,7 +535,7 @@ try {
       const pending = await settingsPage.evaluate(() => window.settingsAPI.has_pending_modifications());
       await settingsPage.locator('#mode-extract').click();
       if (pending) {
-        await settingsPage.locator('#modal-overlay').waitFor({state:'visible'});
+        await settingsPage.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
         await settingsPage.locator('#btn-modal-confirm').click();
       }
       await waitInPage(settingsPage, async () => document.body.classList.contains('mode-extract') && !(await window.__appModule('busy-overlay')).isBusy());
@@ -645,7 +645,7 @@ try {
   await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
   await settingsPage.keyboard.type('5');
   await settingsPage.waitForTimeout(600);
-  if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Typing padding opened a modal');
+  if (await settingsPage.locator('#modal-overlay:not(.hidden)').isVisible()) throw new Error('Typing padding opened a modal');
   if (!await settingsPage.locator('#p-num').evaluate(el => document.activeElement === el && el.value === '15')) throw new Error('Padding typing lost focus or digits');
   if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('2px')) throw new Error('Draft padding applied before Save');
   // Keep the typed 15px value for the persistence check after reload.
@@ -660,16 +660,19 @@ try {
       if (!await settingsPage.locator('[data-setting="'+key+'"]').isEnabled()) throw new Error('Packer locked ' + key);
     }
   }
-  if (await settingsPage.locator('#hint-shareCompositeImage').count() !== 1) throw new Error('Share Composite Image hint missing');
-  // Hints are closed until their info button opens them.
-  if (await settingsPage.locator('#hint-keepLayout').isVisible()) throw new Error('Keep layout hint open by default');
-  await settingsPage.locator('[data-hint="keepLayout"]').click();
-  if (!(await settingsPage.locator('#hint-keepLayout').innerText()).includes('Keep existing region positions when possible')) throw new Error('Keep layout hint');
-  if (await settingsPage.locator('[data-hint="keepLayout"]').getAttribute('aria-expanded') !== 'true') throw new Error('Hint button state');
+  // Every info button opens the info modal on its own topic, with figures.
+  for (const [key, text] of [['meshAware', 'mesh outline'], ['shareCompositeImage', 'every region uses the whole image'], ['bleed', 'alpha stays 0'], ['padding', 'Empty pixels kept between images'], ['keepLayout', 'Keep existing region positions when possible']]) {
+    await settingsPage.locator('[data-info="'+key+'"]').click();
+    await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
+    if (!(await settingsPage.locator('#packer-info').innerText()).includes(text)) throw new Error('Info modal text ' + key);
+    if (await settingsPage.locator('#packer-info .info-figs svg').count() < 1) throw new Error('Info modal figure ' + key);
+    await settingsPage.keyboard.press('Escape');
+    await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
+    if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Closing an info modal closed the panel');
+  }
   await settingsPage.locator('#btn-packer-info').click();
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'visible'});
-  if (await settingsPage.locator('.pi-card').count() !== 4) throw new Error('Packer info cards');
-  if (!(await settingsPage.locator('#packer-info').innerText()).includes('Try to Keep Layout works with any packer.')) throw new Error('Packer info layout explanation');
+  if (await settingsPage.locator('.pi-card').count() !== 3) throw new Error('Packer info cards');
   await settingsPage.keyboard.press('Escape');
   await settingsPage.locator('#packer-info-overlay').waitFor({state:'hidden'});
   if (!await settingsPage.locator('#pack-panel').isVisible()) throw new Error('Closing packer info closed the panel');
@@ -706,9 +709,8 @@ try {
   if (await settingsPage.locator('#pack-panel').evaluate(el => el.classList.contains('pack-attention') || el.getAnimations().length > 0)) throw new Error('Attention flash replays on open');
   await settingsPage.locator('#pack-cancel').click();
   await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
-  // A clean panel still closes on an outside click; hints start closed every time.
+  // A clean panel still closes on an outside click.
   await openSettings();
-  if (await settingsPage.locator('#hint-keepLayout').isVisible()) throw new Error('Hint stayed open after reopening');
   await settingsPage.locator('#sidebar-head').click();
   await settingsPage.locator('#pack-panel').waitFor({state:'hidden'});
   // Pack both once (the draft above was cancelled), so the next two are cached.
@@ -771,7 +773,7 @@ try {
   await settingsPage.locator('#mode-modify').click();
   await waitForEdit(settingsPage);
   if (!(await settingsPage.locator('#btn-pack-chip').innerText()).includes('Rectangles ·')) throw new Error('Migrated polygons fallback chip');
-  if (await settingsPage.locator('#modal-overlay').isVisible()) throw new Error('Migrated preference opened an error dialog');
+  if (await settingsPage.locator('#modal-overlay:not(.hidden)').isVisible()) throw new Error('Migrated preference opened an error dialog');
   await settingsPage.evaluate(async () => {
     const settings = window.settingsAPI.get_settings();
     if (settings.fallbackFrom !== 'polygons' || settings.requested.packer !== 'polygons' || !settings.requested.keepLayout) throw new Error('In-place preference migration');
@@ -816,7 +818,7 @@ try {
   await settingsPage.waitForFunction(() => !document.getElementById('pack-save').disabled, null, {polling:500});
   await settingsPage.locator('#pack-save').click();
   try {
-    await settingsPage.locator('#modal-overlay').waitFor({state:'visible',timeout:30000});
+    await settingsPage.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible',timeout:30000});
   } catch (error) {
     const size = await settingsPage.evaluate(() => window.lastSettingsPackedPageSize || 'no EditResult returned');
     throw new Error('Setting failure dialog did not appear within 30s; last EditResult packed page size: ' + size + '; ' + error.message);
@@ -857,7 +859,7 @@ try {
     const pending = await pendingPage.evaluate(() => window.pendingAPI.has_pending_modifications());
     await pendingPage.locator('#mode-extract').click();
     if (pending) {
-      await pendingPage.locator('#modal-overlay').waitFor({state:'visible'});
+      await pendingPage.locator('#modal-overlay:not(.hidden)').waitFor({state:'visible'});
       await pendingPage.locator('#btn-modal-confirm').click();
     }
     await pendingPage.waitForFunction(() => document.body.classList.contains('mode-extract'), null, {polling:500});

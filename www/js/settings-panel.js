@@ -32,7 +32,6 @@ const LOCK_REASONS = {
 // that applies them (AppHost._settings).
 let settings = null, draft = null, view = null, fallback = null, timer = null;
 let previewSeq = 0;
-const openHints = new Set();
 export function resetSettingsFallback() { fallback = null; }
 const panel = () => document.getElementById('pack-panel');
 const chip = () => document.getElementById('btn-pack-chip');
@@ -132,16 +131,12 @@ async function save() {
 }
 
 function infoButton(key, label) {
-  const open = openHints.has(key);
-  return `<button type="button" class="info-btn" data-hint="${key}" aria-expanded="${open}" aria-label="About ${label}">${INFO}</button>`;
-}
-function hint(key, extraClass = '') {
-  return `<p class="hint ${extraClass}" id="hint-${key}" ${openHints.has(key) ? '' : 'hidden'}>${HINTS[key]}</p>`;
+  return `<button type="button" class="info-btn" data-info="${key}" aria-haspopup="dialog" aria-label="About ${label}">${INFO}</button>`;
 }
 function toggle(value, key, label) {
   const locked = value[`${key}Locked`];
   const reason = locked ? ` data-help="${LOCK_REASONS[key](value)}"` : '';
-  return `<div class="opt"><div class="opt-line"><label class="toggle-label ${locked ? 'is-locked' : ''}"${reason}><input type="checkbox" data-setting="${key}" ${value[key] ? 'checked' : ''} ${locked ? 'disabled' : ''}><span class="toggle-switch"></span><span>${label}</span></label>${infoButton(key, label)}</div>${hint(key)}</div>`;
+  return `<div class="opt"><div class="opt-line"><label class="toggle-label ${locked ? 'is-locked' : ''}"${reason}><input type="checkbox" data-setting="${key}" ${value[key] ? 'checked' : ''} ${locked ? 'disabled' : ''}><span class="toggle-switch"></span><span>${label}</span></label>${infoButton(key, label)}</div></div>`;
 }
 
 export function renderSettings(value) {
@@ -179,7 +174,7 @@ function render() {
     <div class="pack-col"><div class="sec"><div class="sec-head"><p class="pack-heading">Packer</p><button type="button" class="info-btn" id="btn-packer-info" aria-label="About the packers">${INFO}</button></div><div class="pk-menu">${packers}</div></div></div>
     <div class="pack-col">
       <div class="sec"><p class="pack-heading">Regions</p>${toggle(value, 'meshAware', 'Mesh-Aware')}${toggle(value, 'shareCompositeImage', 'Share Composite Image')}</div>
-      <div class="sec"><p class="pack-heading">Spacing</p><div class="sec-head"><span class="pack-sub">Padding (px)</span>${infoButton('padding', 'Padding')}<button id="btn-pad-reset" type="button" data-help="Reset to default (2)" aria-label="Reset to default (2)">${RESET}</button></div>${hint('padding', 'hint-flush')}<div class="padding-controls"><input type="range" id="p-range" min="1" max="100" value="${Math.min(100,value.padding)}"><input type="number" id="p-num" min="1" max="256" step="1" value="${value.padding}"></div><div class="opt-gap"></div>${toggle(value, 'bleed', 'Bleed')}</div>
+      <div class="sec"><p class="pack-heading">Spacing</p><div class="sec-head"><span class="pack-sub">Padding (px)</span>${infoButton('padding', 'Padding')}<button id="btn-pad-reset" type="button" data-help="Reset to default (2)" aria-label="Reset to default (2)">${RESET}</button></div><div class="padding-controls"><input type="range" id="p-range" min="1" max="100" value="${Math.min(100,value.padding)}"><input type="number" id="p-num" min="1" max="256" step="1" value="${value.padding}"></div><div class="opt-gap"></div>${toggle(value, 'bleed', 'Bleed')}</div>
       <div class="sec"><p class="pack-heading">Layout</p>${toggle(value, 'keepLayout', 'Try to Keep Layout')}</div>
       ${alphaSection}
     </div>
@@ -204,15 +199,8 @@ function render() {
   } else inner().replaceChildren(...content.children);
   panel().querySelectorAll('[data-packer]').forEach(b => b.onclick = () => setDraft('packer', b.dataset.packer));
   panel().querySelectorAll('[data-setting]').forEach(c => c.onchange = () => setDraft(c.dataset.setting, c.checked));
-  panel().querySelectorAll('[data-hint]').forEach(b => b.onclick = () => {
-    const key = b.dataset.hint;
-    const open = !openHints.has(key);
-    if (open) openHints.add(key); else openHints.delete(key);
-    b.setAttribute('aria-expanded', String(open));
-    document.getElementById(`hint-${key}`).hidden = !open;
-    positionPanel();
-  });
-  document.getElementById('btn-packer-info').onclick = showPackerInfo;
+  panel().querySelectorAll('[data-info]').forEach(b => b.onclick = () => showInfo(b.dataset.info));
+  document.getElementById('btn-packer-info').onclick = () => showInfo('packer');
   const range = document.getElementById('p-range');
   const number = document.getElementById('p-num');
   range.oninput = () => { number.value = range.value; };
@@ -240,22 +228,33 @@ function packerInfo() {
 function closePackerInfo() {
   packerInfo()?.classList.add('hidden');
 }
-function showPackerInfo() {
+// One modal for every info button; its content is swapped per topic.
+function infoContent(key) {
+  if (key === 'packer') {
+    return `<h3 id="packer-info-title">Packers</h3>
+      <p class="pi-lead">A packer decides where regions go on the atlas page when you save edits.</p>
+      <div class="pi-list">${PACKER_INFO.map(([title, body, svg, skel]) => `<div class="pi-card"><svg viewBox="0 0 170 128" aria-hidden="true"><rect x="1" y="1" width="168" height="126" fill="#1e1e1e" stroke="#555"/>${svg}</svg><div><h4>${title}${skel ? ' <span class="pi-pill">needs .skel</span>' : ''}</h4><p>${body}</p></div></div>`).join('')}</div>`;
+  }
+  const {title, figs, legend = []} = INFO_PAGES[key];
+  const swatch = color => color === 'dash' ? '<i class="pi-dash"></i>' : `<i style="background:${color}"></i>`;
+  return `<h3 id="packer-info-title">${title}</h3>
+    <p class="pi-lead">${HINTS[key]}</p>
+    ${legend.length ? `<div class="pi-legend">${legend.map(([color, text]) => `<span>${swatch(color)}${text}</span>`).join('')}</div>` : ''}
+    <div class="info-figs">${figs.map(([caption, svg, w = 170]) => `<figure class="${w > 170 ? 'wide' : ''}"><svg viewBox="0 0 ${w} 110" aria-hidden="true"><rect x="1" y="1" width="${w - 2}" height="108" fill="#1e1e1e" stroke="#555"/>${svg}</svg><figcaption>${caption}</figcaption></figure>`).join('')}</div>`;
+}
+function showInfo(key) {
   let overlay = packerInfo();
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'packer-info-overlay';
-    overlay.innerHTML = `<div id="packer-info" role="dialog" aria-modal="true" aria-labelledby="packer-info-title">
-      <h3 id="packer-info-title">Packers</h3>
-      <p class="pi-lead">A packer decides where regions go on the atlas page when you save edits.</p>
-      <div class="pi-list">${PACKER_INFO.map(([title, body, svg, skel]) => `<div class="pi-card"><svg viewBox="0 0 170 128" aria-hidden="true"><rect x="1" y="1" width="168" height="126" fill="#1e1e1e" stroke="#555"/>${svg}</svg><div><h4>${title}${skel ? ' <span class="pi-pill">needs .skel</span>' : ''}</h4><p>${body}</p></div></div>`).join('')}</div>
-      <p>Try to Keep Layout works with any packer.</p>
-      <div class="modal-buttons"><button type="button" class="btn-primary" id="packer-info-ok">OK</button></div>
-    </div>`;
+    overlay.innerHTML = `<div id="packer-info" role="dialog" aria-modal="true" aria-labelledby="packer-info-title"><div id="packer-info-body"></div>
+      <div class="modal-buttons"><button type="button" class="btn-primary" id="packer-info-ok">OK</button></div></div>`;
     document.body.append(overlay);
     overlay.addEventListener('click', e => { if (e.target === overlay) closePackerInfo(); });
     document.getElementById('packer-info-ok').onclick = closePackerInfo;
   }
+  document.getElementById('packer-info-body').innerHTML = infoContent(key);
+  overlay.dataset.topic = key;
   overlay.classList.remove('hidden');
   overlay.scrollTop = 0;
   // preventScroll: focusing OK must not scroll a tall modal to its end.
@@ -269,7 +268,7 @@ export function initSettingsPanel() {
   chip().onclick = () => {
     if (!settings) return;
     if (isOpen()) { requestClose(); return; }
-    draft = null; view = null; openHints.clear(); render();
+    draft = null; view = null; render();
     delete p.dataset.opened;
     p.classList.remove('hidden'); chip().setAttribute('aria-expanded','true'); positionPanel();
   };
@@ -345,9 +344,69 @@ const layout = name => {
   }).join('') + '</g>';
 };
 const POLYGONS = layout('polygons');
+// Figures for the info modals (170x110 each). Blue: regions, orange: an
+// edited image, green: an added region; dashed: a region's rectangle.
+const B = '#3d7fb8', E = '#d08a2e', A = '#4caf50', DASH = 'fill="none" stroke="#9cc6ea" stroke-width=".8" stroke-dasharray="3 2"';
+const label = (x, y, text) => `<text x="${x}" y="${y}" font-size="9" fill="#ccc" text-anchor="middle">${text}</text>`;
+// A concave mesh (a C shape) and stray pixels outside it.
+const MESH = 'M34 18 L104 18 L104 38 L62 38 L62 70 L104 70 L104 92 L34 92 Z';
+const OUTLINE = `<path d="${MESH}" fill="none" stroke="#fff" stroke-width=".8" stroke-dasharray="3 2" opacity=".8"/>`;
+const box = (x, y, w, h, fill) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
+const STRAY = box(16, 48, 14, 12, B) + box(70, 46, 12, 8, B) + box(80, 58, 10, 8, B);
+const arrow = (x, y) => `<path d="M${x} ${y - 4} L${x + 14} ${y - 4} L${x + 14} ${y - 9} L${x + 24} ${y} L${x + 14} ${y + 9} L${x + 14} ${y + 4} L${x} ${y + 4} Z" fill="#888"/>`;
+// The replacement image: a head overlapping a body.
+const PERSON = (x, y) => `<g transform="translate(${x} ${y})"><rect x="6" y="26" width="28" height="52" rx="5" fill="${B}"/><circle cx="20" cy="18" r="16" fill="#5a9fd8"/></g>`;
+const slot = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" ${DASH}/>`;
+const clip = (id, x, y, w, h, body) => `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath><g clip-path="url(#${id})">${body}</g>`;
+const SOURCE = `${label(36, 12, 'Image')}${slot(12, 18, 48, 86)}${PERSON(16, 22)}${arrow(70, 60)}`;
+const pixels = (on) => {
+  const cells = [];
+  for (let row = 0; row < 4; row++) for (let col = 0; col < 7; col++) {
+    const x = 14 + col * 20, y = 10 + row * 14, filled = col < 3;
+    const fill = filled ? E : (on && col === 3 ? E : '#2a2a2a');
+    const op = filled ? 1 : (on && col === 3 ? .35 : 1);
+    cells.push(`<rect x="${x}" y="${y}" width="19" height="13" fill="${fill}" opacity="${op}"/>`);
+  }
+  const [c1, c2, c3] = (on ? `${E};${E};${E}00` : `${E};#3a2a14;${E}00`).split(';');
+  const id = on ? 'bleed-on' : 'bleed-off';
+  return cells.join('') + `<defs><linearGradient id="${id}"><stop offset="0" stop-color="${c1}"/><stop offset=".55" stop-color="${c2}"/><stop offset="1" stop-color="${c3}"/></linearGradient></defs>`
+    + `<rect x="14" y="78" width="139" height="14" fill="url(#${id})"/>` + label(84, 103, 'edge after filtering');
+};
+// Try to Keep Layout: one page before and after (r: removed, e: edited, n: new).
+const ORIGINAL = [[10, 10, 50, 40], [64, 10, 40, 40], [108, 10, 52, 26], [10, 54, 70, 30], [84, 54, 40, 46], [128, 40, 32, 24]];
+const GHOST = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#777" stroke-width=".8" stroke-dasharray="3 2"/>`;
+const page = list => list.map(([x, y, w, h, kind]) => kind === 'r' ? GHOST(x, y, w, h) : box(x, y, w, h, kind === 'e' ? E : kind === 'n' ? A : B)).join('');
+const INFO_PAGES = {
+  meshAware: {title: 'Mesh-Aware', figs: [
+    ['Off: the whole image is packed, stray pixels included.',
+      `<path d="${MESH}" fill="${B}"/>${STRAY}${OUTLINE}<rect x="14" y="14" width="94" height="82" ${DASH}/>${box(122, 30, 36, 50, B)}`],
+    ['On: pixels outside the mesh outline are cleared, so the rectangle shrinks.',
+      `<path d="${MESH}" fill="${B}"/>${OUTLINE}<rect x="30" y="14" width="78" height="82" ${DASH}/>${box(116, 30, 36, 50, B)}`],
+  ]},
+  shareCompositeImage: {title: 'Share Composite Image', figs: [
+    ['Off: split before packing; each region gets its own piece.',
+      `<g transform="translate(1 0)">${SOURCE}${label(129, 10, 'Head')}${slot(104, 16, 50, 48)}${clip('sc-head', 104, 22, 50, 36, PERSON(109, 22))}`
+      + `${label(191, 10, 'Body')}${slot(166, 16, 50, 64)}${clip('sc-body', 166, 20, 50, 52, PERSON(171, -6))}</g>`, 230],
+    ['On: the regions share the whole image in packing.',
+      `<g transform="translate(32 0)">${SOURCE}${label(129, 12, 'Head + Body')}${slot(104, 18, 50, 86)}${PERSON(109, 22)}</g>`, 230],
+  ]},
+  bleed: {title: 'Bleed', figs: [
+    ['Off: transparent pixels are black, so the edge darkens when filtered.', pixels(false)],
+    ['On: they take the image\'s colour (still transparent), so the edge stays clean.', pixels(true)],
+  ]},
+  padding: {title: 'Padding', figs: [
+    ['The gap between images; none is added at the page edges.',
+      `${box(27, 13, 50, 34, B)}${box(93, 13, 50, 34, B)}${box(27, 63, 50, 34, B)}${box(93, 63, 50, 34, B)}<g stroke="#ffc107" stroke-width="1"><line x1="78" y1="30" x2="92" y2="30"/><line x1="78" y1="25" x2="78" y2="35"/><line x1="92" y1="25" x2="92" y2="35"/><line x1="52" y1="48" x2="52" y2="62"/><line x1="47" y1="48" x2="57" y2="48"/><line x1="47" y1="62" x2="57" y2="62"/></g>`],
+  ]},
+  keepLayout: {title: 'Try to Keep Layout', legend: [[E, 'edited'], [A, 'added'], ['dash', 'removed']], figs: [
+    ['The original atlas page.', page(ORIGINAL)],
+    ["On: regions stay put; the new one goes into free space, such as a removed region's spot.",
+      page([ORIGINAL[0], [...ORIGINAL[1], 'e'], ORIGINAL[2], [...ORIGINAL[3], 'r'], ORIGINAL[4], ORIGINAL[5], [14, 58, 56, 22, 'n']])],
+    ['Off, or when an edit does not fit: the page is repacked.',
+      page([[10, 10, 40, 46], [54, 10, 50, 40], [108, 10, 40, 40, 'e'], [10, 60, 52, 26], [66, 54, 56, 22, 'n'], [126, 54, 32, 24]])],
+  ]},
+};
 const PACKER_INFO = [
-  ['Auto', 'Uses Polygons when a .skel is loaded, otherwise Rectangles.',
-    POLYGONS],
   ['Shelf', 'Lays regions out in rows, tallest first. The fastest packer; leaves empty space above shorter regions in a row.',
     layout('shelf')],
   ['Rectangles', 'Puts each region into the first gap its rectangle fits, including gaps between regions already placed. Smaller pages than Shelf.',

@@ -9,6 +9,7 @@ import { initPanelResizer } from './js/panel-resizer.js';
 import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetModify, saveModified, setMode, onModPreviewReceived, updateMeshCroppingUI, updateForcedResizingUI, updateMeshHullUI } from './js/modify-mode.js';
 import { initAppBar } from './js/app-bar.js';
 import { initSettingsPanel } from './js/settings-panel.js';
+import { initOverlayMotion } from './js/overlay-motion.js';
 import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
@@ -141,7 +142,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initPanelResizer();
   initAppBar();
   initOptionsPopover();
-  initSettingsPanel();
+  initOverlayMotion(); initSettingsPanel();
   initOptionsRowCollapse();
   // Stamp the initial body.mode-extract class setMode()'s CSS-gated
   // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called

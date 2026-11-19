@@ -5,6 +5,7 @@ import { HostError } from './engine-client.js';
 import { isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, matchDroppedPngToPage } from './platform.js';
 import { AtlasAPI } from './atlas-api.js';
 import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
+import { removeOverlay } from './overlay-motion.js';
 
 export function showConfirm(message, title = 'Confirm') {
   return new Promise((resolve) => {
@@ -489,7 +490,7 @@ export function showMissingAtlasImagesDialog(missingPages) {
       _missingDialogState = null;
       const dropOverlay = document.getElementById('drop-overlay');
       if (dropOverlay) dropOverlay.style.pointerEvents = '';
-      overlay.remove();
+      removeOverlay(overlay);
       resolve(result);
     };
 

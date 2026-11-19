@@ -1765,15 +1765,10 @@ body.mode-extract #advance-toolbar {
   .sec-head { display: flex; align-items: center; gap: 2px; margin-bottom: 4px; }
   .sec-head .pack-heading { margin: 0; }
   .sec-head #btn-pad-reset { margin-left: auto; }
-  /* Indent = switch width (32px) + gap (8px): the hint lines up with the label text. */
-  #pack-panel .hint { margin: 4px 0 0 40px; font-size: 11px; color: #999; line-height: 1.45; }
-  #pack-panel .hint.hint-flush { margin: 0 0 6px; }
-  #pack-panel .hint[hidden] { display: none; }
   #pack-panel .opt + .opt { margin-top: 8px; }
   .opt-line { display: flex; align-items: center; gap: 2px; }
   .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #888; cursor: pointer; flex-shrink: 0; }
   .info-btn:hover { color: #ddd; background: #3a3d41; }
-  .info-btn[aria-expanded="true"] { color: #4fc1ff; }
   /* Locked toggles keep pointer events so their data-help reason can show. */
   .is-locked { opacity: .55; cursor: not-allowed; }
   .pack-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; border-top: 1px solid #3c3c3c; }
@@ -1817,15 +1812,36 @@ body.mode-extract #advance-toolbar {
 /* The overlay scrolls, so a tall modal moves up as a whole; margin:auto centres a short one. */
 #packer-info-overlay { position: fixed; inset: 0; z-index: 4500; display: flex; align-items: flex-start; padding: 16px; box-sizing: border-box; overflow-y: auto; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 #packer-info-overlay.hidden { display: none; }
-#packer-info { margin: auto; background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); width: min(640px, 100%); box-sizing: border-box; padding: 20px 22px; animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+/* Modal overlays fade in; .overlay-leaving (overlay-motion.js) keeps a just
+   hidden one drawn and unclickable while it fades out. */
+#modal-overlay, #rename-modal, #add-region-modal, #packer-info-overlay, .missing-images-overlay { animation: overlayIn .2s ease-out; }
+/* !important: the overlays' own id rules set their entry animations. */
+.overlay-leaving, .overlay-leaving.hidden { display: flex !important; pointer-events: none; animation: overlayOut .25s ease-in forwards !important; }
+.overlay-leaving > * { animation: overlayBoxOut .25s ease-in forwards !important; }
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlayOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes overlayBoxOut { from { transform: scale(1); opacity: 1; } to { transform: scale(.95); opacity: 0; } }
+#packer-info { margin: auto; background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); width: min(720px, 100%); box-sizing: border-box; padding: 20px 22px; animation: modalPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
 #packer-info h3 { margin: 0 0 4px; font-size: 18px; color: #ddd; }
 #packer-info .pi-lead { margin: 0 0 10px; color: #aaa; font-size: 12.5px; line-height: 1.5; }
-.pi-card { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid #3c3c3c; align-items: start; }
-.pi-card svg { width: 170px; height: 128px; display: block; }
+.pi-card { display: grid; grid-template-columns: 240px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid #3c3c3c; align-items: start; }
+.pi-card svg { width: 240px; height: 181px; display: block; }
 .pi-card h4 { margin: 0 0 4px; font-size: 13.5px; color: #e3e3e3; display: flex; gap: 8px; align-items: center; }
 .pi-card p { margin: 0; font-size: 12px; color: #bbb; line-height: 1.5; }
 .pi-pill { font-size: 10px; font-weight: 400; padding: 1px 7px; border-radius: 999px; border: 1px solid #806400; color: #ffc107; }
 #packer-info .modal-buttons { margin-top: 10px; }
+.info-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 12px; margin-top: 4px; }
+/* One cell: the picture, its caption under it, both centred in the cell. */
+.info-figs figure { margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.info-figs svg { width: 100%; max-width: 260px; height: auto; display: block; }
+.info-figs figure.wide { grid-column: 1 / -1; }
+.info-figs figure.wide svg { max-width: 360px; }
+.info-figs figcaption { margin-top: 6px; max-width: 260px; font-size: 11.5px; color: #bbb; line-height: 1.45; }
+.info-figs figure.wide figcaption { max-width: 360px; }
+#packer-info .pi-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: #aaa; margin: 0 0 8px; }
+#packer-info .pi-legend span { display: inline-flex; align-items: center; gap: 5px; }
+#packer-info .pi-legend i { width: 12px; height: 9px; display: inline-block; border-radius: 2px; }
+#packer-info .pi-legend i.pi-dash { border: 1px dashed #888; box-sizing: border-box; }
 @media (max-width: 560px) {
   .pi-card { grid-template-columns: 1fr; }
   .pi-card svg { width: 100%; height: auto; max-width: 260px; }

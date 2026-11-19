@@ -185,7 +185,7 @@ try {
     await command('dialog-cancel'); await page.locator('#btn-save-mod').click();
     await page.locator('.toast.info').filter({hasText:'Cancelled'}).waitFor();
     assert.deepEqual(snapshot(), before);
-    assert(await page.locator('#modal-overlay').isHidden());
+    assert(await page.locator('#modal-overlay:not(.hidden)').isHidden());
     assert.equal(await command('unsaved', null), 'true');
   });
   await scenario('5 missing-images drop', 'missing/missing.atlas', async ({page,command}) => {
@@ -209,7 +209,7 @@ try {
       decodeFrame(response.request().postDataBuffer()).header.method === 'close_answer');
     await page.locator('#btn-modal-cancel').click();
     await cancelled;
-    await page.locator('#modal-overlay').waitFor({state:'hidden'});
+    await page.locator('#modal-overlay:not(.hidden)').waitFor({state:'hidden'});
     assert(!lines.includes('destroyed'));
     assert.equal(await command('close', null), 'vetoed');
     await page.locator('#btn-modal-confirm').click();
@@ -239,7 +239,7 @@ try {
     assert.equal(response.status(),404);
   });
   await scenario('9 failing startup remains usable', null, async ({page,ready,open,regions}) => {
-    await page.locator('#modal-overlay').filter({has:page.locator('#modal-message').filter({hasText:'Startup check failed'})}).waitFor({state:'visible',timeout:120000});
+    await page.locator('#modal-overlay:not(.hidden)').filter({has:page.locator('#modal-message').filter({hasText:'Startup check failed'})}).waitFor({state:'visible',timeout:120000});
     await page.locator('#btn-modal-confirm').click();
     await ready(); await open('one/one.atlas'); await regions(['a','b']);
   }, ['--fail-startup']);
@@ -252,7 +252,7 @@ try {
       const before = frames.length;
       await page.evaluate(() => window.copyPreviewImage());
       // Headless Linux has no image clipboard: dismiss the fallback's alert.
-      const alert = page.locator('#modal-overlay');
+      const alert = page.locator('#modal-overlay:not(.hidden)');
       if (await alert.isVisible()) await page.locator('#btn-modal-confirm').click();
       return frames.slice(before).map(frame => frame.method);
     };
