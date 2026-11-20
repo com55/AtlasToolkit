@@ -2,209 +2,60 @@
 
 **Spine Atlas Toolkit - Extract, modify, and repack atlas sprites.**
 
-A tool for working with [Spine](http://esotericsoftware.com/) atlas files, available as a **hosted web app**, a **desktop app** (powered by [pywebview](https://pywebview.flowrl.com/)), or run directly from source.
-View atlas regions, extract individual sprites, replace sprites with other images, and repack the atlas — all through the same simple interface everywhere.
+View the regions of a [Spine](http://esotericsoftware.com/) atlas, extract
+sprites, replace them with your own images, and save a repacked atlas. The
+same app runs in the browser and on the desktop.
 
 ## Usage
 
-- **[Web app](https://com55.github.io/AtlasToolkit/)** — use it directly, no installation required
-- **Desktop app** — download the pre-built executables from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
-  - Windows is distributed as an **installer** (`AtlasToolkit-Setup-x64.exe`, per-user, no admin) plus a **portable** zip. The installed build updates itself silently in-app; the portable build links to the releases page.
-  - **One-time migration:** builds made before the installer switch used the old single-exe auto-update and will report "asset not found" when checking for this release — download and run the new installer once manually.
-- **From source** (in-development / unstable) — clone the repository:
-  ```bash
-  git clone https://github.com/com55/AtlasToolkit.git
-  cd AtlasToolkit
-  ```
-
-## Setup & Run (desktop app, from source)
-
-Needs Python 3.11 or later and Node.js (for the page bundler). Once you are
-inside the project directory, choose your preferred method:
-
-- **Using [uv](https://github.com/astral-sh/uv#installation) (Recommended)**
-  ```bash
-  uv sync --extra app
-  npm ci
-  uv run python scripts/build_web.py --target desktop
-  uv run python main.py
-  ```
-- **Using pip**
-  ```bash
-  pip install -e ".[app]"
-  npm ci
-  python scripts/build_web.py --target desktop
-  python main.py
-  ```
-
-Rebuild the page (`build_web.py --target desktop`) after changing anything in `www/`.
-
-## Setup & Run (web app, from source)
-
-```bash
-uv sync
-npm ci
-uv run python scripts/build_web.py        # writes dist/web (downloads Pyodide once)
-uv run python scripts/serve_www.py        # http://127.0.0.1:8000/
-```
-
-The web app runs the same Python engine in [Pyodide](https://pyodide.org/)
-inside a Web Worker. `www/` itself cannot be opened directly: its service
-worker is a template that the build fills in.
-
-## Python library
-
-The `atlas_toolkit` package is the atlas engine both apps run, and it can be
-used from scripts without the app. Differences from the JavaScript engine of
-0.4.x are listed in [CHANGELOG.md](CHANGELOG.md).
-
-Install from source (Python 3.11 or later):
-
-```bash
-uv sync                # library only; add --extra app for the desktop shell
-uv run python your_script.py
-```
-
-Open an atlas, look at it, edit it, and save the result:
-
-```python
-from PIL import Image
-from atlas_toolkit import SpineAtlas, CanvasTooLarge, PackOptions, Packer
-
-atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
-for region in atlas.regions:
-    print(region.name, region.page, region.bounds)
-
-atlas.extract("head").save("head.png")
-atlas.extract_all_to("sprites/")
-
-atlas.replace({"head": "new_head.png"})
-atlas.add_region("hat", Image.new("RGBA", (8, 8), (0, 255, 0, 255)), page="hero_2.png")
-atlas.rename_region("arm", "left_arm")
-atlas.remove_region("tail")
-
-try:
-    atlas.save("out/hero.atlas", options=PackOptions(packer=Packer.RECTANGLES, padding=4))  # + page PNGs
-except CanvasTooLarge as error:
-    print("too big:", error.page, error)
-```
-
-Atlases can also be loaded from memory, and several regions can be edited as
-one picture:
-
-```python
-atlas = SpineAtlas.load(text, {"hero.png": page_one, "hero_2.png": page_two})
-sheet = atlas.extract_composite(["head", "arm"], force_resize=True)
-# ... edit `sheet` in an image editor ...
-atlas.replace_composite(["head", "arm"], sheet)
-built = atlas.build()                           # a new SpineAtlas; `atlas` is unchanged
-```
-
-- Edits are only recorded. `build()` packs them once and returns a new
-  `SpineAtlas`; `save()` builds and writes. Both take `options=PackOptions(...)`:
-  - `packer`: `"auto"` (default), `"shelf"`, `"rectangles"` or `"polygons"`.
-    A string or a `Packer` member. `"auto"` picks `"polygons"` when the atlas
-    has usable mesh data (a `.skel` next to it, or a skeleton passed to
-    `load()`), otherwise `"rectangles"`. `"shelf"` puts one row of images, no
-    nesting; `"rectangles"` is Smart Packing on solid rects; `"polygons"` is
-    Smart Packing on mesh silhouettes and needs mesh data
-    (`PackOptions(mesh_aware=False)` with it raises `ValueError`). With
-    `"polygons"`, a region's rect can contain pixels of neighbours nested into
-    its empty corners; extract with `mesh_crop=True` to see only the region.
-    Auto's size-aware choice (Polygons > Rectangles > Shelf by region count
-    and each region's size) comes later.
-  - `padding`: pixels between packed images, default 2, 1 to 256.
-  - `mesh_aware`: cut each region's pixels outside its mesh hull before
-    packing. Default on whenever the atlas has usable mesh data, so a `.skel`
-    next to the atlas changes the default output.
-  - `try_keep_layout` (default on): an edited page first tries to keep its
-    layout. Removed regions leave empty space; a replacement fits when it is
-    the size `extract()` returns for that region (its full canvas), shows
-    nothing outside the region's trimmed rect (outside its mesh hull is
-    ignored when mesh-aware), and leaves pixels it shares with an overlapping
-    neighbour unchanged; regions that share one rect must be replaced alike;
-    additions go into its free space and may grow the page right/down.
-    Free space is everything outside existing regions' rects and visible
-    pixels; with mesh data, outside their mesh hulls. New regions may be
-    stored rotated 90/180/270. A page with any other edit, whose image is not
-    the size its text declares, or that holds a shared-image composite
-    replace is repacked with `packer`. `try_keep_layout=False` repacks every
-    edited page.
-  - `bleed`: Spine's packer Bleed. On every page the pack writes that is not
-    pma, transparent pixels within 2 px of an image take its colour (alpha
-    stays 0) so linear filtering draws no dark edges. Default: on when the
-    pack splits composite images (the default), off when it shares them.
-  - `share_composite_image`: `replace_composite` only. Off (default) cuts the
-    image back into one piece per region: the inverse of
-    `extract_composite(force_resize=True)`. On, every region of the group uses
-    the whole image at the image's own size (offsets dropped), and a page
-    holding such a replace is repacked.
-
-  `atlas.build(options=PackOptions(packer="polygons", padding=4))`
-- `mesh_crop=True` on the extract methods and `packer="polygons"` or
-  `PackOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
-  the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
-- Removing a region added since the atlas was loaded or built undoes the add.
-  An added region whose name has a mesh in the `.skel` is cut to its hull when
-  `mesh_aware` is on, and stays a mesh region in the built atlas.
-- On a `pma: true` page, images are read and written premultiplied: extracts
-  return premultiplied pixels, additive colour on alpha-0 pixels included, and
-  `replace` / `replace_composite` take premultiplied images. Mesh Cropping and
-  mesh-aware packing clear all four channels outside the hull. A composite
-  that mixes pma and non-pma pages is stacked as straight alpha and warns.
-- For straight-alpha images, such as PNGs from an ordinary image editor, pass
-  `alpha_mode="straight"` (or `AlphaMode.STRAIGHT`) to `replace`,
-  `replace_composite`, `add_region` and the extract methods:
-  `atlas.replace({"head": "new_head.png"}, alpha_mode="straight")`. Each image
-  is converted to or from its page's own space; `"premultiplied"` does the same
-  for straight pages. Without `alpha_mode` nothing is converted. On a pma page
-  only its own space (no `alpha_mode`, or `"premultiplied"`) round-trips
-  exactly: a straight extract drops additive colour (RGB above alpha,
-  including colour on alpha-0 pixels). A composite group that mixes pma and
-  non-pma pages raises `MixedAlphaGroup` when `alpha_mode` is given.
-- Multi-page atlases can be edited. Only the pages that own an edited
-  region are repacked; the others are kept as they are. `add_region(page=...)`
-  picks the page, otherwise the page whose regions cover the least area is
-  used.
-- A region added with `add_region` can be extracted only after `build()`.
-- Errors derive from `AtlasError`: `RegionNotFound`, `DuplicateRegionName`,
-  `InvalidRegionName`, `MissingPageImage`, `SkeletonUnavailable`,
-  `CanvasTooLarge`, `MixedAlphaGroup` and `DuplicatePage`. `CanvasTooLarge`
-  is raised when a packed page would be over 10000 px on a side; `.page`
-  names the page on a multi-page atlas. `DuplicatePage` is raised on load
-  when one page file is listed twice. A region bigger than its page image
-  raises `ValueError` when it is read.
+- **[Web app](https://com55.github.io/AtlasToolkit/)** — use it directly, no installation required. It can be installed as a PWA for offline use.
+- **Desktop app (Windows)** — download from [Releases](https://github.com/com55/AtlasToolkit/releases/latest): an installer (`AtlasToolkit-Setup-x64.exe`, per-user, updates itself) or a portable zip.
+- **Python library** — use the engine from your own scripts: see [LIBRARY.md](LIBRARY.md).
 
 ## Features
 
-- **Atlas Preview** — View the full atlas image with region overlays
-- **Region Extraction** — Extract individual sprites or all regions at once
-- **Sprite Modification** — Replace sprites with mod images, and add, rename or remove regions (Edit Mode)
-- **Packing** — Shelf, Rectangles or Polygons (nests regions by their mesh outline), or Auto; with **Try to Keep Layout** (on by default) an edited page keeps its existing positions when the edit fits, and is repacked otherwise. Identical sprites are deduplicated
-- **Mesh support** — With a `.skel` next to the atlas, Mesh Cropping trims previews and extracts to each region's mesh, and Mesh-Aware packing cuts pixels outside it
-- **Drag & Drop** — Load `.atlas` files by dragging them into the app; in Edit Mode, drop a `.png` image directly to apply it as a mod
-- **Copy to Clipboard** — Right-click the preview image to copy it to clipboard (View Mode)
-- **Auto Format Conversion** — Automatically converts LibGDX atlas format (`xy`/`orig`/`offset`) to the Spine format on load
-- **Multi-page Atlas** — Supports atlas files that reference multiple page images
-- **File Association** (desktop app) — Can be set as the default app for `.atlas` files; opening an atlas file directly will launch the app and load it automatically
-- **Update Notifications** (desktop app) — Checks GitHub for new releases on startup and shows an in-app banner when an update is available
-- **PWA Support** (web app) — Install as a Progressive Web App for offline use
-- **Save Modified Atlas** — Export updated `.atlas`, `.png`, and also copy `.skel` file if available
+- **View Mode** — preview single regions or several at once, extract one or all of them as PNGs, copy the preview to the clipboard.
+- **Edit Mode** — replace regions with your own images (drop a `.png` on the preview), add, rename and remove regions, then save the new `.atlas` and page images.
+- **Packing** — Auto, Shelf, Rectangles or Polygons. With **Try to Keep Layout** (on by default) an edited page keeps its existing positions when the edit fits, and is repacked otherwise.
+- **Mesh support** — with the `.skel` next to the atlas, previews and extracts can be cut to each region's mesh, and packing can nest regions by their mesh outline.
+- **Multi-page atlases** and LibGDX-format atlases (converted on load).
+- **Desktop extras** — open `.atlas` files from Explorer, and update from inside the app.
 
-## Acknowledgments
+## Run from source
 
-- [Spine Atlas Format](https://esotericsoftware.com/spine-atlas-format) — Atlas format specification reference
+Needs Python 3.11+, [uv](https://github.com/astral-sh/uv#installation) and Node.js.
+
+```bash
+git clone https://github.com/com55/AtlasToolkit.git
+cd AtlasToolkit
+uv sync --extra app
+npm ci
+```
+
+- **Desktop app:**
+  ```bash
+  uv run python scripts/build_web.py --target desktop
+  uv run python main.py
+  ```
+- **Web app:**
+  ```bash
+  uv run python scripts/build_web.py
+  uv run python scripts/serve_www.py   # http://127.0.0.1:8000/
+  ```
+
+Rebuild after changing anything in `www/`. Without uv, `pip install -r requirements.txt` installs the same dependencies.
+Developer notes are in [NOTES.md](NOTES.md), and changes in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-- Found a bug or have a suggestion? Please [open an issue](https://github.com/com55/AtlasToolkit/issues)
-- Pull requests are welcome!
+Found a bug or have a suggestion? Please [open an issue](https://github.com/com55/AtlasToolkit/issues). Pull requests are welcome.
 
 ## License
 
-This project is licensed under the Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 Releases up to and including 0.4.x were published under the MIT License and stay available under those terms.
+
+Atlas format reference: [Spine Atlas Format](https://esotericsoftware.com/spine-atlas-format).
 
 ## Disclaimer
 
