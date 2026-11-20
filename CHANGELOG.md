@@ -148,11 +148,20 @@ desktop app through a local server.
   `replace_composite` already did; such a composite is stacked as straight
   alpha.
 
+- Mesh Cropping previews and extracts are about 2-3x faster (vectorized mesh
+  masks, masking only the area a region covers), with the same pixels.
+  View Mode Extract and Save image write PNGs at compression level 3: about
+  1.7x faster, files about 10% larger. Saved atlases keep the default level.
+- The web app stores its settings under new keys, so existing web users
+  start from the defaults once. The desktop app keeps `config.json`.
+- The JS engine is gone from the tree (archived on `legacy/js-app`), and so
+  are the tests that compared the Python engine with it.
+
 ### Fixed
 - `pma: true` pages: composite extracts and previews stack premultiplied
   colour instead of treating it as straight alpha.
 
-### Differences from the app's engine
+### Differences from the JS engine (0.4.x)
 - Keeping a page's layout (adds go into free space), undo-on-remove and hull
   cutting of added regions are Python-only; the app always repacks and keeps
   added sprites whole.
@@ -172,6 +181,13 @@ desktop app through a local server.
   edge), and nest packing defaults to 2 px padding (the app's gap is 4).
   `"rectangles"` can be combined with mesh_aware (the app always nests
   mesh-aware regions on their mesh).
+
+## [0.4.2] - 2026-10-28
+
+### Fixed
+- Extracting several regions to a folder that already holds files with the same
+  names: the "Overwrite files?" dialog was covered by the Processing overlay and
+  could not be clicked. Only the extraction itself shows Processing now.
 
 ## [0.4.1] - 2026-10-12
 
