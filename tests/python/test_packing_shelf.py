@@ -1,9 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Parity tests for domain/packing.py's shelf_pack against the real
-www/js/atlas-modifier.js _shelfPack (plain Node, via conftest.py's
-run_packing_oracle fixture), plus pinned no-Node cases."""
-import pytest
+"""Pinned tests for domain/packing.py's shelf_pack."""
 
 from atlas_toolkit.domain.packing import shelf_pack
 
@@ -28,42 +25,6 @@ MIXED = [
 # Python. Verified against real JS.
 ZERO_ONLY = [{"name": "z", "w": 0, "h": 0}]
 ZERO_AND_REAL = [{"name": "z", "w": 0, "h": 0}, {"name": "real", "w": 10, "h": 10}]
-
-CASES = {
-    "shelf_six_squares": ("shelfPack", [SIX_SQUARES]),
-    "shelf_seven_squares": ("shelfPack", [SEVEN_SQUARES]),
-    "shelf_three_strips": ("shelfPack", [THREE_STRIPS]),
-    "shelf_mixed": ("shelfPack", [MIXED]),
-    "shelf_single_tall": ("shelfPack", [[{"name": "tall", "w": 7, "h": 30}]]),
-    "shelf_two_tall": ("shelfPack", [[{"name": "t1", "w": 7, "h": 30}, {"name": "t2", "w": 7, "h": 30}]]),
-    "shelf_empty": ("shelfPack", [[]]),
-    "shelf_zero_only": ("shelfPack", [ZERO_ONLY]),
-    "shelf_zero_and_real": ("shelfPack", [ZERO_AND_REAL]),
-}
-
-PY_ARGS = {case_id: args[0] for case_id, (_op, args) in CASES.items()}
-
-
-def _js_to_python_shape(result: dict) -> dict:
-    """The JS result uses canvasW/canvasH; Python uses canvas_w/canvas_h.
-    Placement dicts already match key-for-key."""
-    return {
-        "canvas_w": result["canvasW"],
-        "canvas_h": result["canvasH"],
-        "placements": result["placements"],
-    }
-
-
-@pytest.fixture(scope="module")
-def js_results(run_packing_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_packing_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-def test_matches_real_js(case_id, js_results):
-    assert shelf_pack(PY_ARGS[case_id]) == _js_to_python_shape(js_results[case_id])
-
 
 def test_six_squares_prefers_the_squarer_of_two_equal_area_layouts():
     # 1x6, 2x3, 3x2 and 6x1 all tile six 20x20 squares at the identical

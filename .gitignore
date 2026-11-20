@@ -35,5 +35,3 @@ tests/**/*.py[cod]
 .workspaces
 tests/browser/ground_truth_ops.local.json
 
-# Pulled fresh at build/dev time -- never committed.
-www/js/vendor/spine-skeleton-binary

@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for engine/modifier.py's repack helpers: JS key ordering, dedup
-hashing, raw-sprite extraction, and the pack-rotation seam. Parity against
-the real JS runs through conftest.py's run_packing_oracle fixture."""
+"""Tests for engine/modifier.py's repack helpers: key ordering, dedup
+hashing, raw-sprite extraction, and the pack-rotation seam."""
 import io
 
 import pytest
@@ -17,32 +16,6 @@ from atlas_toolkit.engine.modifier import (
     rotate_sprite_for_pack,
 )
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-
-KEY_SETS = {
-    "keys_mixed": ["10", "2", "a"],
-    "keys_boundary": ["4294967294", "4294967295", "4294967296", "0", "b"],
-    "keys_non_canonical": ["01", "00", "007", "-1", "1.5", " 2", "+2", "2e3", "3"],
-    "keys_all_strings": ["arm", "leg", "arm#2"],
-    "keys_all_indices": ["7", "3", "11", "0"],
-    # Non-ASCII digits: str.isdigit() is True for all three, int() converts
-    # two of them and raises on the third. JS treats every one as an
-    # ordinary string key, so only "5" may sort to the front.
-    "keys_unicode_digits": ["²", "٢", "߅", "5", "x"],
-}
-
-CASES = {case_id: ("jsKeyOrder", [names]) for case_id, names in KEY_SETS.items()}
-
-
-@pytest.fixture(scope="module")
-def js_results(run_packing_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_packing_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-def test_key_order_matches_real_js(case_id, js_results):
-    assert js_object_key_order(KEY_SETS[case_id]) == js_results[case_id]
-
 
 def test_integer_like_names_sort_before_string_names():
     # The exact divergence this helper exists for: text order 10, 2, a
@@ -168,16 +141,6 @@ def test_rotate_sprite_for_pack_inverts_the_degree(pack_degrees, stored_degrees)
     if pack_degrees != 180:
         wrong = raster.crop_rotate(sprite, 0, 0, crop_w, crop_h, pack_degrees)
         assert raster.get_pixels(result) != raster.get_pixels(wrong)
-
-
-def test_rotate_sprite_for_pack_matches_real_js_dimensions(run_packing_oracle):
-    results = run_packing_oracle([("rotateSpriteForPack", [8, 5, deg]) for deg in (0, 90, 180, 270)])
-    raster = PillowRasterBackend()
-    for degrees, js in zip((0, 90, 180, 270), results, strict=True):
-        sprite = _patterned(raster, 8, 5, 70)
-        rotated = rotate_sprite_for_pack(raster, sprite, degrees)
-        assert raster.size(rotated) == (js["w"], js["h"])
-        assert (rotated == sprite) is js["same_object"]
 
 
 def test_region_meta_carries_the_js_shape():

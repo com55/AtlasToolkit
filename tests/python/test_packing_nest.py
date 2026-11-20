@@ -1,19 +1,15 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Parity tests for domain/packing.py's nest packer against the real
-www/js/repack-nest.js (plain Node, via conftest.py's run_packing_oracle
-fixture), plus pinned no-Node cases."""
+"""Pinned tests for domain/packing.py's nest packer."""
 import pytest
 
 from atlas_toolkit.domain.packing import (
     dilate,
     footprint_for_canonical,
-    grow_canvas,
     nest_pack,
     normalize_gap,
     rotate90_ccw,
     rotate90_cw,
-    rotate180,
     solid_mask,
 )
 
@@ -30,9 +26,6 @@ CENTER_MASK = [0] * 25
 CENTER_MASK[2 * 5 + 2] = 1
 CORNER_MASK = [0] * 9
 CORNER_MASK[0] = 1
-
-GAP_VALUES = [1, 4, 7, 256, 0, -3, 2.9, 300, "abc", None, "5_000"]
-
 
 def _solid(w, h):
     return [1] * (w * h)
@@ -57,60 +50,6 @@ HOST_AND_SMALL = [
     {"name": "small", "w": 6, "h": 6, "footprint": _solid(6, 6)},
 ]
 
-CASES = {
-    "rot_cw": ("rotateMask", ["cw", SRC, SRC_W, SRC_H]),
-    "rot_ccw": ("rotateMask", ["ccw", SRC, SRC_W, SRC_H]),
-    "rot_180": ("rotateMask", ["half", SRC, SRC_W, SRC_H]),
-    "dilate_center": ("dilate", [CENTER_MASK, 5, 5, 1]),
-    "dilate_corner": ("dilate", [CORNER_MASK, 3, 3, 2]),
-    "grow_right": ("growCanvas", [2, 10, {"w": 8, "h": 1}, 1]),
-    "grow_down": ("growCanvas", [10, 2, {"w": 1, "h": 8}, 1]),
-    "grow_tie": ("growCanvas", [4, 8, {"w": 8, "h": 4}, 1]),
-    "grow_from_zero": ("growCanvas", [0, 0, {"w": 10, "h": 6}, 1]),
-    "nest_single": ("nestPack", [[{"name": "a", "w": 10, "h": 6, "footprint": _solid(10, 6)}], {"gapDistance": 1}]),
-    "nest_empty": ("nestPack", [[], {}]),
-    "nest_two_10x10_gap1": ("nestPack", [TWO_10x10, {"gapDistance": 1}]),
-    "nest_two_10x10_gap4": ("nestPack", [TWO_10x10, {"gapDistance": 4}]),
-    "nest_two_10x10_gap8": ("nestPack", [TWO_10x10, {"gapDistance": 8}]),
-    "nest_gapshaped_gap1": ("nestPack", [HOST_AND_SMALL, {"gapDistance": 1}]),
-    "nest_gapshaped_gap6": ("nestPack", [HOST_AND_SMALL, {"gapDistance": 6}]),
-}
-
-PY_CALLS = {
-    "rot_cw": lambda: list(rotate90_cw(bytes(SRC), SRC_W, SRC_H)),
-    "rot_ccw": lambda: list(rotate90_ccw(bytes(SRC), SRC_W, SRC_H)),
-    "rot_180": lambda: list(rotate180(bytes(SRC), SRC_W, SRC_H)),
-    "dilate_center": lambda: _dilate_shape(CENTER_MASK, 5, 5, 1),
-    "dilate_corner": lambda: _dilate_shape(CORNER_MASK, 3, 3, 2),
-    "grow_right": lambda: _grow_shape(2, 10, {"w": 8, "h": 1}, 1),
-    "grow_down": lambda: _grow_shape(10, 2, {"w": 1, "h": 8}, 1),
-    "grow_tie": lambda: _grow_shape(4, 8, {"w": 8, "h": 4}, 1),
-    "grow_from_zero": lambda: _grow_shape(0, 0, {"w": 10, "h": 6}, 1),
-    "nest_single": lambda: _nest_shape([{"name": "a", "w": 10, "h": 6, "footprint": _solid(10, 6)}], 1),
-    "nest_empty": lambda: _nest_shape([], 4),
-    "nest_two_10x10_gap1": lambda: _nest_shape(TWO_10x10, 1),
-    "nest_two_10x10_gap4": lambda: _nest_shape(TWO_10x10, 4),
-    "nest_two_10x10_gap8": lambda: _nest_shape(TWO_10x10, 8),
-    "nest_gapshaped_gap1": lambda: _nest_shape(HOST_AND_SMALL, 1),
-    "nest_gapshaped_gap6": lambda: _nest_shape(HOST_AND_SMALL, 6),
-}
-
-
-def _dilate_shape(mask, w, h, gap):
-    result = dilate(bytes(mask), w, h, gap)
-    return {"mask": list(result["mask"]), "w": result["w"], "h": result["h"]}
-
-
-def _grow_shape(canvas_w, canvas_h, seed_rot, gap):
-    occupied = bytes((canvas_w + 2 * gap) * (canvas_h + 2 * gap))
-    result = grow_canvas(canvas_w, canvas_h, occupied, seed_rot, gap)
-    return {
-        "canvas_w": result["canvas_w"],
-        "canvas_h": result["canvas_h"],
-        "occupied_len": len(result["occupied"]),
-    }
-
-
 def _nest_shape(items, gap_distance):
     built = [{**item, "footprint": bytes(item["footprint"])} for item in items]
     result = nest_pack(built, gap_distance=gap_distance)
@@ -119,23 +58,6 @@ def _nest_shape(items, gap_distance):
         "canvasH": result["canvas_h"],
         "placements": result["placements"],
     }
-
-
-@pytest.fixture(scope="module")
-def js_results(run_packing_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_packing_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-def test_matches_real_js(case_id, js_results):
-    assert PY_CALLS[case_id]() == js_results[case_id]
-
-
-@pytest.mark.parametrize("value", GAP_VALUES)
-def test_normalize_gap_matches_real_js(value, run_packing_oracle):
-    (expected,) = run_packing_oracle([("normalizeGap", [value])])
-    assert normalize_gap(value) == expected
 
 
 def test_normalize_gap_falls_back_on_an_int_too_big_for_a_float():

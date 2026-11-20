@@ -8,7 +8,7 @@ from atlas_toolkit.domain.region_ops import (
 
 
 # Ground-truth cross-checked against `python3 -c "print(round(x))"` for each
-# value (mirrors tests/core-region-ops.test.js's own cross-check note):
+# value:
 # 2.5->2, 3.5->4, 0.5->0, 1.5->2, 10.5->10, 7.5->8, 2.4->2, 2.6->3.
 
 def test_round_half_even_even_base_tie_rounds_down():

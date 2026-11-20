@@ -1,14 +1,9 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for AtlasModifier.prepare_mod_image: geometric parity (padded size,
-paste position, flags) against the real www/js/atlas-modifier.js (plain
-Node, via conftest.py's run_modifier_oracle fixture), plus pinned pixel
-tests. Pixel parity with Canvas needs no browser here: padding is a single
-paste onto a fully transparent canvas, and Stage 3 already proved paste
-bit-exact against real Chromium."""
+"""Tests for AtlasModifier.prepare_mod_image: padded size, paste position,
+flags and pixels."""
 import io
 
-import pytest
 from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
@@ -16,80 +11,7 @@ from atlas_toolkit.engine.modifier import AtlasModifier
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 PAD_TEXT = "p.png\nsize: 200,200\nhero\n  bounds: 0, 0, 100, 108\n  offsets: 10, 20, 200, 200"
-HALF_DECLARED_TEXT = "p.png\nsize: 100,100\nhero\n  bounds: 0, 0, 50, 54\n  offsets: 5, 10, 100, 100"
-THREE_REGION_TEXT = (
-    "p.png\nsize: 100,100\n"
-    "a\n  bounds: 0, 0, 40, 40\n  offsets: 1, 2, 100, 100\n"
-    "b\n  bounds: 40, 0, 40, 40\n  offsets: 3, 4, 100, 100\n"
-    "c\n  bounds: 0, 40, 10, 10"
-)
-ONE_REGION_TEXT = "p.png\nsize: 100,100\na\n  bounds: 0, 0, 40, 40"
-# Non-square offsets canvas (20x119): the resolved canvas is 10x62, so
-# scale_x = 0.5 and scale_y = 62/119 differ -- a swapped scale_x/scale_y
-# pastes at (2, -5) instead of the real JS's (2, -6). Every other case uses
-# a square offsets canvas, where the two scales are equal and a swap is
-# invisible (Task 4 scrutinize finding).
-NON_SQUARE_TEXT = "p.png\nsize: 20,119\nhero\n  bounds: 0, 0, 10, 65\n  offsets: 3, 5, 20, 119"
 NEGATIVE_X_TEXT = "p.png\nsize: 200,200\nhero\n  bounds: 0, 0, 100, 108\n  offsets: -10, 20, 200, 200"
-
-CASES = {
-    "pmi_padding_non_square_scales": ("prepareModImage", [NON_SQUARE_TEXT, 20, 119, "p.png", 10, 65, ["hero"]]),
-    "pmi_padding_negative_x_and_y": ("prepareModImage", [NEGATIVE_X_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
-    "pmi_padding_negative_y": ("prepareModImage", [PAD_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
-    "pmi_padding_after_page_rescale": ("prepareModImage", [HALF_DECLARED_TEXT, 200, 200, "p.png", 100, 108, ["hero"]]),
-    "pmi_full_canvas_single": ("prepareModImage", [PAD_TEXT, 200, 200, "p.png", 200, 200, ["hero"]]),
-    "pmi_shared_canvas_pair": ("prepareModImage", [THREE_REGION_TEXT, 100, 100, "p.png", 100, 100, ["a", "b"]]),
-    "pmi_loose_shared_but_strict_false": ("prepareModImage", [THREE_REGION_TEXT, 100, 100, "p.png", 100, 100, ["a", "c"]]),
-    "pmi_selection_outside_scope": ("prepareModImage", [ONE_REGION_TEXT, 100, 100, "p.png", 30, 20, ["zzz"]]),
-}
-
-
-class _RecordingRaster(PillowRasterBackend):
-    """Records paste positions, comparable with the JS oracle's recorded
-    drawImage positions."""
-
-    def __init__(self, *, allow_premultiplied: bool = False) -> None:
-        super().__init__()
-        # Straight-only unless a pma test opts in (spec 2026-10-26 §3.1).
-        self.allow_premultiplied = allow_premultiplied
-        self.pastes: list[list[int]] = []
-
-    def paste(self, dest, src, x, y, *, premultiplied=False):
-        assert premultiplied is False or self.allow_premultiplied, "straight-only fake got premultiplied=True; construct it with allow_premultiplied=True in a pma test"
-        self.pastes.append([x, y])
-        super().paste(dest, src, x, y, premultiplied=premultiplied)
-
-
-def _python_result(op: str, args: list):
-    if op == "prepareModImage":
-        text, real_w, real_h, target_page, mod_w, mod_h, selected = args
-        raster = _RecordingRaster()
-        modifier = AtlasModifier(AtlasDocument.parse(text), raster.create(real_w, real_h), raster, target_page)
-        prepared = modifier.prepare_mod_image(raster.create(mod_w, mod_h), selected)
-        canvas_w, canvas_h = raster.size(prepared.image)
-        return {
-            "canvas_w": canvas_w,
-            "canvas_h": canvas_h,
-            "draws": raster.pastes,
-            "mod_w": prepared.mod_w,
-            "mod_h": prepared.mod_h,
-            "shared_canvas_mod": prepared.shared_canvas_mod,
-            "is_full_canvas": prepared.is_full_canvas,
-        }
-    raise ValueError(f"unknown op: {op}")
-
-
-@pytest.fixture(scope="module")
-def js_results(run_modifier_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_modifier_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-def test_matches_real_js(case_id, js_results):
-    op, args = CASES[case_id]
-    assert _python_result(op, args) == js_results[case_id]
-
 
 def _patterned(raster: PillowRasterBackend, w: int, h: int):
     """Opaque image whose pixel (x, y) is (x, y, 200, 255), so every pixel

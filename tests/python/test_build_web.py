@@ -6,28 +6,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from build_web import excluded, import_offenders
-
-
-def test_excluded_engine_files():
-    names = [
-        "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
-        "atlas-converter", "atlas-api-legacy", "legacy-native-paths", "core-region-ops",
-        "effective-region-model", "lanczos-resize", "region-mesh-lookup",
-        "region-mesh-mask", "repack-nest", "region-name-validation",
-        "job-runner", "preview-jobs", "canvas-surface",
-    ]
-    for name in names:
-        assert excluded(f"js/{name}.js"), name
-    for path in ("js/vendor/x.js", "js/vendor/nested/x.js",
-                 "workers/engine-job-worker.js", "workers/preview-job-worker.js"):
-        assert excluded(path), path
-
-
-def test_retained_ui_files():
-    for path in ("js/atlas-api.js", "js/preview.js", "workers/engine-host-worker.js",
-                 "script.js", "style.css", "js/vendor-other.js"):
-        assert not excluded(path), path
+from build_web import import_offenders
 
 
 def test_import_offenders_follows_transitive_imports(tmp_path):
@@ -229,11 +208,9 @@ def test_generated_sw_inventory_and_content_identity(tmp_path):
 def test_assemble_stamps_and_generates_complete_site(tmp_path, monkeypatch):
     template = (build_web.ROOT / 'www/sw.js').read_text()
     source = tmp_path / 'www'
-    (source / 'js/vendor').mkdir(parents=True)
+    source.mkdir(parents=True)
     (source / 'index.html').write_text('<title>Atlas Toolkit</title>')
     (source / 'sw.js').write_text(template)
-    (source / 'js/vendor/old.js').write_text('excluded')
-    (source / 'js/atlas-document.js').write_text('excluded')
     (source / 'script.js').write_text('retained')
     (tmp_path / 'pyproject.toml').write_text('version = "1.2.3"')
     runtime = tmp_path / 'runtime.wasm'
@@ -282,8 +259,6 @@ def test_desktop_build(tmp_path, monkeypatch, flags, expected):
         'sw.js': 'worker',
         'workers/engine-host-worker.js': 'worker',
         'workers/engine-transfer.js': 'transfer',
-        'js/atlas-document.js': 'engine',
-        'js/vendor/old.js': 'engine',
     }
     for name, content in files.items():
         path = source / name

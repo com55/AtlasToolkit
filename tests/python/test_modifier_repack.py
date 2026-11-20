@@ -1,13 +1,10 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Parity tests for AtlasModifier's two repack entry points against the
-real www/js/atlas-modifier.js (plain Node, via run_packing_oracle), plus
-pinned no-Node cases covering multi-page scoping, the rescale-then-repack
-path, and the mesh-stage deferral."""
+"""Pinned tests for AtlasModifier's repack entry points: multi-page scoping,
+the rescale-then-repack path, and the mesh-stage deferral."""
 import hashlib
 import io
 
-import pytest
 from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
@@ -163,22 +160,6 @@ def _python_result(case_id):
     return _shape(raster, result)
 
 
-@pytest.fixture(scope="module")
-def js_results(run_packing_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_packing_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-def test_matches_real_js(case_id, js_results):
-    expected = dict(js_results[case_id])
-    actual = _python_result(case_id)
-    # The oracle reports scoped_names only for the modded-sprite op.
-    if "scoped_names" not in expected:
-        actual.pop("scoped_names", None)
-    assert actual == expected
-
-
 def test_repack_scopes_to_the_target_page():
     result = _python_result("repack_second_page")
     assert result["scoped_names"] == ["two", "three"]
@@ -265,4 +246,3 @@ def test_mesh_aware_repack_works_with_mesh_lookup_fn_returning_none():
     assert len(result2.region_bounds) > 0
     assert result1.document.serialize() == result2.document.serialize()
     assert raster.get_pixels(result1.image) == raster.get_pixels(result2.image)
-

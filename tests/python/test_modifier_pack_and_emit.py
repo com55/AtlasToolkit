@@ -1,17 +1,13 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Parity tests for AtlasModifier._pack_and_emit against the real
-www/js/atlas-modifier.js (plain Node, via conftest.py's run_packing_oracle
-fixture), plus pinned no-Node cases.
+"""Pinned tests for AtlasModifier._pack_and_emit.
 
 Sprite pixel content is chosen per case: two sprites given the same tint
 are byte-identical and must dedup onto one placement, which is observable
-through region_bounds without ever comparing digest strings across
-runtimes."""
+through region_bounds without ever comparing digest strings."""
 import hashlib
 import io
 
-import pytest
 from PIL import Image
 
 from atlas_toolkit.document import AtlasDocument
@@ -49,26 +45,6 @@ INT_SPRITES = {
     "10": {"w": 20, "h": 12, "content": "TEN"},
     "2": {"w": 8, "h": 30, "content": "TWO"},
     "a": {"w": 9, "h": 17, "content": "A"},
-}
-
-CASES = {
-    "pack_distinct": ("packAndEmit", [PAGE_TEXT, 64, 64, "p.png", DISTINCT, None, None]),
-    "pack_dedup": ("packAndEmit", [PAGE_TEXT, 64, 64, "p.png", DEDUPED, None, None]),
-    "pack_full_canvas": ("packAndEmit", [PAGE_TEXT, 64, 64, "p.png", DISTINCT, ["alpha"], None]),
-    "pack_missing_sprite": ("packAndEmit", [PAGE_TEXT, 64, 64, "p.png", MISSING, None, None]),
-    "pack_nest_gap4": (
-        "packAndEmit",
-        [PAGE_TEXT, 64, 64, "p.png", DISTINCT, None, {"enabled": True, "gapDistance": 4}],
-    ),
-    "pack_nest_gap8": (
-        "packAndEmit",
-        [PAGE_TEXT, 64, 64, "p.png", DISTINCT, None, {"enabled": True, "gapDistance": 8}],
-    ),
-    "pack_nest_disabled": (
-        "packAndEmit",
-        [PAGE_TEXT, 64, 64, "p.png", DISTINCT, None, {"enabled": False, "gapDistance": 4}],
-    ),
-    "pack_integer_like_names": ("packAndEmit", [INT_TEXT, 64, 64, "p.png", INT_SPRITES, None, None]),
 }
 
 PY_ARGS = {
@@ -139,18 +115,6 @@ def _python_result(text, specs, full_canvas_regions, nest_options):
         "region_bounds": result.region_bounds,
         "atlas_text": result.document.serialize(),
     }
-
-
-@pytest.fixture(scope="module")
-def js_results(run_packing_oracle):
-    case_ids = list(CASES)
-    return dict(zip(case_ids, run_packing_oracle([CASES[c] for c in case_ids]), strict=True))
-
-
-@pytest.mark.parametrize("case_id", list(CASES))
-@pytest.mark.usefixtures("untrimmed_nest")
-def test_matches_real_js(case_id, js_results):
-    assert _python_result(*PY_ARGS[case_id]) == js_results[case_id]
 
 
 def test_identical_sprites_collapse_onto_one_placement():

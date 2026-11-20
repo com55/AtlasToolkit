@@ -21,23 +21,9 @@ PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
 PARSER_URL = "https://github.com/com55/skel-mesh-parser.git"
 PARSER_TAG = "py-v0.3.0"
 NOTICE_FILES = ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
-EXCLUDED = {
-    f"js/{name}.js" for name in (
-        "atlas-document", "atlas-session", "atlas-modifier", "atlas-extracter",
-        "atlas-converter", "atlas-api-legacy", "legacy-native-paths", "core-region-ops",
-        "effective-region-model", "lanczos-resize", "region-mesh-lookup",
-        "region-mesh-mask", "repack-nest", "region-name-validation",
-        "job-runner", "preview-jobs", "canvas-surface",
-    )
-} | {"workers/engine-job-worker.js", "workers/preview-job-worker.js"}
 IMPORT_RE = re.compile(
     r"\b(?:export\s+[^;\"\']*?\bfrom\s*|import\s*(?:\(\s*|(?:[^;'\"()]*?\bfrom\s*)?))[\"']([^\"']+)[\"']"
 )
-
-
-def excluded(rel_path: str) -> bool:
-    """Whether a www-relative file belongs to the retired JS engine."""
-    return rel_path in EXCLUDED or rel_path.startswith("js/vendor/")
 
 
 def import_offenders(site: Path) -> list[str]:
@@ -147,10 +133,10 @@ def generate_sw(site: Path, template: str) -> str:
 
 
 def _copy_shell(out: Path, skip: frozenset[str]) -> None:
-    """Copy shell files except retired engine files and target-specific skips."""
+    """Copy shell files except target-specific skips."""
     for source in (ROOT / "www").rglob("*"):
         relative = source.relative_to(ROOT / "www")
-        if not source.is_file() or excluded(relative.as_posix()) or relative.as_posix() in skip:
+        if not source.is_file() or relative.as_posix() in skip:
             continue
         target = out / relative
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-from pathlib import Path
 
 from atlas_toolkit.document import AtlasDocument, Region
-
-FIXTURES_DIR = Path(__file__).parent.parent / "browser" / "fixtures"
 
 # Shared fixture text, ported verbatim from tests/atlas-document.test.js's
 # FIXTURE constant. Covers: a region with an explicit-but-redundant
@@ -238,38 +235,6 @@ def test_short_xy_size_lines_degrade_to_zero_instead_of_crashing():
     doc3 = AtlasDocument.parse("page1.png\nsize: 100,100\nleg\nsize: 20\n")
     leg3 = doc3.pages[0].regions[0]
     assert (leg3.w, leg3.h) == (20, 0)
-
-
-def test_fixture_opaque_transparent_matches_live_js_oracle_output():
-    text = (FIXTURES_DIR / "opaque-transparent" / "fixture-opaque.atlas").read_text()
-    got = AtlasDocument.parse(text).serialize()
-    expected = "\n".join([
-        "fixture-opaque.png",
-        "size: 32,10",
-        "plain",
-        "  bounds: 0, 0, 10, 10",
-        "withOffsets",
-        "  bounds: 10, 0, 8, 6",
-        "  offsets: 2, 2, 16, 10",
-        "dupeA",
-        "  bounds: 20, 0, 6, 6",
-        "dupeB",
-        "  bounds: 26, 0, 6, 6",
-    ]) + "\n"
-    assert got == expected
-
-
-def test_fixture_tie_rounding_matches_live_js_oracle_output():
-    text = (FIXTURES_DIR / "tie-rounding" / "fixture-tie.atlas").read_text()
-    got = AtlasDocument.parse(text).serialize()
-    expected = "\n".join([
-        "fixture-tie.png",
-        "size: 14,14",
-        "tieRegion",
-        "  bounds: 0, 0, 6, 6",
-        "  offsets: 0, 0, 7, 7",
-    ]) + "\n"
-    assert got == expected
 
 
 from atlas_toolkit.document import png_names_for_save

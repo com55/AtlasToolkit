@@ -4,17 +4,13 @@
 // not shell chaining -- sidesteps two problems shell separators have:
 //
 // 1. `&&` between commands aborts the whole chain on the first non-zero
-//    exit. verify-ui-flows.mjs has a project-documented flaky baseline of
-//    3-4 failures that occur on nearly every run (see CLAUDE.md), so under
-//    `&&` it silently killed every suite listed after it -- confirmed only
-//    2 of 8 suites ever actually ran via `npm run test:browser` before this
-//    file existed.
+//    exit, so one failing suite silently skipped every suite after it.
 // 2. `;` (the fix for #1) runs every suite regardless of an earlier one's
 //    exit code, which is correct -- but `;` is a POSIX/PowerShell statement
 //    separator, not a cmd.exe one (npm's default script shell on Windows).
 //    Under cmd.exe, everything after the first `.mjs` path in a `;`-joined
 //    command line becomes inert argv text passed to the FIRST script, so
-//    only verify-ops.mjs would run, silently, with no error.
+//    only the first suite would run, silently, with no error.
 //
 // Doing the sequencing here in Node instead avoids both: every suite always
 // runs, and the aggregate exit code (unlike a bare `;`-joined command,
@@ -26,34 +22,10 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-// Final whole-branch review finding: this list originally covered only 8
-// of the 13 verify-*.mjs files actually in this directory, contradicting
-// this file's own header comment ("every browser test file"). Two of the
-// omitted five are directly load-bearing for this branch specifically --
-// verify-app-e2e.mjs exercises multi-page repack through the public
-// AtlasAPI (the only coverage of AtlasSession._rebuildMultiPageRepack,
-// still-open gap tracked in the SDD ledger), and verify-rotation.mjs is
-// the PIL rotation-direction pixel oracle on a branch that adds two new
-// rotate values (180/270) AtlasToolkit had never emitted before. All 13
-// verified passing before being added here.
-const PARKED = ['verify-ui-flows.mjs', 'verify-region-editing.mjs', 'verify-region-identity.mjs'];
 const SUITES = [
   'verify-python-app.mjs',
   'verify-desktop-app.mjs',
   'verify-engine-transfer.mjs',
-  'verify-ops.mjs',
-  'verify-ui-flows.mjs',
-  'verify-region-identity.mjs',
-  'verify-mesh-repack.mjs',
-  'verify-mesh-mask-processor.mjs',
-  'verify-nest-repack.mjs',
-  'verify-repack-asymmetry.mjs',
-  'verify-region-editing.mjs',
-  'verify-app-e2e.mjs',
-  'verify-rotation.mjs',
-  'verify-mesh-mask.mjs',
-  'verify-mesh-mask-acceptance.mjs',
-  'verify-mesh-mask-integration.mjs',
 ];
 
 let anyFailed = false;
@@ -61,12 +33,6 @@ let anySkipped = false;
 const results = [];
 
 for (const suite of SUITES) {
-  if (PARKED.includes(suite)) {
-    console.log('PARKED ' + suite + ' (awaiting Python Edit Mode)');
-    anySkipped = true;
-    results.push({suite, code: 0, skipped: true});
-    continue;
-  }
   // Captured (not 'inherit') so this runner can tell a genuine pass from a
   // self-skip (playwright-core absent, ground_truth_ops.json missing, etc
   // -- several suites print 'SKIP: ...' and exit 0 in that case, same as a

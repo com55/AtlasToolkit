@@ -175,8 +175,8 @@ export function drawRegionOverlay() {
   const multiPage = state.modifyPages.length > 1;
   for (const { key, label } of getSelectedRegions()) {
     // Bounds/page lookups below are keyed by the engine's internal key
-    // (state.modifyRegionBounds/modifyRegionPages, built in atlas-session.js
-    // from the pristine parse) -- .label is only ever used for the drawn
+    // (state.modifyRegionBounds/modifyRegionPages, from the host's Edit-mode
+    // result) -- .label is only ever used for the drawn
     // text at the bottom of this loop.
     const bounds = state.modifyRegionBounds[key];
     if (!bounds) continue;

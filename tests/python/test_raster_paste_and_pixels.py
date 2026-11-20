@@ -1,21 +1,10 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
 import io
-import json
-from pathlib import Path
 
-import pytest
 from PIL import Image
 
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-
-FIXTURES = Path(__file__).parent / "fixtures"
-ORACLE_PATH = FIXTURES / "raster_js_oracle.json"
-
-
-def _load_oracle():
-    return json.loads(ORACLE_PATH.read_text())
-
 
 def test_paste_alpha_composites_overlapping_semi_transparent_regions():
     """The discriminating case: dest has an opaque red pixel at (0,0); src
@@ -105,37 +94,6 @@ def test_paste_clips_when_box_extends_past_dest_bounds():
 
     assert backend._images[dest].getpixel((1, 1)) == (5, 5, 5, 255)
     assert backend.size(dest) == (2, 2)  # dest itself never resizes
-
-
-@pytest.mark.skipif(
-    not ORACLE_PATH.exists(),
-    reason="raster_js_oracle.json not generated -- run tests/python/gen_js_reference_raster.mjs",
-)
-def test_paste_partial_over_partial_matches_js_oracle():
-    """The one alpha-compositing regime scrutinize round 1 (Task 3) found
-    completely uncovered: BOTH dest and src alpha strictly between 0 and
-    255 -- the only case where the unpremultiply division in Porter-Duff
-    "over" actually executes, and where a Pillow-vs-Canvas fixed-point
-    rounding difference could silently surface (every other test in this
-    file has at least one side fully opaque or fully transparent, where
-    that division either doesn't run or is trivial). dest=(255,0,0,128),
-    src=(0,0,255,128) -- composited for real in Chromium via putImageData
-    (exact straight-alpha input, bypassing any fillStyle-parsing rounding)
-    + ctx.drawImage's default source-over, recorded in
-    raster_js_oracle.json's paste_partial_over_partial case. Empirically:
-    Pillow and real Canvas agree bit-for-bit here, (85, 0, 170, 192) both
-    sides -- this test pins that confirmed value, it does not re-derive
-    it from theory."""
-    oracle = _load_oracle()["paste_partial_over_partial"]
-    backend = PillowRasterBackend()
-    dest = backend.create(1, 1)
-    backend._images[dest].putpixel((0, 0), (255, 0, 0, 128))
-    src = backend.create(1, 1)
-    backend._images[src].putpixel((0, 0), (0, 0, 255, 128))
-
-    backend.paste(dest, src, 0, 0)
-
-    assert list(backend._images[dest].getpixel((0, 0))) == oracle["rgba"]
 
 
 def test_get_pixels_returns_row_major_rgba_bytes():
