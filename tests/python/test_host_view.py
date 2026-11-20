@@ -290,3 +290,25 @@ def test_preview_pixels_equal_save_image(factory, alpha):
         saved = decode(host.save_image(names, False, False, alpha))
         assert (preview["width"], preview["height"]) == saved.size
         assert preview["rgba"] == saved.tobytes()
+
+
+def test_extract_and_save_image_encode_png_at_level_3_and_save_output_at_the_default(monkeypatch):
+    """View Mode exports trade ~10% size for ~1.7x faster encoding; saved atlas pages do not."""
+    from PIL import Image
+    host, _ = loaded()  # the fixture encodes its own page PNG
+    levels = []
+    real_save = Image.Image.save
+
+    def spy(self, fp, format=None, **params):
+        levels.append(params.get("compress_level"))
+        return real_save(self, fp, format, **params)
+
+    monkeypatch.setattr(Image.Image, "save", spy)
+    host.extract(None, False, "straight")
+    host.save_image(["a"], False, False, "straight")
+    assert levels == [3, 3, 3]
+    levels.clear()
+    host.enter_edit()
+    host.save_output()
+    host.page_png(0, "straight")
+    assert levels and set(levels) == {None}

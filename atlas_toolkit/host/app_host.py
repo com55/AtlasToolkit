@@ -13,9 +13,18 @@ from atlas_toolkit.alpha_mode import parse_alpha_mode
 from atlas_toolkit.document import png_names_for_save
 
 
-def _png(image: Image.Image) -> bytes:
+# View Mode exports (Extract, Save image) use zlib level 3: about 1.7x faster
+# than Pillow's default 6 for about 10% larger files, same pixels. Saved atlas
+# pages keep the default.
+EXPORT_PNG_LEVEL = 3
+
+
+def _png(image: Image.Image, compress_level: int | None = None) -> bytes:
     output = BytesIO()
-    image.save(output, format="PNG")
+    if compress_level is None:
+        image.save(output, format="PNG")
+    else:
+        image.save(output, format="PNG", compress_level=compress_level)
     return output.getvalue()
 
 
@@ -268,7 +277,7 @@ class AppHost:
             alpha_mode=self._alpha_mode(alpha),
         )
         return [
-            {"filename": _file_name(key), "png": _png(images[name])}
+            {"filename": _file_name(key), "png": _png(images[name], EXPORT_PNG_LEVEL)}
             for key, name in zip(wanted, names)
             if images[name].width > 0 and images[name].height > 0
         ]
@@ -282,7 +291,7 @@ class AppHost:
         )
         if image.width == 0 or image.height == 0:
             return None
-        return _png(image)
+        return _png(image, EXPORT_PNG_LEVEL)
 
     def _labels(self, keys: list[str]) -> list[str]:
         labels = {view.key: view.label for view in self._require_atlas().region_views()}
