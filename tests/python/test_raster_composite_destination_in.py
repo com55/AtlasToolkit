@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
 # tests/python/test_raster_composite_destination_in.py
+import pytest
+
 from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
@@ -87,3 +89,61 @@ def test_src_rect_selecting_the_opaque_side_preserves_dest():
     big_mask = _mask_half(backend, 8, 4)  # opaque for x<4
     backend.composite_destination_in(dest, big_mask, (0, 0, 4, 4))
     assert list(backend._images[dest].getdata()) == list(before.getdata())
+
+
+def _reference_destination_in(dest, mask, premultiplied):
+    """The whole-image formula (straight: alpha only; pma: every channel)."""
+    import numpy as np
+
+    m = mask[..., 3:4].astype(np.uint16)
+    out = dest.astype(np.uint16).copy()
+    if premultiplied:
+        out = out * m // 255
+    else:
+        out[..., 3:4] = out[..., 3:4] * m // 255
+    return out.astype(np.uint8)
+
+
+@pytest.mark.parametrize("premultiplied", [False, True])
+@pytest.mark.parametrize("src_rect", [None, (3, 2, 30, 20)])
+def test_masking_only_the_non_zero_box_gives_the_whole_image_result(premultiplied, src_rect):
+    """dest is clear except a patterned sprite window holding RGB under a
+    mask-0 area (kept by straight), alpha-0 RGB (pma additive colour) and
+    partial alpha; the result must equal masking the whole image."""
+    import numpy as np
+    from PIL import Image
+
+    backend = PillowRasterBackend()
+    w, h = 30, 20
+    rng = np.random.default_rng(7)
+    canvas = np.zeros((h, w, 4), np.uint8)
+    canvas[5:14, 8:21] = rng.integers(0, 256, (9, 13, 4), dtype=np.uint8)
+    canvas[6, 9] = (40, 50, 60, 0)  # RGB under alpha 0
+    canvas[0, 29] = (0, 0, 7, 0)  # a lone non-zero RGB byte widens the box
+    dest = backend._store(Image.fromarray(canvas, "RGBA"))
+    mask_w, mask_h = (w, h) if src_rect is None else (36, 25)
+    full = backend.rasterize_mesh_mask([0.0, 0.0, 0.7, 0.0, 0.1, 1.0, 0.9, 0.2, 1.0, 1.0], [0, 1, 2, 1, 3, 4], mask_w, mask_h)
+    mask_rgba = np.asarray(backend.export(full))
+    x, y = (0, 0) if src_rect is None else src_rect[:2]
+    window = mask_rgba[y:y + h, x:x + w]
+    assert (window[5:14, 8:21, 3] == 0).any() and (window[5:14, 8:21, 3] == 255).any()
+    backend.composite_destination_in(dest, full, src_rect, premultiplied=premultiplied)
+    got = np.asarray(backend.export(dest))
+    assert np.array_equal(got, _reference_destination_in(canvas, window, premultiplied))
+
+
+def test_an_all_clear_dest_stays_clear_and_a_size_mismatch_still_raises():
+    import numpy as np
+    from PIL import Image
+
+    backend = PillowRasterBackend()
+    dest = backend.create(6, 4)
+    backend.composite_destination_in(dest, backend.rasterize_mesh_mask([0, 0, 1, 0, 0, 1], [0, 1, 2], 6, 4))
+    assert not np.asarray(backend.export(dest)).any()
+    with pytest.raises(ValueError):
+        backend.composite_destination_in(dest, backend.rasterize_mesh_mask([0, 0, 1, 0, 0, 1], [0, 1, 2], 5, 4))
+    other = backend._store(Image.new("RGBA", (6, 4), (1, 2, 3, 4)))
+    with pytest.raises(ValueError):  # a larger mask used to be truncated silently
+        backend.composite_destination_in(other, backend.rasterize_mesh_mask([0, 0, 1, 0, 0, 1], [0, 1, 2], 7, 5))
+    with pytest.raises(ValueError):
+        backend.composite_destination_in(other, backend.rasterize_mesh_mask([0, 0, 1, 0, 0, 1], [0, 1, 2], 6, 5), premultiplied=True)

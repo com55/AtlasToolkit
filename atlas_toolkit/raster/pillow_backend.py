@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import math
 
 import numpy as np
 from PIL import Image, ImageChops
@@ -40,6 +39,124 @@ def _mesh_key(uvs: list[float], triangles: list[int], width: int, height: int) -
     digest.update(np.asarray(uvs, dtype=np.float64).tobytes())
     digest.update(np.asarray(triangles, dtype=np.int32).tobytes())
     return digest.digest()
+
+
+# Use the run-length writer while its sort is cheaper than the dense diff:
+# about 16 bytes of events per crossing against 1 output byte per pixel.
+_RUNS_BYTES_PER_CROSSING = 16
+
+
+def mesh_crossings(
+    uvs: list[float], triangles: list[int], width: int, height: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every (row, k, direction) where a mesh edge crosses a pixel-centre row.
+    k counts the pixel centres strictly left of the crossing, so the edge
+    adds `direction` to the winding of pixels 0..k-1 of that row.
+
+    Same decisions as the original per-edge loop, made for all edges at once:
+    edges stored low-y first with their true direction (exact cancellation of
+    opposite twins), horizontal edges skipped, rows whose centre lies in
+    [y0, y1), and a pixel counted when crossing_x > its centre (searchsorted
+    with side="left" counts exactly those; a NaN crossing counts none).
+    Errors match the loop too: a bad index raises IndexError, and the first
+    non-finite y raises ValueError (NaN) or OverflowError (inf), like
+    math.floor. Row and key arithmetic is int64 so wasm32 (32-bit intp)
+    computes the same values as a 64-bit desktop."""
+    u = np.asarray(uvs, dtype=np.float64).reshape(-1)
+    t = np.asarray(triangles, dtype=np.int64).reshape(-1)
+    if t.size % 3:
+        raise IndexError("list index out of range")
+    t = t.reshape(-1, 3)
+    xs = u[t * 2] * width
+    ys = u[t * 2 + 1] * height
+    x0, y0 = xs.reshape(-1), ys.reshape(-1)
+    x1, y1 = xs[:, [1, 2, 0]].reshape(-1), ys[:, [1, 2, 0]].reshape(-1)
+    keep = y0 != y1
+    x0, y0, x1, y1 = x0[keep], y0[keep], x1[keep], y1[keep]
+    d = np.where(y1 > y0, 1, -1).astype(np.int64)
+    swap = y0 > y1
+    x0, x1 = np.where(swap, x1, x0), np.where(swap, x0, x1)
+    y0, y1 = np.where(swap, y1, y0), np.where(swap, y0, y1)
+    bad = ~(np.isfinite(y0) & np.isfinite(y1))
+    if bad.any():
+        i = int(np.argmax(bad))
+        value = y0[i] if not np.isfinite(y0[i]) else y1[i]
+        if np.isnan(value):
+            raise ValueError("cannot convert float NaN to integer")
+        raise OverflowError("cannot convert float infinity to integer")
+    # Clamp in float before the cast: a huge y must not overflow the int.
+    r0 = np.clip(np.floor(y0 - 0.5), 0, height).astype(np.int64)
+    r1 = np.clip(np.ceil(y1 - 0.5) + 1, 0, height).astype(np.int64)
+    n = np.maximum(r1 - r0, 0)
+    counts = n.astype(np.intp)
+    edge = np.repeat(np.arange(d.size, dtype=np.int64), counts)
+    row = np.arange(edge.size, dtype=np.int64) - np.repeat(np.cumsum(n) - n, counts) + r0[edge]
+    centre = row + 0.5
+    inside = (centre >= y0[edge]) & (centre < y1[edge])
+    edge, row, centre = edge[inside], row[inside], centre[inside]
+    along = (centre - y0[edge]) / (y1[edge] - y0[edge])
+    with np.errstate(invalid="ignore"):  # inf - inf and 0 * inf give NaN: no pixel
+        cross = x0[edge] + along * (x1[edge] - x0[edge])
+    live = ~np.isnan(cross)
+    edge, row, cross = edge[live], row[live], cross[live]
+    centres = np.arange(width, dtype=np.float64) + 0.5
+    k = np.searchsorted(centres, cross, side="left").astype(np.int64)
+    return row, k, d[edge]
+
+
+def alpha_from_dense(
+    row: np.ndarray, k: np.ndarray, d: np.ndarray, width: int, height: int,
+) -> np.ndarray:
+    """(height, width) uint8 0/255 from crossings: an int32 difference array
+    per row (+d at column 0, -d at column k), summed along x."""
+    stride = width + 1
+    diff = np.zeros(height * stride, dtype=np.int32)
+    weight = d.astype(np.int32)
+    np.add.at(diff, row * stride, weight)
+    np.add.at(diff, row * stride + k, -weight)
+    winding = np.cumsum(diff.reshape(height, stride)[:, :width], axis=1, dtype=np.int32)
+    out = (winding != 0).view(np.uint8)
+    out *= 255
+    return out
+
+
+def alpha_from_runs(
+    row: np.ndarray, k: np.ndarray, d: np.ndarray, width: int, height: int,
+) -> np.ndarray:
+    """Same result as alpha_from_dense for sparse crossings: sort the +-1
+    events by flat position, sum them per position, and write each run of
+    equal winding with one np.repeat (1 byte per pixel, no int32 canvas).
+    An event at k == width lands on the next row's start; a row's events sum
+    to zero, so it never leaks into that row."""
+    total = width * height
+    if d.size == 0 or total == 0:
+        return np.zeros((height, width), dtype=np.uint8)
+    start = row * width
+    # Packed key: position * 2 + (1 for a +1 event, 0 for a -1 event).
+    key = np.concatenate([start, start + k]) * 2 + np.concatenate([d > 0, d < 0]).astype(np.int64)
+    key.sort()
+    position = key >> 1
+    weight = (key & 1) * 2 - 1
+    first = np.flatnonzero(np.r_[True, position[1:] != position[:-1]])
+    winding = np.cumsum(np.add.reduceat(weight, first))
+    lengths = np.diff(np.r_[np.int64(0), position[first], np.int64(total)]).astype(np.intp)
+    filled = np.r_[np.int64(0), winding] != 0
+    values = np.where(filled, np.uint8(255), np.uint8(0))
+    return np.repeat(values, lengths).reshape(height, width)
+
+
+def _destination_in(dest_img: Image.Image, mask_img: Image.Image, premultiplied: bool) -> None:
+    """composite_destination_in's per-pixel step on two same-size images,
+    in place on dest_img."""
+    if premultiplied:
+        # pma page (spec 2026-10-26 §3.1): every channel x mask, the same
+        # integer formula as straight alpha, so outside the mask RGB is
+        # cleared too and partial coverage scales colour with alpha.
+        mask_alpha = np.asarray(mask_img.getchannel("A"), dtype=np.uint16)
+        scaled = (np.asarray(dest_img, dtype=np.uint16) * mask_alpha[..., None]) // 255
+        dest_img.paste(Image.frombytes("RGBA", dest_img.size, scaled.astype(np.uint8).tobytes()), (0, 0))
+        return
+    dest_img.putalpha(ImageChops.multiply(dest_img.getchannel("A"), mask_img.getchannel("A")))
 
 
 class PillowRasterBackend:
@@ -197,10 +314,9 @@ class PillowRasterBackend:
             if self._mesh_cache_bytes + len(alpha) <= _MESH_CACHE_MAX_BYTES:
                 self._mesh_cache[key] = alpha
                 self._mesh_cache_bytes += len(alpha)
-        rgba = np.empty((height, width, 4), dtype=np.uint8)
-        rgba[:, :, 0:3] = 255
-        rgba[:, :, 3] = np.frombuffer(alpha, dtype=np.uint8).reshape(height, width)
-        return self._store(Image.fromarray(rgba, mode="RGBA"))
+        white = Image.new("L", (width, height), 255)
+        mask = Image.frombytes("L", (width, height), alpha)
+        return self._store(Image.merge("RGBA", (white, white, white, mask)))
 
     def clear_mesh_cache(self) -> None:
         self._mesh_cache.clear()
@@ -218,55 +334,10 @@ class PillowRasterBackend:
         # (hard edges) -- Canvas's fill is antialiased; that difference is
         # confined to polygon edges, not the interior, and is expected
         # (see rasterize_mesh_mask's docstring in raster/base.py).
-        edges: list[tuple[float, float, float, float, int]] = []
-        for i in range(0, len(triangles), 3):
-            ia, ib, ic = triangles[i] * 2, triangles[i + 1] * 2, triangles[i + 2] * 2
-            pts = [
-                (uvs[ia] * width, uvs[ia + 1] * height),
-                (uvs[ib] * width, uvs[ib + 1] * height),
-                (uvs[ic] * width, uvs[ic + 1] * height),
-            ]
-            for k in range(3):
-                x0, y0 = pts[k]
-                x1, y1 = pts[(k + 1) % 3]
-                if y0 == y1:
-                    continue
-                direction = 1 if y1 > y0 else -1
-                # Canonicalize storage order to (low-y point, high-y point)
-                # BEFORE appending -- two edges that represent the same
-                # physical segment but arrive with opposite winding (e.g.
-                # from a triangle and its exact index-reversed twin) then
-                # compute an identical floating-point cross_x, so nonzero-
-                # winding cancellation is exact rather than depending on
-                # two different orders of float operations agreeing by
-                # chance. direction still carries the edge's TRUE original
-                # direction, independent of storage order.
-                if y0 > y1:
-                    x0, y0, x1, y1 = x1, y1, x0, y0
-                edges.append((x0, y0, x1, y1, direction))
-
-        winding = np.zeros((height, width), dtype=np.int32)
-        if edges:
-            cy = (np.arange(height, dtype=np.float64) + 0.5)[:, np.newaxis]  # (H,1)
-            cx = (np.arange(width, dtype=np.float64) + 0.5)[np.newaxis, :]   # (1,W)
-            for x0, y0, x1, y1, direction in edges:
-                # Canonical order guarantees y1 > y0 always now. An edge can
-                # only cross the rows whose centres lie in [y0, y1), so work
-                # on that band alone (one spare row each side absorbs float
-                # rounding; the exact test below still decides every row) --
-                # same result as scanning the whole canvas, far less work.
-                r0 = max(0, math.floor(y0 - 0.5))
-                r1 = min(height, math.ceil(y1 - 0.5) + 1)
-                if r0 >= r1:
-                    continue
-                band = cy[r0:r1]
-                crosses = (band >= y0) & (band < y1)
-                t = (band - y0) / (y1 - y0)
-                cross_x = x0 + t * (x1 - x0)
-                contributes = crosses & (cross_x > cx)
-                winding[r0:r1] += np.where(contributes, direction, 0).astype(np.int32)
-
-        return np.where(winding != 0, 255, 0).astype(np.uint8)
+        row, k, d = mesh_crossings(uvs, triangles, width, height)
+        if _RUNS_BYTES_PER_CROSSING * d.size < width * height:
+            return alpha_from_runs(row, k, d, width, height)
+        return alpha_from_dense(row, k, d, width, height)
 
     def composite_destination_in(
         self, dest: ImageHandle, mask: ImageHandle,
@@ -279,14 +350,12 @@ class PillowRasterBackend:
         # images computes exactly (a*b)//255 per pixel, which is this
         # formula in 0-255 space -- but it does NOT itself enforce equal
         # sizes (it silently truncates to the smaller operand's extent on
-        # a mismatch, verified directly). The actual guard is the
-        # putalpha() call below: Image.putalpha raises ValueError on a
-        # size mismatch between dest_img and new_alpha, which is what
-        # turns a caller bug (mask, cropped by src_rect when given, not
-        # sized to match dest -- see maskRawSprite's own crop-back
-        # derivation in engine/modifier.py, which always produces a match
-        # in production) into a hard error instead of a silently
-        # truncated composite.
+        # a mismatch, verified directly). The explicit size check below
+        # raises ValueError instead, which turns a caller bug (mask,
+        # cropped by src_rect when given, not sized to match dest -- see
+        # maskRawSprite's own crop-back derivation in engine/modifier.py,
+        # which always produces a match in production) into a hard error
+        # instead of a silently truncated composite.
         #
         # src_rect's crop uses Image.crop(), which zero-pads (transparent)
         # any out-of-bounds region rather than raising or clamping --
@@ -298,15 +367,19 @@ class PillowRasterBackend:
             x, y, w, h = src_rect
             mask_img = mask_img.crop((x, y, x + w, y + h))
         dest_img = self._images[dest]
-        if premultiplied:
-            # pma page (spec 2026-10-26 §3.1): every channel x mask, the same
-            # integer formula as straight alpha, so outside the mask RGB is
-            # cleared too and partial coverage scales colour with alpha.
-            mask_alpha = np.asarray(mask_img.getchannel("A"), dtype=np.uint16)
-            if mask_alpha.shape != (dest_img.size[1], dest_img.size[0]):
-                raise ValueError("images do not match")
-            scaled = (np.asarray(dest_img, dtype=np.uint16) * mask_alpha[..., None]) // 255
-            dest_img.paste(Image.frombytes("RGBA", dest_img.size, scaled.astype(np.uint8).tobytes()), (0, 0))
+        if mask_img.size != dest_img.size:
+            raise ValueError("images do not match")
+        # Work only on the box that holds dest's non-zero pixels (any
+        # channel, so pma's alpha-0 RGB counts). Outside it dest is
+        # (0, 0, 0, 0), which both formulas below leave unchanged, so the
+        # result is the same bytes as masking the whole image. An extracted
+        # region pasted onto its original canvas often fills a fifth of it.
+        box = dest_img.getbbox(alpha_only=False)
+        if box is None:
             return
-        new_alpha = ImageChops.multiply(dest_img.getchannel("A"), mask_img.getchannel("A"))
-        dest_img.putalpha(new_alpha)
+        if box == (0, 0, *dest_img.size):
+            _destination_in(dest_img, mask_img, premultiplied)
+            return
+        part = dest_img.crop(box)
+        _destination_in(part, mask_img.crop(box), premultiplied)
+        dest_img.paste(part, box[:2])

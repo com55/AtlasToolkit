@@ -132,11 +132,13 @@ class RasterBackend(Protocol):
         `PillowRasterBackend`'s implementation composes `dest`'s and (the
         optionally `src_rect`-cropped) `mask`'s alpha channels via
         `PIL.ImageChops.multiply` (exact `(a*b)//255` per pixel), then calls
-        `putalpha`. `ImageChops.multiply` itself does not enforce that its
-        two operands share a size (it silently truncates to the smaller
-        extent on a mismatch); `putalpha` is what actually raises
-        `ValueError` on a size mismatch, turning a caller bug into a hard
-        error rather than a silently truncated composite.
+        `putalpha`, on just the box holding dest's non-zero pixels (outside
+        it dest is (0,0,0,0) and stays so). `ImageChops.multiply` itself
+        does not enforce that its two operands share a size (it silently
+        truncates to the smaller extent on a mismatch), so the backend
+        checks sizes first and raises `ValueError` on a mismatch, turning a
+        caller bug into a hard error rather than a silently truncated
+        composite.
 
         With `premultiplied=True` (a pma page, spec 2026-10-26 §3.1) every
         channel c, RGB and alpha alike, becomes `(c * m) // 255` where m is
