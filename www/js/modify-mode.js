@@ -31,8 +31,6 @@ function updateModifyActionButtons() {
 
 export function setMode(mode) {
   state.currentMode = mode;
-  document.getElementById('advance-toolbar').classList.remove('hidden');
-  document.body.classList.toggle('advance-mode-on', mode === 'modify');
   document.body.classList.toggle('mode-modify', mode === 'modify');
   document.body.classList.toggle('mode-extract', mode !== 'modify');
   const extractControls = document.getElementById('extract-controls');

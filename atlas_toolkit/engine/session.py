@@ -249,6 +249,20 @@ class AtlasSession:
         }
         return derive_effective_model(pristine, self._mod_batches if batches is None else batches)
 
+    def validated_name(self, candidate: str, exclude_key: str | None = None) -> str:
+        """The trimmed name, or RegionNameError if it is invalid or taken
+        (ignoring the region `exclude_key`)."""
+        return self._validated_name(candidate, exclude_key=exclude_key)
+
+    def pristine_page_views(self) -> dict:
+        """Each page's pristine image as loaded, by file name. Views share the
+        session's pixels: read only."""
+        return {name: self._raster.view(handle) for name, handle in self._page_images.items()}
+
+    def export_page_image(self, name: str):
+        """A caller-owned copy of one pristine page (KeyError if unknown)."""
+        return self._raster.export(self._page_images[name])
+
     def _validated_name(self, candidate: str, exclude_key: str | None = None) -> str:
         effective = self._raw_effective_model()
         labels = []

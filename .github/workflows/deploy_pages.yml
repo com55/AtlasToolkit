@@ -6,6 +6,13 @@ on:
       - main
     paths:
       - "www/**"
+      - "atlas_toolkit/**"
+      - "scripts/build_web.py"
+      - "scripts/web_version.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/deploy_pages.yml"
   workflow_dispatch:
 
@@ -28,17 +35,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Pull vendor dependencies
-        env:
-          VENDOR_SOURCE_REPO: ${{ secrets.VENDOR_SOURCE_REPO }}
-          VENDOR_SOURCE_TAG: ${{ secrets.VENDOR_SOURCE_TAG }}
-        run: |
-          git clone --quiet --depth 1 --branch "$VENDOR_SOURCE_TAG" "$VENDOR_SOURCE_REPO" "$RUNNER_TEMP/vendor-src"
-          mkdir -p www/js/vendor/spine-skeleton-binary
-          cp "$RUNNER_TEMP"/vendor-src/src/*.js www/js/vendor/spine-skeleton-binary/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Stamp app version into index.html
-        run: python3 scripts/web_version.py --stamp www/index.html
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      # Pyodide runtime, engine wheels, bundled page, generated sw.js and the
+      # version stamp; fails if the shipped import graph is broken.
+      - name: Build web app
+        run: uv run python scripts/build_web.py
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -46,7 +59,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: www
+          path: dist/web
 
       - name: Deploy to GitHub Pages
         id: deployment

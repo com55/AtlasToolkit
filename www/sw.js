@@ -24,7 +24,8 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k.startsWith('atlas-toolkit-py-') && k !== CACHE_NAME).map((k) => caches.delete(k)))
+      // Also drop the old JS app's atlas-toolkit-v<N> caches (same origin).
+      Promise.all(keys.filter((k) => (k.startsWith('atlas-toolkit-py-') && k !== CACHE_NAME) || /^atlas-toolkit-v\d+$/.test(k)).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();

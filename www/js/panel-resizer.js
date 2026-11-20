@@ -36,7 +36,7 @@ export function initPanelResizer() {
   // header row always stays visible: dragging up stops once the preview has
   // shrunk to nothing beneath #options-row + status-bar; dragging down
   // stops once the region list has shrunk to nothing beneath sidebar-head
-  // (and #advance-toolbar too, when Advance Mode has it showing -- its
+  // (and #advance-toolbar too in Edit Mode -- its
   // getBoundingClientRect().height is naturally 0 while hidden, so this
   // reads correctly either way without a separate visibility check).
   // The budget is #main-content's own height (not window.innerHeight) minus

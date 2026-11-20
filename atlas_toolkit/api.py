@@ -652,7 +652,7 @@ class SpineAtlas:
         if not entries or entries[-1] is not hit:
             kept = tuple(entry for entry in entries if entry is not hit)
             entries = (*kept, hit)[-_BUILD_CACHE_SIZE:]
-            pristine = {id(self._session._raster.view(h)) for h in self._session._page_images.values()}
+            pristine = {id(image) for image in self._session.pristine_page_views().values()}
 
             def cost(entry: tuple) -> int:
                 return sum(image.width * image.height * 4 for image in entry[2].values() if id(image) not in pristine)
@@ -689,15 +689,16 @@ class SpineAtlas:
 
     def page_image(self, name: str) -> Image.Image:
         """Return a copy of one pristine page."""
-        if name not in self._session._page_images:
-            raise ValueError(f"unknown page {name!r}")
-        return self._session._raster.export(self._session._page_images[name])
+        try:
+            return self._session.export_page_image(name)
+        except KeyError:
+            raise ValueError(f"unknown page {name!r}") from None
 
     def validate_region_name(self, name: str, exclude: str | None = None) -> str:
         """Validate and trim a name, optionally excluding an existing region."""
         key = self._key(exclude) if exclude is not None else None
         try:
-            return self._session._validated_name(name, exclude_key=key)
+            return self._session.validated_name(name, exclude_key=key)
         except RegionNameError as error:
             raise InvalidRegionName(error.reason) from None
 
@@ -908,10 +909,7 @@ class SpineAtlas:
         """
         resolved = self._resolve(options)
         if not self.has_changes:
-            return self._text, {
-                name: self._session._raster.view(handle)
-                for name, handle in self._session._page_images.items()
-            }
+            return self._text, self._session.pristine_page_views()
         text, pages, _ = self._cached_pack(resolved)
         return text, pages
 

@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Serve www/ with the app version injected into index.html.
+"""Serve the built web app (dist/web by default; run build_web.py first)
+with the app version injected into index.html.
 
 Reads version from pyproject.toml (same source as the desktop title).
-Does not write the repo copy of index.html.
+Does not write the repo copy of index.html. www/ itself does not run: its
+sw.js is a template.
 
   uv run python scripts/serve_www.py
   uv run python scripts/serve_www.py --port 8000
-  uv run python scripts/serve_www.py --site dist/web
+  uv run python scripts/serve_www.py --site www
 """
 from __future__ import annotations
 
@@ -55,7 +57,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--bind", default="127.0.0.1")
-    parser.add_argument("--site", type=Path, default=Path("www"))
+    parser.add_argument("--site", type=Path, default=Path("dist/web"))
     args = parser.parse_args()
     version = load_version()
     StampingHandler.version = version
