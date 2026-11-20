@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import atlas_toolkit.packer as packer_module
-from atlas_toolkit.packer import PackOptions, Packer, ResolvedPack, resolve_packer
+import spine_atlas_toolkit.packer as packer_module
+from spine_atlas_toolkit.packer import PackOptions, Packer, ResolvedPack, resolve_packer
 
 
 def resolve_in(options, *, mesh_ready=True):

@@ -10,8 +10,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from atlas_toolkit.app import desktop
-from atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
+from spine_atlas_toolkit.app import desktop
+from spine_atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
 from .host_fixtures import one_page, page_bytes
 
 
@@ -23,7 +23,7 @@ def site(tmp_path):
 
 @pytest.fixture
 def assembled(site, tmp_path, monkeypatch):
-    monkeypatch.setattr("atlas_toolkit.app.config.CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr("spine_atlas_toolkit.app.config.CONFIG_PATH", tmp_path / "config.json")
     urls = []
     window = Mock()
     window.create_confirmation_dialog.return_value = False

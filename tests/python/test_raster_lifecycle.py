@@ -5,7 +5,7 @@ import io
 import pytest
 from PIL import Image
 
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def _png_bytes(mode: str, size: tuple[int, int], color) -> bytes:

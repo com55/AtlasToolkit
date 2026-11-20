@@ -7,9 +7,9 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier, js_object_key_order
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier, js_object_key_order
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 PAGE_TEXT = "\n".join([
     "p.png", "size: 64,64", "format: RGBA8888", "filter: Linear, Linear", "repeat: none",

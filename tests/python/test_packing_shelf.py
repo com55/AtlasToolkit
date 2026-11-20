@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pinned tests for domain/packing.py's shelf_pack."""
 
-from atlas_toolkit.domain.packing import shelf_pack
+from spine_atlas_toolkit.domain.packing import shelf_pack
 
 SIX_SQUARES = [{"name": f"s{i}", "w": 20, "h": 20} for i in range(6)]
 SEVEN_SQUARES = [{"name": f"s{i}", "w": 20, "h": 20} for i in range(7)]

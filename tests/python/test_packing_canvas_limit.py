@@ -5,8 +5,8 @@ before allocating, and every layout that already fits is unchanged."""
 import numpy as np
 import pytest
 
-from atlas_toolkit.domain import packing
-from atlas_toolkit.domain.packing import (
+from spine_atlas_toolkit.domain import packing
+from spine_atlas_toolkit.domain.packing import (
     CanvasTooLargeError, _overlaps, _rotation_variants, _stamp_occupied, nest_pack, shelf_pack,
 )
 

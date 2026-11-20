@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """LibGDX-atlas -> Spine-atlas text conversion -- port of
 www/js/atlas-converter.js. That JS file is itself a port of a real prior
-Python original (atlas_toolkit/atlas/converter.py on
+Python original (spine_atlas_toolkit/atlas/converter.py on
 origin/legacy/dev-python), but this port follows the CURRENT JS behavior,
 not the legacy Python one -- they differ in _is_page_line's extension
 matching (this port/JS: .png only; legacy Python: png/jpg/jpeg/webp/bmp/gif).

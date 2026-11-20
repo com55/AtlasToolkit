@@ -33,7 +33,7 @@ def test_fixture_axes_are_live():
     golden.self_check(EXPECTED)
 
 
-from atlas_toolkit.packer import PackOptions
+from spine_atlas_toolkit.packer import PackOptions
 
 # The fixture pins the old default combination -- no keep-layout, shared
 # composite image, auto bleed off -- so the old bytes come back.

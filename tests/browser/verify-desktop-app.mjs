@@ -170,7 +170,7 @@ try {
     const files = fs.readdirSync(folder);
     assert(files.includes('one.atlas')); assert(files.some(name => name.endsWith('.png')));
     const text = fs.readFileSync(path.join(folder, 'one.atlas'), 'utf8');
-    const parsed = spawnSync(python, ['-c', 'import sys; from atlas_toolkit.document import AtlasDocument; d = AtlasDocument.parse(sys.stdin.read()); assert d.pages',], {cwd:ROOT,input:text,encoding:'utf8'});
+    const parsed = spawnSync(python, ['-c', 'import sys; from spine_atlas_toolkit.document import AtlasDocument; d = AtlasDocument.parse(sys.stdin.read()); assert d.pages',], {cwd:ROOT,input:text,encoding:'utf8'});
     assert.equal(parsed.status, 0, parsed.stderr);
     assert.equal(await command('unsaved', null), 'false');
     const saved = frames.filter(frame => frame.method === 'mark_saved'); assert(saved.length);

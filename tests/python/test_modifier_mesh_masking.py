@@ -14,13 +14,13 @@ from io import BytesIO
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import (
     AtlasModifier,
     _mask_modded_sprites,
     mask_raw_sprite,
 )
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 # Two triangles tiling a clean axis-aligned rectangle covering the left
 # half (u in [0, 0.5], full v range) of whatever width/height it's

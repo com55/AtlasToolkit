@@ -5,10 +5,10 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
     "p.png\nsize: 8,4\nscale: 0.5\nfoo: bar, baz\n"

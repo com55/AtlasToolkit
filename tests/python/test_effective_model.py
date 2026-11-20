@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-from atlas_toolkit.domain.effective_model import derive_effective_model
+from spine_atlas_toolkit.domain.effective_model import derive_effective_model
 
 
 def _pristine():

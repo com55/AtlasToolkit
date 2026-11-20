@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-from atlas_toolkit.domain.region_validation import validate_region_name
+from spine_atlas_toolkit.domain.region_validation import validate_region_name
 
 
 def test_trims_before_validating_and_returns_trimmed_value():

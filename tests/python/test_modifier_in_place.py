@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 UPPER_LEFT = {"uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 1, 2]}
 LOWER_RIGHT = {"uvs": [1, 0, 1, 1, 0, 1], "triangles": [0, 1, 2]}
@@ -111,7 +111,7 @@ def test_vacate_keeps_a_neighbours_hull_inside_the_removed_rect():
     rgba = page_rgba(24, 16, [(0, 0, 24, 16)])
     modifier, raster, _ = setup(text, rgba)
     out = pixels(raster, run(modifier, [remove("A")], mesh={"B": LOWER_RIGHT}))
-    from atlas_toolkit.engine.modifier import mesh_mask_grid
+    from spine_atlas_toolkit.engine.modifier import mesh_mask_grid
     b_hull = mesh_mask_grid(raster, LOWER_RIGHT, None, 16, 16)  # B's hull over its own rect
     region = out[:, 8:24]
     assert (region[b_hull & (np.arange(16)[None, :] < 8)][:, 3] > 0).all()   # inside A's old rect, on B's hull
@@ -126,7 +126,7 @@ def test_each_group_is_masked_by_its_own_hull():
     batch = {"type": "mod", "names": ["A", "B"], "source": sprite, "is_full_canvas": True, "composite": True}
     mesh = {"A": UPPER_LEFT, "B": LOWER_RIGHT}
     out = pixels(raster, run(modifier, [batch], mesh=mesh, sprites={"A": sprite, "B": sprite}))
-    from atlas_toolkit.engine.modifier import mesh_mask_grid
+    from spine_atlas_toolkit.engine.modifier import mesh_mask_grid
     a_hull = mesh_mask_grid(raster, UPPER_LEFT, None, 16, 16)
     assert (out[:, :16][~a_hull][:, 3] == 0).all()     # nothing of B's hull inside A's rect
     assert (out[:, :16][a_hull][:, 3] == 255).all()

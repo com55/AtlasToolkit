@@ -3,7 +3,7 @@
 # tests/python/test_raster_composite_destination_in.py
 import pytest
 
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def _solid(backend, w, h, rgba):

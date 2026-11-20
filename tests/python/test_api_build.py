@@ -6,11 +6,11 @@ import io
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.packer import PackOptions, Packer
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.packer import PackOptions, Packer
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
     "page.png\nsize: 16,8\nscale: 0.5\n"
@@ -328,7 +328,7 @@ def test_switching_settings_back_does_not_repack(monkeypatch):
 
 
 def test_build_cache_evicts_the_least_recently_used(monkeypatch):
-    from atlas_toolkit import api
+    from spine_atlas_toolkit import api
     atlas, calls = _counted_atlas(monkeypatch)
     paddings = range(1, api._BUILD_CACHE_SIZE + 1)
     for padding in paddings:

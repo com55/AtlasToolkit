@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
 
-from atlas_toolkit.document import AtlasDocument, Region
+from spine_atlas_toolkit.document import AtlasDocument, Region
 
 # Shared fixture text, ported verbatim from tests/atlas-document.test.js's
 # FIXTURE constant. Covers: a region with an explicit-but-redundant
@@ -237,7 +237,7 @@ def test_short_xy_size_lines_degrade_to_zero_instead_of_crashing():
     assert (leg3.w, leg3.h) == (20, 0)
 
 
-from atlas_toolkit.document import png_names_for_save
+from spine_atlas_toolkit.document import png_names_for_save
 
 
 def test_with_updates_replaces_bounds_offsets_rotate_and_applies_page_size():

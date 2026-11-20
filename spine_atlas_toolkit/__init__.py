@@ -21,9 +21,9 @@ def __dir__() -> list[str]:
 
 def __getattr__(name: str):
     if name in _API_NAMES:
-        from atlas_toolkit import api
+        from spine_atlas_toolkit import api
         return getattr(api, name)
     if name == "__version__":
-        from atlas_toolkit.update.updater import get_current_version
+        from spine_atlas_toolkit.update.updater import get_current_version
         return get_current_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

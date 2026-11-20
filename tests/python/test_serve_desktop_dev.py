@@ -7,7 +7,7 @@ import sys
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.document import AtlasDocument
 
 
 def test_make_fixture(tmp_path):

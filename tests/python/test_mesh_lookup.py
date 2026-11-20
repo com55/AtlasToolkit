@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-from atlas_toolkit.mesh.lookup import build_mesh_lookup
+from spine_atlas_toolkit.mesh.lookup import build_mesh_lookup
 
 
 def test_keeps_only_mesh_type_attachments_drops_others():

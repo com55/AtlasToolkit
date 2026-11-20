@@ -104,7 +104,7 @@ def build_project_wheels(cache: Path) -> dict[str, Path]:
              PARSER_URL, str(parser_source)], check=True,
         )
     return {
-        "atlas_toolkit": build_wheel(ROOT, cache / "atlas-wheel"),
+        "spine_atlas_toolkit": build_wheel(ROOT, cache / "atlas-wheel"),
         "skel_mesh_parser": build_wheel(parser_source, cache / "parser-wheel"),
     }
 

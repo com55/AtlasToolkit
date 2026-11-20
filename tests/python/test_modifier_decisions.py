@@ -3,7 +3,7 @@
 """Pinned tests for engine/modifier.py's pure mod-canvas decision functions."""
 
 
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.engine.modifier import (
     ModCanvas,
     canvas_size_match,
     resolve_mod_canvas,

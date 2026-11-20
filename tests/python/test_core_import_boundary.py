@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parents[2] / "atlas_toolkit"
+PACKAGE = Path(__file__).resolve().parents[2] / "spine_atlas_toolkit"
 
 
 def _imported_modules(source, own_package):
@@ -38,7 +38,7 @@ def test_core_modules_do_not_import_desktop_or_network_packages():
         if relative.parts[0] in {"app", "update"}:
             continue
         inspected.append(relative.as_posix())
-        package = ".".join(("atlas_toolkit", *relative.parts[:-1]))
+        package = ".".join(("spine_atlas_toolkit", *relative.parts[:-1]))
         bad = [name for name in _imported_modules(path.read_text(encoding="utf-8"), package) if _forbidden(name)]
         if bad:
             offenders[relative.as_posix()] = bad
@@ -48,14 +48,14 @@ def test_core_modules_do_not_import_desktop_or_network_packages():
 
 
 @pytest.mark.parametrize("source,package,expected", [
-    ("import requests.sessions", "atlas_toolkit.domain", "requests.sessions"),
-    ("from requests.sessions import Session", "atlas_toolkit.domain", "requests.sessions.Session"),
-    ("from requests import sessions", "atlas_toolkit.domain", "requests.sessions"),
-    ("from ..engine import session", "atlas_toolkit.domain", "atlas_toolkit.engine.session"),
-    ("from .. import engine", "atlas_toolkit.domain", "atlas_toolkit.engine"),
-    ("from . import session", "atlas_toolkit.engine", "atlas_toolkit.engine.session"),
-    ("from ... import api", "atlas_toolkit.engine.nested", "atlas_toolkit.api"),
-    ("from . import api", "atlas_toolkit", "atlas_toolkit.api"),
+    ("import requests.sessions", "spine_atlas_toolkit.domain", "requests.sessions"),
+    ("from requests.sessions import Session", "spine_atlas_toolkit.domain", "requests.sessions.Session"),
+    ("from requests import sessions", "spine_atlas_toolkit.domain", "requests.sessions"),
+    ("from ..engine import session", "spine_atlas_toolkit.domain", "spine_atlas_toolkit.engine.session"),
+    ("from .. import engine", "spine_atlas_toolkit.domain", "spine_atlas_toolkit.engine"),
+    ("from . import session", "spine_atlas_toolkit.engine", "spine_atlas_toolkit.engine.session"),
+    ("from ... import api", "spine_atlas_toolkit.engine.nested", "spine_atlas_toolkit.api"),
+    ("from . import api", "spine_atlas_toolkit", "spine_atlas_toolkit.api"),
 ])
 def test_import_guard_resolves_every_import_form(source, package, expected):
     assert expected in _imported_modules(source, package)
@@ -68,5 +68,5 @@ def test_import_guard_recognizes_forbidden_packages(name):
 
 
 def test_package_and_version_import_without_requests():
-    code = "import sys; sys.modules['requests'] = None; sys.modules['webview'] = None; import atlas_toolkit; assert atlas_toolkit.__version__; atlas_toolkit.SpineAtlas"
+    code = "import sys; sys.modules['requests'] = None; sys.modules['webview'] = None; import spine_atlas_toolkit; assert spine_atlas_toolkit.__version__; spine_atlas_toolkit.SpineAtlas"
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)

@@ -4,7 +4,7 @@
 import numpy as np
 from PIL import Image
 
-from atlas_toolkit.domain.alpha_split import SPLIT, split_alphas
+from spine_atlas_toolkit.domain.alpha_split import SPLIT, split_alphas
 
 COLOURS = np.arange(256, dtype=np.uint8)
 

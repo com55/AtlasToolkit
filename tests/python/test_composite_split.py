@@ -4,10 +4,10 @@
 import numpy as np
 from PIL import Image
 
-from atlas_toolkit.domain.alpha_split import SPLIT
-from atlas_toolkit.engine.composite_split import Piece, scaled_rect, split_composite
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from atlas_toolkit.raster.premultiplied import premultiplied_over
+from spine_atlas_toolkit.domain.alpha_split import SPLIT
+from spine_atlas_toolkit.engine.composite_split import Piece, scaled_rect, split_composite
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.premultiplied import premultiplied_over
 
 QUAD = [0, 1, 2, 0, 2, 3]
 

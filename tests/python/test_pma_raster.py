@@ -4,10 +4,10 @@
 import numpy as np
 import pytest
 
-from atlas_toolkit.raster import lanczos
-from atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from atlas_toolkit.raster.premultiplied import attenuate, premultiplied_over
+from spine_atlas_toolkit.raster import lanczos
+from spine_atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.premultiplied import attenuate, premultiplied_over
 from tests.python.pma_cases import GLOW_IN, premultiplied_pattern
 
 

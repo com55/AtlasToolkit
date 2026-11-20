@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.extraction import AtlasProcessor
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.extraction import AtlasProcessor
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def image(raster, width=8, height=6, pixels=None):

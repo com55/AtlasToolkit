@@ -4,8 +4,8 @@
 import numpy as np
 import pytest
 
-from atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
-from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
+from spine_atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
+from spine_atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 
 pytestmark = pytest.mark.filterwarnings("error::RuntimeWarning")
 

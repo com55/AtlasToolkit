@@ -5,8 +5,8 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.engine._images import _SessionRaster
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine._images import _SessionRaster
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def patterned(width=3, height=2, mode="RGBA"):

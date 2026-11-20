@@ -6,9 +6,9 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 PAD_TEXT = "p.png\nsize: 200,200\nhero\n  bounds: 0, 0, 100, 108\n  offsets: 10, 20, 200, 200"
 NEGATIVE_X_TEXT = "p.png\nsize: 200,200\nhero\n  bounds: 0, 0, 100, 108\n  offsets: -10, 20, 200, 200"

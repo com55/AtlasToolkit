@@ -6,7 +6,7 @@ import struct
 from PIL import Image
 import pytest
 
-from atlas_toolkit.app.clipboard import copy_png, png_to_dib, _WindowsBackend
+from spine_atlas_toolkit.app.clipboard import copy_png, png_to_dib, _WindowsBackend
 
 
 def png_bytes():
@@ -60,7 +60,7 @@ def test_session_order_and_close(failure):
 
 def test_retry_open(monkeypatch):
     calls = []
-    monkeypatch.setattr("atlas_toolkit.app.clipboard.time.sleep", lambda delay: None)
+    monkeypatch.setattr("spine_atlas_toolkit.app.clipboard.time.sleep", lambda delay: None)
     class Backend:
         def register_png(self): return 99
         def open(self):
@@ -84,7 +84,7 @@ def test_failed_transfer_frees_memory():
         GlobalFree=lambda handle: calls.append(("free", handle)),
     )
     backend.user = SimpleNamespace(SetClipboardData=lambda fmt, handle: 0)
-    from atlas_toolkit.app import clipboard
+    from spine_atlas_toolkit.app import clipboard
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(clipboard.ctypes, "memmove", lambda *args: None)
         patch.setattr(clipboard.ctypes, "get_last_error", lambda: 5, raising=False)
@@ -97,7 +97,7 @@ def test_failed_transfer_frees_memory():
 def test_copy_rgba_publishes_the_same_pixels():
     from io import BytesIO
     from PIL import Image
-    from atlas_toolkit.app.clipboard import copy_rgba
+    from spine_atlas_toolkit.app.clipboard import copy_rgba
     image = Image.new("RGBA", (3, 2))
     image.putdata([(x * 40, y * 90, 7, 50 + x * 60 + y) for y in range(2) for x in range(3)])
     published = {}

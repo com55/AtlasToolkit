@@ -12,11 +12,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.domain.alpha_split import SPLIT
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.packer import PackOptions
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
+from spine_atlas_toolkit.domain.alpha_split import SPLIT
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.packer import PackOptions
 
 QUAD = [0, 1, 2, 0, 2, 3]
 

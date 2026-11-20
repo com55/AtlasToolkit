@@ -4,7 +4,7 @@ import json
 import struct
 import unittest
 
-from atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
+from spine_atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
 
 
 class RpcFrameTests(unittest.TestCase):

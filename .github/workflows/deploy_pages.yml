@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "www/**"
-      - "atlas_toolkit/**"
+      - "spine_atlas_toolkit/**"
       - "scripts/build_web.py"
       - "scripts/web_version.py"
       - "pyproject.toml"

@@ -6,8 +6,8 @@ must give exactly that answer at every band height."""
 import numpy as np
 import pytest
 
-from atlas_toolkit.domain import packing
-from atlas_toolkit.domain.packing import (
+from spine_atlas_toolkit.domain import packing
+from spine_atlas_toolkit.domain.packing import (
     _SCAN_STEP, _find_first_fit, _overlaps, _rotation_variants, _stamp_occupied,
 )
 

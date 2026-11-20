@@ -37,9 +37,9 @@ from typing import Optional
 
 import numpy as np
 
-from atlas_toolkit.document import AtlasDocument, Region
-from atlas_toolkit.domain.effective_model import derive_effective_model
-from atlas_toolkit.domain.packing import (
+from spine_atlas_toolkit.document import AtlasDocument, Region
+from spine_atlas_toolkit.domain.effective_model import derive_effective_model
+from spine_atlas_toolkit.domain.packing import (
     footprint_for_canonical,
     nest_pack,
     nest_place_into,
@@ -48,8 +48,8 @@ from atlas_toolkit.domain.packing import (
     solid_mask,
     trim_canvas,
 )
-from atlas_toolkit.domain.region_ops import round_half_even
-from atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from spine_atlas_toolkit.domain.region_ops import round_half_even
+from spine_atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
 def canvas_size_match(

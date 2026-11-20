@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.packing import CanvasTooLargeError
-from atlas_toolkit.engine.modifier import AtlasModifier
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.packing import CanvasTooLargeError
+from spine_atlas_toolkit.engine.modifier import AtlasModifier
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 UPPER_LEFT = {"uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 1, 2]}
 LOWER_RIGHT = {"uvs": [1, 0, 1, 1, 0, 1], "triangles": [0, 1, 2]}

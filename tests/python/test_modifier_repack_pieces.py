@@ -6,11 +6,11 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.composite_split import Piece
-from atlas_toolkit.engine.modifier import AtlasModifier, region_meta
-from atlas_toolkit.domain.effective_model import derive_effective_model
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.composite_split import Piece
+from spine_atlas_toolkit.engine.modifier import AtlasModifier, region_meta
+from spine_atlas_toolkit.domain.effective_model import derive_effective_model
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 TEXT = "page.png\nsize: 16,8\nA\n bounds: 0,0,6,5\n offsets: 1,2,10,8\nB\n bounds: 6,0,4,4\n"
 

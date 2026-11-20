@@ -3,8 +3,8 @@
 """Session wiring for composite split (spec 2026-10-13 §3.1, §3.5)."""
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
 
 ATLAS = (
     "page.png\nsize: 64,32\n"

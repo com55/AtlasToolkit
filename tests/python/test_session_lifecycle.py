@@ -8,8 +8,8 @@ import io
 import pytest
 from PIL import Image, UnidentifiedImageError
 
-from atlas_toolkit.raster.base import ImageHandle
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.base import ImageHandle
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def png() -> bytes:
@@ -112,7 +112,7 @@ def live_pixels(raster):
 
 
 def test_session_owns_only_its_roots_and_read_temporaries_are_released():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = RecordingRaster()
     foreign = raster.decode_png(png())
@@ -138,7 +138,7 @@ def test_session_owns_only_its_roots_and_read_temporaries_are_released():
 
 
 def test_facade_tracks_allocations_and_dispose_is_idempotent_for_owned_only():
-    from atlas_toolkit.engine._images import _SessionRaster
+    from spine_atlas_toolkit.engine._images import _SessionRaster
 
     backend = RecordingRaster()
     facade = _SessionRaster(backend)
@@ -157,7 +157,7 @@ def test_facade_tracks_allocations_and_dispose_is_idempotent_for_owned_only():
 
 
 def test_failed_encode_keeps_session_reusable_and_no_scratch_leaks():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = RecordingRaster()
     loaded = AtlasSession.load("p.png\nsize: 2,2\nr\n bounds: 0,0,1,1", {"p.png": png()}, raster)
@@ -175,7 +175,7 @@ def test_failed_encode_keeps_session_reusable_and_no_scratch_leaks():
 
 
 def test_corrupt_second_page_releases_decoded_first_and_preserves_foreign():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -188,7 +188,7 @@ def test_corrupt_second_page_releases_decoded_first_and_preserves_foreign():
 
 
 def test_processor_constructor_failure_releases_all_decoded_roots(monkeypatch):
-    import atlas_toolkit.engine.session as module
+    import spine_atlas_toolkit.engine.session as module
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -208,7 +208,7 @@ def test_processor_constructor_failure_releases_all_decoded_roots(monkeypatch):
 
 
 def test_missing_second_filename_is_rejected_before_corrupt_first_is_decoded():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -235,7 +235,7 @@ def test_missing_second_filename_is_rejected_before_corrupt_first_is_decoded():
 def test_read_failures_preserve_exact_live_pixels_snapshot_and_allow_retry(
     operation, method, call_number,
 ):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -270,7 +270,7 @@ def test_read_failures_preserve_exact_live_pixels_snapshot_and_allow_retry(
 
 
 def test_extract_regions_disposes_each_crop_before_the_next_name():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     class PeakRaster(FaultRaster):
         def __init__(self):
@@ -302,7 +302,7 @@ def test_extract_regions_disposes_each_crop_before_the_next_name():
 
 
 def test_later_failed_save_preserves_true_saved_flag_and_can_retry():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(TWO, two_pngs(), raster)
@@ -331,7 +331,7 @@ def test_later_failed_save_preserves_true_saved_flag_and_can_retry():
 
 @pytest.mark.parametrize("previously_saved", [False, True])
 def test_serializer_failure_preserves_saved_flag(monkeypatch, previously_saved):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(TWO, two_pngs(), raster)
@@ -364,7 +364,7 @@ def test_serializer_failure_preserves_saved_flag(monkeypatch, previously_saved):
 
 
 def test_facade_all_six_allocators_and_nonallocating_pixel_forwards():
-    from atlas_toolkit.engine._images import _SessionRaster
+    from spine_atlas_toolkit.engine._images import _SessionRaster
 
     backend = FaultRaster()
     facade = _SessionRaster(backend)
@@ -421,7 +421,7 @@ def test_facade_all_six_allocators_and_nonallocating_pixel_forwards():
 
 
 def test_clear_drops_explicit_scratch_and_double_close_guards_all_reads():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -454,8 +454,8 @@ def test_clear_drops_explicit_scratch_and_double_close_guards_all_reads():
 
 
 def test_extraction_outer_cleanup_discriminator_when_extraction_raises(monkeypatch):
-    from atlas_toolkit.engine._images import _SessionRaster
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine._images import _SessionRaster
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(TWO, two_pngs(), raster)
@@ -492,7 +492,7 @@ def test_extraction_outer_cleanup_discriminator_when_extraction_raises(monkeypat
 
 def test_repeated_page_filename_keeps_first_modifier_size_and_last_extract_size():
     """Repeated filename declarations remain serialized; modifier uses first size, extraction last."""
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     class CountingRaster(FaultRaster):
         def __init__(self):
@@ -546,7 +546,7 @@ s
 
 
 def test_pending_add_label_collision_rejects_before_decode_and_preserves_output():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -596,8 +596,8 @@ def single_pngs():
 def test_failed_mod_candidate_keeps_published_output_and_releases_facade_allocations(
     monkeypatch, failure, saved_before_failure,
 ):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -664,9 +664,9 @@ def test_failed_mod_candidate_keeps_published_output_and_releases_facade_allocat
 def test_nonpositive_pack_dimensions_roll_back_apply_and_repack(
     monkeypatch, width, height, operation, has_previous_output,
 ):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.modifier import PackResult
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.modifier import PackResult
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -701,9 +701,9 @@ def test_nonpositive_pack_dimensions_roll_back_apply_and_repack(
 
 
 def test_nonpositive_dimension_gate_discriminator_and_real_empty_atlas(monkeypatch):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.modifier import PackResult
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.modifier import PackResult
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -743,7 +743,7 @@ def test_nonpositive_dimension_gate_discriminator_and_real_empty_atlas(monkeypat
 
 @pytest.mark.parametrize("saved_before_failure", [False, True])
 def test_active_output_encode_failure_preserves_output_pixels_and_state(saved_before_failure):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -773,8 +773,8 @@ def test_active_output_encode_failure_preserves_output_pixels_and_state(saved_be
 
 
 def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkeypatch):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(png())
@@ -843,8 +843,8 @@ def test_repeated_repack_reuses_durable_roots_and_isolates_shared_backend(monkey
 
 
 def test_pack_failure_before_first_output_restores_pristine_roots(monkeypatch):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -874,8 +874,8 @@ def test_pack_failure_before_first_output_restores_pristine_roots(monkeypatch):
 def test_active_base_with_pristine_document_changes_untouched_sprite_pixels(
     monkeypatch,
 ):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     def sized_png(width, height, color):
         output = io.BytesIO()
@@ -942,7 +942,7 @@ c
 @pytest.mark.parametrize("nest_enabled", [False, True])
 @pytest.mark.parametrize("previous_output", [False, True])
 def test_real_packers_remove_all_roll_back_exact_checkpoint(nest_enabled, previous_output):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -975,8 +975,8 @@ def test_real_packers_remove_all_roll_back_exact_checkpoint(nest_enabled, previo
 
 
 def test_session_operations_do_not_reparse_atlas_after_load(monkeypatch):
-    from atlas_toolkit.document import AtlasDocument
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     loaded = AtlasSession.load(SINGLE, single_pngs(), PillowRasterBackend())
 
@@ -995,7 +995,7 @@ def test_session_operations_do_not_reparse_atlas_after_load(monkeypatch):
 
 
 def test_structural_repack_releases_no_foreign_or_shared_session_handles():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -1041,7 +1041,7 @@ def test_structural_repack_releases_no_foreign_or_shared_session_handles():
 
 
 def test_empty_remove_multipage_guards_and_closed_guards():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(TWO, two_pngs(), raster)
@@ -1069,7 +1069,7 @@ def test_empty_remove_multipage_guards_and_closed_guards():
 
 
 def test_corrupt_add_rollback_and_historical_source_ownership():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(patterned_png())
@@ -1103,8 +1103,8 @@ def test_corrupt_add_rollback_and_historical_source_ownership():
 def test_failed_structural_operation_preserves_saved_output_and_recovers(
     monkeypatch, operation, failure,
 ):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -1170,7 +1170,7 @@ _TASK5_LIFECYCLE_GEOMETRY = {
 def test_task5_setting_rerun_failure_restores_saved_output_and_all_live_pixels(
     monkeypatch, setter, failure_point, route,
 ):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)
@@ -1228,7 +1228,7 @@ def test_task5_setting_rerun_failure_restores_saved_output_and_all_live_pixels(
 
 
 def test_task5_mesh_copy_failure_preserves_attached_data_flags_and_session_state():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     class BrokenGeometry(dict):
         def __deepcopy__(self, memo):
@@ -1253,7 +1253,7 @@ def test_task5_mesh_copy_failure_preserves_attached_data_flags_and_session_state
 
 
 def test_task5_toggle_success_failure_and_clear_preserve_shared_backend_owners(monkeypatch):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = FaultRaster()
     foreign = raster.decode_png(png())
@@ -1302,9 +1302,9 @@ def test_task5_toggle_success_failure_and_clear_preserve_shared_backend_owners(m
 
 
 def test_task5_toggle_rerun_keeps_positive_dimension_gate_on_real_packer(monkeypatch):
-    import atlas_toolkit.engine.modifier as modifier_module
-    from atlas_toolkit.engine.session import AtlasSession
-    from atlas_toolkit.engine.modifier import PackResult
+    import spine_atlas_toolkit.engine.modifier as modifier_module
+    from spine_atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.modifier import PackResult
 
     raster = FaultRaster()
     loaded = AtlasSession.load(SINGLE, single_pngs(), raster)

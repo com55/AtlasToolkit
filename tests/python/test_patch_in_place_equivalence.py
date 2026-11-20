@@ -27,8 +27,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit import PackOptions, SpineAtlas
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit import PackOptions, SpineAtlas
 from tests.python import test_api_added_mesh as added_mesh
 from tests.python import test_api_patch_mode as patch_mode
 

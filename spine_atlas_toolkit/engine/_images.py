@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from spine_atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
 class _SessionRaster:

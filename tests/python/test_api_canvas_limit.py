@@ -5,10 +5,10 @@ leaves the atlas exactly as it was."""
 import pytest
 from PIL import Image
 
-import atlas_toolkit
-from atlas_toolkit.api import AtlasError, CanvasTooLarge, SpineAtlas
-from atlas_toolkit.domain import packing
-from atlas_toolkit.packer import PackOptions
+import spine_atlas_toolkit
+from spine_atlas_toolkit.api import AtlasError, CanvasTooLarge, SpineAtlas
+from spine_atlas_toolkit.domain import packing
+from spine_atlas_toolkit.packer import PackOptions
 
 ATLAS = (
     "page.png\nsize: 16,8\n"
@@ -65,8 +65,8 @@ def test_save_raises_before_writing(tmp_path, monkeypatch):
 
 
 def test_canvas_too_large_is_exported():
-    import atlas_toolkit.api as api
-    assert atlas_toolkit.CanvasTooLarge is CanvasTooLarge
+    import spine_atlas_toolkit.api as api
+    assert spine_atlas_toolkit.CanvasTooLarge is CanvasTooLarge
     assert "CanvasTooLarge" in api.__all__
 
 

@@ -7,13 +7,13 @@ import io
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.region_ops import extracted_canvas_size
-from atlas_toolkit.engine.extraction import (
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.region_ops import extracted_canvas_size
+from spine_atlas_toolkit.engine.extraction import (
     AtlasProcessor, hull_polyline, pick_force_resize_target,
 )
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 

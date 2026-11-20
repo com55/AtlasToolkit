@@ -1,6 +1,6 @@
 # AtlasToolkit Python library
 
-The `atlas_toolkit` package is the atlas engine that the web and desktop apps
+The `spine_atlas_toolkit` package is the atlas engine that the web and desktop apps
 run. It can also be used from your own scripts, without the app.
 Differences from the JavaScript engine of 0.4.x are listed in
 [CHANGELOG.md](CHANGELOG.md).
@@ -20,7 +20,7 @@ Open an atlas, look at it, edit it, and save the result:
 
 ```python
 from PIL import Image
-from atlas_toolkit import SpineAtlas, CanvasTooLarge, PackOptions, Packer
+from spine_atlas_toolkit import SpineAtlas, CanvasTooLarge, PackOptions, Packer
 
 atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
 for region in atlas.regions:

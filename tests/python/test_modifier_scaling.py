@@ -4,9 +4,9 @@
 AtlasModifier's page-scoped construction, including the object-identity /
 non-mutation guarantees."""
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 TWO_PAGE = (
     "a.png\nsize: 10,10\n"

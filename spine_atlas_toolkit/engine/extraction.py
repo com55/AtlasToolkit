@@ -8,11 +8,11 @@ from math import isfinite
 
 import numpy as np
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.region_ops import extracted_canvas_size, scaled_region_geometry
-from atlas_toolkit.engine.modifier import js_object_key_order
-from atlas_toolkit.raster.base import ImageHandle, RasterBackend
-from atlas_toolkit.raster.premultiplied import premultiplied_over
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.region_ops import extracted_canvas_size, scaled_region_geometry
+from spine_atlas_toolkit.engine.modifier import js_object_key_order
+from spine_atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from spine_atlas_toolkit.raster.premultiplied import premultiplied_over
 
 
 class AtlasProcessor:

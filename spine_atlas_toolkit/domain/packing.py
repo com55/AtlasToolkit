@@ -6,7 +6,7 @@ www/js/repack-nest.js's packing geometry, plus footprintForCanonical's
 dependency-injected shell.
 
 PACKAGE RULE (spec §1, promoted to package level in rev 6): nothing in
-this module may import from atlas_toolkit.engine at module level -- that
+this module may import from spine_atlas_toolkit.engine at module level -- that
 is what keeps the real domain/<->engine cycle (packing needs modifier's
 identity/offset helpers; modifier needs packing's placement algorithm)
 resolved by injection rather than by convention. The same shape
@@ -25,7 +25,7 @@ import math
 
 import numpy as np
 
-from atlas_toolkit.domain.region_ops import round_up_to_multiple
+from spine_atlas_toolkit.domain.region_ops import round_up_to_multiple
 
 # Deliberate deviation from repacker.py, inherited from the JS (see
 # NOTES.md "Deviation: repack packing diverges from repacker.py"): spend

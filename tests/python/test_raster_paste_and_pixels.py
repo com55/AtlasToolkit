@@ -4,7 +4,7 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 def test_paste_alpha_composites_overlapping_semi_transparent_regions():
     """The discriminating case: dest has an opaque red pixel at (0,0); src

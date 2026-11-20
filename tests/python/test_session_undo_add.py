@@ -3,8 +3,8 @@
 """Deferred remove of an added key undoes the add (spec 2026-10-31 §3.1, R8)."""
 from PIL import Image
 
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = "p.png\nsize: 16,8\nHead\n bounds: 0,0,6,5\nBody\n bounds: 6,0,8,6\n"
 

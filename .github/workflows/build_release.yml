@@ -84,7 +84,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
-          f=atlas_toolkit/app/build_info.py
+          f=spine_atlas_toolkit/app/build_info.py
           grep -q '^DEV_BUILD = False[[:space:]]*$' "$f" || { echo "DEV_BUILD = False line not found in $f"; exit 1; }
           sed -i 's/^DEV_BUILD = False\([[:space:]]*\)$/DEV_BUILD = True\1/' "$f"
           grep -q '^DEV_BUILD = True[[:space:]]*$' "$f" || { echo "rewrite did not land"; exit 1; }
@@ -105,7 +105,7 @@ jobs:
             NOTICE=NOTICE
             THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md
           include-package-data: webview
-          include-package: atlas_toolkit
+          include-package: spine_atlas_toolkit
           nofollow-import-to: |
             PyQt5
             PyQt6

@@ -7,8 +7,8 @@ import pytest
 
 from PIL import Image
 
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = "p.png\nsize: 8,4\na\n bounds: 0,0,4,4\nb\n bounds: 4,0,4,4\n"
 

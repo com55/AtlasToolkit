@@ -7,41 +7,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "atlastoolkit"
-version = "1.0.0"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pillow" },
-    { name = "skel-mesh-parser" },
-]
-
-[package.optional-dependencies]
-app = [
-    { name = "pywebview" },
-    { name = "requests" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=2.4.6" },
-    { name = "pillow", specifier = ">=10.0,<13" },
-    { name = "pywebview", marker = "extra == 'app'", specifier = "==6.1" },
-    { name = "requests", marker = "extra == 'app'", specifier = "==2.32.5" },
-    { name = "skel-mesh-parser", git = "https://github.com/com55/skel-mesh-parser.git?rev=py-v0.3.0" },
-]
-provides-extras = ["app"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
 name = "bottle"
 version = "0.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -675,6 +640,41 @@ wheels = [
 name = "skel-mesh-parser"
 version = "0.3.0"
 source = { git = "https://github.com/com55/skel-mesh-parser.git?rev=py-v0.3.0#78537b2fca1522830a767597211f7a79fb0e1877" }
+
+[[package]]
+name = "spine-atlas-toolkit"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pillow" },
+    { name = "skel-mesh-parser" },
+]
+
+[package.optional-dependencies]
+app = [
+    { name = "pywebview" },
+    { name = "requests" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.4.6" },
+    { name = "pillow", specifier = ">=10.0,<13" },
+    { name = "pywebview", marker = "extra == 'app'", specifier = "==6.1" },
+    { name = "requests", marker = "extra == 'app'", specifier = "==2.32.5" },
+    { name = "skel-mesh-parser", git = "https://github.com/com55/skel-mesh-parser.git?rev=py-v0.3.0" },
+]
+provides-extras = ["app"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "typing-extensions"

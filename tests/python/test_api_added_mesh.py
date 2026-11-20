@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-import atlas_toolkit.engine.modifier as modifier_module
-from atlas_toolkit import PackOptions, SpineAtlas
+import spine_atlas_toolkit.api as api
+import spine_atlas_toolkit.engine.modifier as modifier_module
+from spine_atlas_toolkit import PackOptions, SpineAtlas
 
 UPPER_LEFT = {"type": "Mesh", "uvs": [0, 0, 1, 0, 0, 1], "triangles": [0, 1, 2], "hull_length": 3}
 MESH = {"X": UPPER_LEFT}

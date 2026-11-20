@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit import PackOptions, SpineAtlas
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit import PackOptions, SpineAtlas
 
 
 def pattern(w, h, seed=1):
@@ -80,7 +80,7 @@ def two():
 
 
 def _counted(monkeypatch):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
     calls = []
     original = AtlasSession.pack_pending
 
@@ -167,7 +167,7 @@ def test_multi_page_one_in_place_one_refused():
 
 def test_session_in_place_defaults_off():
     import inspect
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
     for fn in (AtlasSession.pack_pending, AtlasSession._build_pages):
         assert inspect.signature(fn).parameters["in_place"].default is False
 
@@ -560,8 +560,8 @@ def test_mod_that_keeps_pixels_shared_with_a_neighbours_hull_goes_in_place(monke
 
 def test_refused_meshed_attempt_releases_its_handles(monkeypatch):
     # Spec M-5: what place_in_place allocated (mesh hull rasters) is released before the fallback repack.
-    from atlas_toolkit.engine.modifier import AtlasModifier
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.session import AtlasSession
     atlas = overlap(monkeypatch, UPPER_LEFT)      # B's hull reaches into A's: A's mod refuses
     atlas.replace({"A": img(16, 16, 9)})
     seen = {}
@@ -622,7 +622,7 @@ PAD = "p.png\nsize: 32,16\nA\n bounds: 0,0,10,8\nB\n bounds: 16,0,12,12\n"
 
 def _pad_atlas(monkeypatch):
     atlas = SpineAtlas.load(PAD, {"p.png": page(32, 16, [(0, 0, 10, 8), (16, 0, 12, 12)])})
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
     calls = []
     original = AtlasSession.pack_pending
     monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))

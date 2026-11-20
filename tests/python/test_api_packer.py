@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import atlas_toolkit
-import atlas_toolkit.engine.modifier as modifier_module
-from atlas_toolkit import PackOptions, Packer, SkeletonUnavailable, SpineAtlas
-from atlas_toolkit.engine.session import AtlasSession
+import spine_atlas_toolkit
+import spine_atlas_toolkit.engine.modifier as modifier_module
+from spine_atlas_toolkit import PackOptions, Packer, SkeletonUnavailable, SpineAtlas
+from spine_atlas_toolkit.engine.session import AtlasSession
 
 REPACK = {"try_keep_layout": False, "share_composite_image": True}
 
@@ -60,7 +60,7 @@ def assert_spaced(built, page, padding):
 
 
 def test_public_names():
-    assert atlas_toolkit.Packer is Packer and atlas_toolkit.PackOptions is PackOptions
+    assert spine_atlas_toolkit.Packer is Packer and spine_atlas_toolkit.PackOptions is PackOptions
 
 
 # --- test 3b: shelf padding through the API ---------------------------------
@@ -274,7 +274,7 @@ def test_default_build_splits_a_composite():
 
 
 def test_try_keep_layout_false_repacks_an_add_only_page(monkeypatch):
-    from atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
 
     calls = count_packs(monkeypatch)
     placed = []
@@ -305,7 +305,7 @@ def test_try_keep_layout_false_repacks_an_add_only_page(monkeypatch):
 # --- nest pages are trimmed to their regions' extent -------------------------
 @pytest.mark.parametrize("packer", ["rectangles", "polygons"])
 def test_nest_page_is_trimmed_to_region_extent(packer):
-    from atlas_toolkit.domain.region_ops import round_up_to_multiple
+    from spine_atlas_toolkit.domain.region_ops import round_up_to_multiple
     built = golden.edited_atlas("single").build(options=PackOptions(
         packer=packer, padding=8, try_keep_layout=False,
     ))

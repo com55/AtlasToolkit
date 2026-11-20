@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.engine.composite_split import split_composite
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from atlas_toolkit.raster.premultiplied import premultiplied_over
+from spine_atlas_toolkit.engine.composite_split import split_composite
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.premultiplied import premultiplied_over
 
 QUAD = [0, 1, 2, 0, 2, 3]
 

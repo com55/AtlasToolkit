@@ -5,7 +5,7 @@
 Port of the abstract contract defined in the architecture spec
 (docs/superpowers/specs/2026-09-10-python-canonical-architecture-design.md,
 rev 7, §3). This module defines the FULL Protocol -- every method the whole
-Phase-3 migration will eventually need, not just what atlas_toolkit's
+Phase-3 migration will eventually need, not just what spine_atlas_toolkit's
 "basic raster" stage (this one) implements. `PillowRasterBackend`
 (pillow_backend.py) is the only concrete backend Phase 3 ships; no
 CanvasRasterBackend exists or is planned -- per the architecture decision,

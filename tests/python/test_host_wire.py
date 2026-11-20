@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from atlas_toolkit.api import CanvasTooLarge
-from atlas_toolkit.host import AppHost, wire
+from spine_atlas_toolkit.api import CanvasTooLarge
+from spine_atlas_toolkit.host import AppHost, wire
 from .host_fixtures import one_page
 
 

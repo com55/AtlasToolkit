@@ -6,18 +6,18 @@ User-facing changes are in `CHANGELOG.md`.
 
 ## Layout
 
-- `atlas_toolkit/` is the atlas engine, in Python: `api.py` (`SpineAtlas`),
+- `spine_atlas_toolkit/` is the atlas engine, in Python: `api.py` (`SpineAtlas`),
   `packer.py` (`PackOptions`), `document.py`, and `domain/`, `engine/`,
   `mesh/`, `raster/`. It is also usable as a library.
-- `atlas_toolkit/host/` (`AppHost`) is the app's interface to the engine: the
+- `spine_atlas_toolkit/host/` (`AppHost`) is the app's interface to the engine: the
   UI calls it with JSON arguments plus binary buffers.
 - `www/` is the UI. `scripts/build_web.py` builds it into `dist/web` (the web
   app / PWA: the engine runs in Pyodide inside a Worker) or, with
   `--target desktop`, into the page the desktop app serves. `www/sw.js` is a
   template, so serve a build, never `www/` itself.
-- `atlas_toolkit/app/` is the desktop shell: a pywebview window that loads the
+- `spine_atlas_toolkit/app/` is the desktop shell: a pywebview window that loads the
   UI from a token-guarded local server running the same `AppHost` in CPython,
-  plus native dialogs, disk I/O and the self-updater (`atlas_toolkit/update/`).
+  plus native dialogs, disk I/O and the self-updater (`spine_atlas_toolkit/update/`).
 - The JS engine that shipped up to v0.4.2 is archived on `legacy/js-app`;
   nothing in this tree depends on it. Comments that say "port of X.js" name
   where a function came from.
@@ -142,8 +142,8 @@ each other.
 
 ## Python engine
 
-- **Package rule:** nothing under `atlas_toolkit/domain/` imports
-  `atlas_toolkit/engine/`. `tests/python/test_packing_import_boundary.py`
+- **Package rule:** nothing under `spine_atlas_toolkit/domain/` imports
+  `spine_atlas_toolkit/engine/`. `tests/python/test_packing_import_boundary.py`
   enforces it by AST, relative imports included; `domain/packing.py` gets the
   modifier helpers it needs by injection.
 - **Sessions:** `engine/session.py`'s `AtlasSession` has an immediate mode
@@ -165,7 +165,7 @@ each other.
   wider int) before pixel math and clip before casting back. Pyodide's `intp`
   is 32-bit, so index and key arithmetic that can pass 2³¹ uses explicit
   `int64`.
-- **Pack settings:** `atlas_toolkit/packer.py`'s `resolve_packer` validates a
+- **Pack settings:** `spine_atlas_toolkit/packer.py`'s `resolve_packer` validates a
   `PackOptions` and resolves it completely into a frozen `ResolvedPack` --
   every switch the session already has, plus two Python-only `pack_pending`
   keywords (`shelf_padding`, `mesh_footprint`) that `_pack_page` adds to a
@@ -177,15 +177,15 @@ each other.
 
 ## Packaging
 
-The core engine (`atlas_toolkit/{document,domain,engine,mesh,raster}`) needs only
+The core engine (`spine_atlas_toolkit/{document,domain,engine,mesh,raster}`) needs only
 `numpy`, `pillow` (a range, `>=10.0,<13`; the suite passes on 10.0.1 and 12.x)
-and `skel-mesh-parser`. The desktop shell (`atlas_toolkit.app`,
-`atlas_toolkit.update`) needs `pywebview` and `requests`, which live in the
+and `skel-mesh-parser`. The desktop shell (`spine_atlas_toolkit.app`,
+`spine_atlas_toolkit.update`) needs `pywebview` and `requests`, which live in the
 `app` extra: `uv sync --extra app`, and `uv export --extra app` in the release
-workflow. `atlas_toolkit/app/paths.py` is desktop-only for the same reason.
+workflow. `spine_atlas_toolkit/app/paths.py` is desktop-only for the same reason.
 
 `skel-mesh-parser` is a `git+https://` URL dependency pinned to the tag
 `py-v0.3.0` (Python tags are `py-v*`). `micropip` cannot install a URL
 dependency inside Pyodide, so `build_web.py` builds `py3-none-any` wheels of
-the parser and of `atlas_toolkit`, ships them in `dist/web/wheels/`, and the
+the parser and of `spine_atlas_toolkit`, ships them in `dist/web/wheels/`, and the
 Worker unpacks them before starting the host.

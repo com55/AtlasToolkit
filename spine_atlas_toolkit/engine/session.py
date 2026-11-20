@@ -7,22 +7,22 @@ from dataclasses import dataclass, replace as dataclass_replace
 
 import numpy as np
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.bleed import color_bleed
-from atlas_toolkit.domain.converter import auto_convert_atlas
-from atlas_toolkit.domain.effective_model import derive_effective_model
-from atlas_toolkit.domain.packing import CanvasTooLargeError, normalize_gap
-from atlas_toolkit.domain.region_validation import validate_region_name
-from atlas_toolkit.engine._images import _SessionRaster
-from atlas_toolkit.engine.composite_split import split_composite as cut_composite
-from atlas_toolkit.engine.extraction import AtlasProcessor
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.bleed import color_bleed
+from spine_atlas_toolkit.domain.converter import auto_convert_atlas
+from spine_atlas_toolkit.domain.effective_model import derive_effective_model
+from spine_atlas_toolkit.domain.packing import CanvasTooLargeError, normalize_gap
+from spine_atlas_toolkit.domain.region_validation import validate_region_name
+from spine_atlas_toolkit.engine._images import _SessionRaster
+from spine_atlas_toolkit.engine.composite_split import split_composite as cut_composite
+from spine_atlas_toolkit.engine.extraction import AtlasProcessor
+from spine_atlas_toolkit.engine.modifier import (
     AtlasModifier,
     PackResult,
     js_object_key_order,
     region_meta,
 )
-from atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from spine_atlas_toolkit.raster.base import ImageHandle, RasterBackend
 
 
 class RegionNameError(ValueError):

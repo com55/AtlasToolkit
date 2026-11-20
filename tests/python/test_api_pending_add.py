@@ -3,10 +3,10 @@
 """Pending additions accept replacements without becoming mod batches."""
 import pytest
 
-import atlas_toolkit.api as api
+import spine_atlas_toolkit.api as api
 
-from atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
-from atlas_toolkit.packer import PackOptions
+from spine_atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
+from spine_atlas_toolkit.packer import PackOptions
 from .host_fixtures import decode, one_page, two_pages, page_bytes
 
 
@@ -170,8 +170,8 @@ def test_pristine_failure_does_not_record_pending_half(composite, monkeypatch):
 
 
 def test_immediate_session_replacement_repacks():
-    from atlas_toolkit.engine.session import AtlasSession
-    from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+    from spine_atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
     text, pages = one_page()
     session = AtlasSession.load_images(text, {name: decode(data) for name, data in pages.items()}, PillowRasterBackend())
     session.add_region(decode(page_bytes(2, 3)), 'fresh')

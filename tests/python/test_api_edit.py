@@ -6,7 +6,7 @@ import io
 import pytest
 from PIL import Image
 
-from atlas_toolkit.api import (
+from spine_atlas_toolkit.api import (
     AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas,
 )
 
@@ -185,13 +185,13 @@ def test_add_region_page_choice():
 
 
 def test_multi_page_error_class_is_gone():
-    import atlas_toolkit
-    import atlas_toolkit.api as api
+    import spine_atlas_toolkit
+    import spine_atlas_toolkit.api as api
 
     assert "MultiPageNotSupported" not in api.__all__
     assert not hasattr(api, "MultiPageNotSupported")
     with pytest.raises(AttributeError):
-        atlas_toolkit.MultiPageNotSupported
+        spine_atlas_toolkit.MultiPageNotSupported
 
 
 def test_edit_images_are_copied():

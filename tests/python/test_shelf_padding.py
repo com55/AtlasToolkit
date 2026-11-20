@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from atlas_toolkit.domain.packing import _pack_with_width, shelf_pack
+from spine_atlas_toolkit.domain.packing import _pack_with_width, shelf_pack
 
 
 def corpus(seed, count=25):

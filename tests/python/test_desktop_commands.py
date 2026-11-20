@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-from atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
+from spine_atlas_toolkit.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from atlas_toolkit.app import build_info, config
-from atlas_toolkit.app.files import DesktopFiles
-from atlas_toolkit.app.events import EventBroker
+from spine_atlas_toolkit.app import build_info, config
+from spine_atlas_toolkit.app.files import DesktopFiles
+from spine_atlas_toolkit.app.events import EventBroker
 
 
 class FakeWindow:
@@ -199,7 +199,7 @@ def test_config_write_is_atomic(tmp_path, monkeypatch):
 
 
 def test_delegates_and_os_commands(commands, tmp_path, monkeypatch):
-    from atlas_toolkit.app import desktop_commands as module
+    from spine_atlas_toolkit.app import desktop_commands as module
     commands.set_pref("setting", 3)
     assert commands.get_pref("setting", 0) == 3
     assert commands.get_pref("absent", 9) == 9
@@ -347,7 +347,7 @@ def test_reload_after_another_atlas(commands, tmp_path):
 
 @pytest.mark.parametrize("name", [None, "outside.log", "update.txt", "missing.log", "directory.log", "escape.log"])
 def test_refuse_update_log(commands, tmp_path, monkeypatch, name):
-    from atlas_toolkit.app import desktop_commands as module
+    from spine_atlas_toolkit.app import desktop_commands as module
     update_dir = tmp_path / "updates"
     update_dir.mkdir()
     outside = tmp_path / "outside.log"
@@ -456,7 +456,7 @@ def test_failed_write_keeps_grant(commands, tmp_path):
 
 def test_missing_fixture_has_two_missing_pages(tmp_path):
     from scripts.serve_desktop_dev import make_fixture
-    from atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.document import AtlasDocument
 
     make_fixture(tmp_path)
     document = AtlasDocument.parse((tmp_path / "missing/missing.atlas").read_text())
@@ -481,7 +481,7 @@ def test_close_raises_synchronously_before_worker(commands, monkeypatch):
 
 @pytest.mark.parametrize("dev", [False, True])
 def test_build_window_title(commands, monkeypatch, dev):
-    from atlas_toolkit.app import desktop_commands as module
+    from spine_atlas_toolkit.app import desktop_commands as module
     monkeypatch.setattr(build_info, "DEV_BUILD", dev)
     monkeypatch.setattr(module, "get_current_version", lambda: "1.2.3")
     base = "AtlasToolkit (build test)" if dev else "Atlas Toolkit v1.2.3"
@@ -524,7 +524,7 @@ def test_raise_once_after_update_relaunch(commands):
 @pytest.mark.parametrize("dev", [False, True])
 def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev):
     from unittest.mock import MagicMock
-    from atlas_toolkit.app import launch
+    from spine_atlas_toolkit.app import launch
     monkeypatch.setattr(build_info, "DEV_BUILD", dev)
     monkeypatch.setattr(launch, "configure_stdio", lambda: None)
     monkeypatch.setattr(launch, "start_session_log", lambda **kwargs: None)
@@ -547,7 +547,7 @@ def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev
     monkeypatch.setattr(launch, "build_desktop", assemble)
     monkeypatch.setattr(launch.webview, "start", lambda **kwargs: debug.append(kwargs["debug"]))
     launch.run()
-    from atlas_toolkit.app.desktop_commands import window_title
+    from spine_atlas_toolkit.app.desktop_commands import window_title
     assert titles == [window_title()]
     assert debug == [dev]
 
@@ -572,7 +572,7 @@ def test_page_logging(commands, caplog):
 
 @pytest.mark.parametrize("platform,opener", [("win32", None), ("darwin", "open"), ("linux", "xdg-open")])
 def test_open_log_folder(commands, monkeypatch, tmp_path, platform, opener):
-    from atlas_toolkit.app import desktop_commands as module
+    from spine_atlas_toolkit.app import desktop_commands as module
     monkeypatch.setattr(module, "log_dir", lambda: tmp_path)
     monkeypatch.setattr(module.sys, "platform", platform)
     calls = []
@@ -583,7 +583,7 @@ def test_open_log_folder(commands, monkeypatch, tmp_path, platform, opener):
 
 
 def test_open_log_folder_failure(commands, monkeypatch):
-    from atlas_toolkit.app import desktop_commands as module
+    from spine_atlas_toolkit.app import desktop_commands as module
     def fail():
         raise OSError('unavailable')
     monkeypatch.setattr(module, 'log_dir', fail)
@@ -594,25 +594,25 @@ def test_copy_image_failure(commands, monkeypatch, error, unsupported):
     def fail(png):
         assert png == b"png"
         raise error
-    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_png", fail)
+    monkeypatch.setattr("spine_atlas_toolkit.app.desktop_commands.copy_png", fail)
     assert commands.copy_image(b"png") == {"ok": False, "error": str(error), "unsupported": unsupported}
 
 
 def test_copy_image_success(commands, monkeypatch):
     seen = []
-    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_png", seen.append)
+    monkeypatch.setattr("spine_atlas_toolkit.app.desktop_commands.copy_png", seen.append)
     assert commands.copy_image(b"png") == {"ok": True}
     assert seen == [b"png"]
 
 
 def test_copy_raster(commands, monkeypatch):
     seen = []
-    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_rgba", lambda *a: seen.append(a))
+    monkeypatch.setattr("spine_atlas_toolkit.app.desktop_commands.copy_rgba", lambda *a: seen.append(a))
     assert commands.copy_raster(2, 1, b"12345678") == {"ok": True}
     assert seen == [(2, 1, b"12345678")]
     def fail(*a):
         raise NotImplementedError("no clipboard")
-    monkeypatch.setattr("atlas_toolkit.app.desktop_commands.copy_rgba", fail)
+    monkeypatch.setattr("spine_atlas_toolkit.app.desktop_commands.copy_rgba", fail)
     assert commands.copy_raster(2, 1, b"12345678") == {"ok": False, "error": "no clipboard", "unsupported": True}
 
 

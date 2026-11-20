@@ -5,12 +5,12 @@ from io import BytesIO
 
 from PIL import Image
 
-from atlas_toolkit.api import (
+from spine_atlas_toolkit.api import (
     AtlasError, InvalidRegionName, PackOptions, RegionNotFound, SpineAtlas,
     _file_name, _from_page, _page_filenames,
 )
-from atlas_toolkit.alpha_mode import parse_alpha_mode
-from atlas_toolkit.document import png_names_for_save
+from spine_atlas_toolkit.alpha_mode import parse_alpha_mode
+from spine_atlas_toolkit.document import png_names_for_save
 
 
 # View Mode exports (Extract, Save image) use zlib level 3: about 1.7x faster

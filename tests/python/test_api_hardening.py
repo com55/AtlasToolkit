@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit
-import atlas_toolkit.api as api
-from atlas_toolkit.api import DuplicatePage, SpineAtlas
-from atlas_toolkit.packer import PackOptions
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+import spine_atlas_toolkit
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import DuplicatePage, SpineAtlas
+from spine_atlas_toolkit.packer import PackOptions
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from tests.python.pma_cases import mesh
 
 CONFLICT = "p.png\nsize: 8,8\npma: true\nA\n bounds: 0,0,4,4\n\np.png\nsize: 8,8\nB\n bounds: 4,4,4,4\n"
@@ -84,8 +84,8 @@ def test_built_atlases_reuse_the_parsed_skeleton(monkeypatch):
 
 def test_package_lists_its_lazy_api_names():
     assert "DuplicatePage" in api.__all__
-    assert atlas_toolkit.__all__ == sorted(atlas_toolkit._API_NAMES)
-    assert set(atlas_toolkit.__all__) <= set(api.__all__) | {"Packer", "PackOptions", "AlphaMode"}
-    listed = dir(atlas_toolkit)
+    assert spine_atlas_toolkit.__all__ == sorted(spine_atlas_toolkit._API_NAMES)
+    assert set(spine_atlas_toolkit.__all__) <= set(api.__all__) | {"Packer", "PackOptions", "AlphaMode"}
+    listed = dir(spine_atlas_toolkit)
     assert "SpineAtlas" in listed and "DuplicatePage" in listed and "__getattr__" in listed
-    assert atlas_toolkit.DuplicatePage is DuplicatePage
+    assert spine_atlas_toolkit.DuplicatePage is DuplicatePage

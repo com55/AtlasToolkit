@@ -6,9 +6,9 @@ import json
 import pytest
 from PIL import UnidentifiedImageError
 
-from atlas_toolkit.api import AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas
-from atlas_toolkit.document import png_names_for_save
-from atlas_toolkit.host import AppHost, wire
+from spine_atlas_toolkit.api import AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas
+from spine_atlas_toolkit.document import png_names_for_save
+from spine_atlas_toolkit.host import AppHost, wire
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes, two_pages
 from .test_host_view import loaded
 

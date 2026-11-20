@@ -22,10 +22,10 @@ from typing import NamedTuple
 
 import numpy as np
 
-from atlas_toolkit.domain.alpha_split import _BOTTOM, _TOP, split_alphas
-from atlas_toolkit.engine.modifier import mask_raw_sprite
-from atlas_toolkit.raster.base import ImageHandle, RasterBackend
-from atlas_toolkit.raster.premultiplied import attenuate, premultiplied_over
+from spine_atlas_toolkit.domain.alpha_split import _BOTTOM, _TOP, split_alphas
+from spine_atlas_toolkit.engine.modifier import mask_raw_sprite
+from spine_atlas_toolkit.raster.base import ImageHandle, RasterBackend
+from spine_atlas_toolkit.raster.premultiplied import attenuate, premultiplied_over
 
 
 class Piece(NamedTuple):

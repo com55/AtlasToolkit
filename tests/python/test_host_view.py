@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from atlas_toolkit import api
-from atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
-from atlas_toolkit.host import AppHost, wire
+from spine_atlas_toolkit import api
+from spine_atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
+from spine_atlas_toolkit.host import AppHost, wire
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, pixel, two_pages
 
 

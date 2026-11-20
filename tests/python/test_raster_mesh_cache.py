@@ -5,8 +5,8 @@ hit is indistinguishable from a miss."""
 import numpy as np
 import pytest
 
-from atlas_toolkit.raster import pillow_backend
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend, _mesh_key
+from spine_atlas_toolkit.raster import pillow_backend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend, _mesh_key
 
 UVS = [0.1, 0.0, 0.9, 0.2, 0.5, 1.0, 0.0, 0.8]
 TRIS = [0, 1, 2, 0, 2, 3]

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import atlas_toolkit.engine.modifier as modifier_module
-from atlas_toolkit.api import SpineAtlas
+import spine_atlas_toolkit.engine.modifier as modifier_module
+from spine_atlas_toolkit.api import SpineAtlas
 
 
 def _load_golden():

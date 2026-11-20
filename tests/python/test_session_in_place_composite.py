@@ -14,7 +14,7 @@ layout, so these drive the unsplit build directly.
 import numpy as np
 from PIL import Image
 
-from atlas_toolkit import PackOptions, SpineAtlas
+from spine_atlas_toolkit import PackOptions, SpineAtlas
 from tests.python import test_api_in_place as in_place
 
 # Aliased survivors: A and B name one stored 10x8 rect with one offsets

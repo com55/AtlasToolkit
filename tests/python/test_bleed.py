@@ -4,7 +4,7 @@
 import numpy as np
 import pytest
 
-from atlas_toolkit.domain.bleed import color_bleed
+from spine_atlas_toolkit.domain.bleed import color_bleed
 
 
 def page(w, h):

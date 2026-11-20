@@ -4,9 +4,9 @@
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import CanvasTooLarge, InvalidRegionName, SpineAtlas
-from atlas_toolkit.packer import PackOptions, Packer
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import CanvasTooLarge, InvalidRegionName, SpineAtlas
+from spine_atlas_toolkit.packer import PackOptions, Packer
 
 
 def pattern(seed=1):
@@ -229,7 +229,7 @@ def test_pack_validates_settings_like_build(edited):
 
 @pytest.mark.parametrize('packer', list(Packer))
 def test_build_shares_cache_without_changing_output(packer, monkeypatch):
-    from atlas_toolkit.packer import resolve_packer
+    from spine_atlas_toolkit.packer import resolve_packer
 
     mesh = {'type': 'Mesh', 'uvs': [0, 0, 1, 0, 1, 1, 0, 1],
             'triangles': [0, 1, 2, 0, 2, 3], 'hull_length': 4}

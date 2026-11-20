@@ -4,10 +4,10 @@
 import numpy as np
 import pytest
 
-from atlas_toolkit.domain.packing import (
+from spine_atlas_toolkit.domain.packing import (
     CanvasTooLargeError, MAX_CANVAS, nest_place_into, rotate_grid_for_pack,
 )
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def solid(name, w, h):
@@ -15,7 +15,7 @@ def solid(name, w, h):
 
 
 def test_an_over_cap_page_still_takes_adds_that_fit(monkeypatch):
-    import atlas_toolkit.domain.packing as packing
+    import spine_atlas_toolkit.domain.packing as packing
     monkeypatch.setattr(packing, "MAX_CANVAS", 16)
     live = np.ones((20, 20), bool)
     live[0:8, 0:8] = False
@@ -25,7 +25,7 @@ def test_an_over_cap_page_still_takes_adds_that_fit(monkeypatch):
 
 
 def test_live_cells_count_toward_the_cell_bound(monkeypatch):
-    import atlas_toolkit.domain.packing as packing
+    import spine_atlas_toolkit.domain.packing as packing
     monkeypatch.setattr(packing, "MAX_CANVAS", 16)
     # 64 live + 225 item cells = 289 > 16*16; the item alone (225) is under it.
     with pytest.raises(CanvasTooLargeError) as caught:

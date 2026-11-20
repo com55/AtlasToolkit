@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit import PackOptions, SpineAtlas
-from atlas_toolkit.domain.bleed import color_bleed
+from spine_atlas_toolkit import PackOptions, SpineAtlas
+from spine_atlas_toolkit.domain.bleed import color_bleed
 
 TEXT = (
     "p.png\nsize: 24,12\npma: {pma}\nA\n bounds: 0,0,8,6\nB\n bounds: 10,0,6,8\n"

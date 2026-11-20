@@ -4,14 +4,14 @@
 from pathlib import Path
 from typing import Any
 
-from atlas_toolkit.app.config import AppConfig
-from atlas_toolkit.app.desktop_commands import DesktopCommands
-from atlas_toolkit.app.events import EventBroker
-from atlas_toolkit.app.files import DesktopFiles
-from atlas_toolkit.app.paths import app_root, is_source_run, resource_path
-from atlas_toolkit.app.server import DesktopServer
-from atlas_toolkit.host import AppHost
-from atlas_toolkit.update.controller import UpdateController
+from spine_atlas_toolkit.app.config import AppConfig
+from spine_atlas_toolkit.app.desktop_commands import DesktopCommands
+from spine_atlas_toolkit.app.events import EventBroker
+from spine_atlas_toolkit.app.files import DesktopFiles
+from spine_atlas_toolkit.app.paths import app_root, is_source_run, resource_path
+from spine_atlas_toolkit.app.server import DesktopServer
+from spine_atlas_toolkit.host import AppHost
+from spine_atlas_toolkit.update.controller import UpdateController
 
 
 def desktop_site() -> Path:

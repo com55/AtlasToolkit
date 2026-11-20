@@ -9,12 +9,12 @@ import sys
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import (
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import (
     AtlasError, DuplicateRegionName, MissingPageImage, RegionNotFound, SkeletonUnavailable, SpineAtlas,
 )
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
     "page.png\nsize: 16,8\n"
@@ -187,10 +187,10 @@ def test_skeleton_reasons_and_mesh_crop(monkeypatch):
 
 def test_lazy_import():
     code = (
-        "import sys, atlas_toolkit\n"
-        "assert 'PIL' not in sys.modules and 'atlas_toolkit.engine' not in sys.modules\n"
-        "atlas_toolkit.SpineAtlas; atlas_toolkit.RegionNotFound\n"
-        "assert 'PIL' in sys.modules and 'atlas_toolkit.engine.session' in sys.modules\n"
+        "import sys, spine_atlas_toolkit\n"
+        "assert 'PIL' not in sys.modules and 'spine_atlas_toolkit.engine' not in sys.modules\n"
+        "spine_atlas_toolkit.SpineAtlas; spine_atlas_toolkit.RegionNotFound\n"
+        "assert 'PIL' in sys.modules and 'spine_atlas_toolkit.engine.session' in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
 

@@ -6,8 +6,8 @@ import io
 import pytest
 from PIL import Image
 
-from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
     "p.png\nsize: 16,8\n"

@@ -21,17 +21,17 @@ from typing import Union
 import numpy as np
 from PIL import Image
 
-from atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.converter import auto_convert_atlas
-from atlas_toolkit.domain.packing import CanvasTooLargeError
-from atlas_toolkit.domain.region_ops import scaled_region_geometry
-from atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
-from atlas_toolkit.engine.extraction import hull_polyline
-from atlas_toolkit.packer import PackOptions, Packer, ResolvedPack, resolve_packer
-from atlas_toolkit.mesh.lookup import build_mesh_lookup
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
+from spine_atlas_toolkit.alpha_mode import AlphaMode, parse_alpha_mode
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.converter import auto_convert_atlas
+from spine_atlas_toolkit.domain.packing import CanvasTooLargeError
+from spine_atlas_toolkit.domain.region_ops import scaled_region_geometry
+from spine_atlas_toolkit.engine.session import AtlasSession, RegionNameError, RemoveAllRegionsError
+from spine_atlas_toolkit.engine.extraction import hull_polyline
+from spine_atlas_toolkit.packer import PackOptions, Packer, ResolvedPack, resolve_packer
+from spine_atlas_toolkit.mesh.lookup import build_mesh_lookup
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 
 __all__ = [
     "SpineAtlas", "Region", "RegionView", "AtlasError", "RegionNotFound", "DuplicateRegionName",
@@ -100,7 +100,7 @@ class SkeletonUnavailable(AtlasError):
 
 class CanvasTooLarge(AtlasError, ValueError):
     """Packing the edits would need a canvas side over the packers' limit
-    (atlas_toolkit.domain.packing.MAX_CANVAS, 10000 px). Raised by build()
+    (spine_atlas_toolkit.domain.packing.MAX_CANVAS, 10000 px). Raised by build()
     and save() before the oversized page is allocated; the atlas and its
     recorded edits are unchanged. `page` names the page file of a
     multi-page atlas, and is None for a one-page atlas."""

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "AtlasToolkit"
+name = "spine-atlas-toolkit"
 version = "1.0.0"
 description = "Spine Atlas Toolkit - Extract, modify, and repack atlas sprites."
 readme = "README.md"
@@ -22,7 +22,7 @@ Source = "https://github.com/com55/AtlasToolkit"
 Issues = "https://github.com/com55/AtlasToolkit/issues"
 
 [project.optional-dependencies]
-# Desktop shell only (atlas_toolkit.app / atlas_toolkit.update): the core
+# Desktop shell only (spine_atlas_toolkit.app / spine_atlas_toolkit.update): the core
 # engine imports none of these, so a library or Pyodide install omits them.
 app = [
     "pywebview==6.1",
@@ -30,7 +30,7 @@ app = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["atlas_toolkit"]
+packages = ["spine_atlas_toolkit"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

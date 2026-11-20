@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain import packing
-from atlas_toolkit.domain.alpha_split import SPLIT
-from atlas_toolkit.domain.packing import CanvasTooLargeError
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain import packing
+from spine_atlas_toolkit.domain.alpha_split import SPLIT
+from spine_atlas_toolkit.domain.packing import CanvasTooLargeError
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 ATLAS = (
     "one.png\nsize: 16,8\n"
@@ -250,7 +250,7 @@ def test_auto_page_uses_scaled_bounds():
 
 
 def test_rename_is_checked_across_pages_and_rename_only_page_keeps_pixels():
-    from atlas_toolkit.engine.session import RegionNameError
+    from spine_atlas_toolkit.engine.session import RegionNameError
 
     session = load()
     with pytest.raises(RegionNameError):
@@ -282,7 +282,7 @@ def test_removing_a_pages_last_region_leaves_a_10x10_page():
 
 
 def test_removing_every_region_still_raises():
-    from atlas_toolkit.engine.session import RemoveAllRegionsError
+    from spine_atlas_toolkit.engine.session import RemoveAllRegionsError
 
     session = load()
     with pytest.raises(RemoveAllRegionsError):

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 
 def png(width: int, height: int, color: tuple[int, int, int, int]) -> bytes:
@@ -32,7 +32,7 @@ same
 
 
 def session():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     return AtlasSession.load(
         ATLAS,
@@ -90,7 +90,7 @@ def test_load_snapshot_extract_preview_save_and_close_are_pristine():
 
 
 def test_load_converts_once_validates_all_files_before_decode_and_ignores_extras(monkeypatch):
-    import atlas_toolkit.engine.session as module
+    import spine_atlas_toolkit.engine.session as module
 
     calls: list[str] = []
     original = module.AtlasDocument.parse
@@ -120,7 +120,7 @@ def test_load_converts_once_validates_all_files_before_decode_and_ignores_extras
 
 
 def test_no_pages_and_scaled_snapshot_bounds_preserve_raw_saved_metadata():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     with pytest.raises(ValueError, match="page"):
         AtlasSession.load("region\n bounds: 0,0,1,1", {}, PillowRasterBackend())
@@ -157,7 +157,7 @@ d
 
 
 def _pixel_session(raster=None):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     backend = raster or PillowRasterBackend()
     return AtlasSession.load(
@@ -192,8 +192,8 @@ def test_sequential_overlapping_mods_are_latest_wins_and_saved_pixels_are_real()
 
 
 def test_full_canvas_union_preserves_historical_reset_and_untouched_offsets(monkeypatch):
-    from atlas_toolkit.engine.modifier import AtlasModifier
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 8, 4
@@ -220,7 +220,7 @@ b
     assert prepared_flags == [(True, False), (False, False)]
 
     text, saved = loaded.save()
-    from atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.document import AtlasDocument
 
     output = AtlasDocument.parse(text)
     regions = output.regions_by_key()
@@ -235,7 +235,7 @@ b
 
 
 def test_generation_saved_state_preview_and_repack_prepare_once(monkeypatch):
-    from atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
 
     loaded, raster = _pixel_session()
     assert loaded.snapshot().generation == 0
@@ -301,7 +301,7 @@ def test_result_metadata_is_frozen_defensive_and_borrowed_image_lifetime():
     assert next(region for region in after_mutation.regions if region.key == "a").page_filename == original_pages["a"]
     saved_text, saved_before_repack = loaded.save()
     assert set(saved_before_repack) == set(original_snapshot.pages)
-    from atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.document import AtlasDocument
 
     saved_doc = AtlasDocument.parse(saved_text)
     assert tuple(saved_doc.regions_by_key()["a"].bounds_with_rotate()) == original_regions["a"]
@@ -320,7 +320,7 @@ def test_result_metadata_is_frozen_defensive_and_borrowed_image_lifetime():
 
 
 def test_guards_empty_unknown_mult_page_and_closed_session():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     loaded, _raster = _pixel_session()
     before = loaded.snapshot()
@@ -373,7 +373,7 @@ def test_guards_empty_unknown_mult_page_and_closed_session():
 
 
 def test_repack_reuses_prepared_mod_and_clear_close_preserve_foreign_handles(monkeypatch):
-    from atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
 
     loaded, raster = _pixel_session()
     foreign = raster.create(1, 1)
@@ -403,8 +403,8 @@ def test_repack_reuses_prepared_mod_and_clear_close_preserve_foreign_handles(mon
 
 
 def test_structural_add_rename_remove_saved_pixels_and_pristine_extraction():
-    from atlas_toolkit.document import AtlasDocument
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 4,2
@@ -455,7 +455,7 @@ b
 
 def test_invalid_add_checks_validation_before_decode():
     import pytest
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     class CountingRaster(PillowRasterBackend):
         def __init__(self):
@@ -482,7 +482,7 @@ def test_invalid_add_checks_validation_before_decode():
 
 def test_reserved_add_keys_and_pending_rename_collisions():
     import pytest
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 3,1
@@ -509,7 +509,7 @@ a_2
 
 
 def test_unknown_targets_and_multikey_remove_commit_once():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 3,1
@@ -533,8 +533,8 @@ c
 
 
 def test_numeric_add_order_and_real_dedup_identity():
-    from atlas_toolkit.document import AtlasDocument
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 6,2
@@ -563,8 +563,8 @@ a
 
 
 def test_nonuniform_scaled_structural_rename_keeps_raw_key_and_metadata():
-    from atlas_toolkit.document import AtlasDocument
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 4,4
@@ -593,8 +593,8 @@ a
 
 
 def test_historical_full_canvas_reset_survives_structural_rebuild():
-    from atlas_toolkit.document import AtlasDocument
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.document import AtlasDocument
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 8,4
@@ -627,7 +627,7 @@ _TASK5_LEFT_HALF = {
 
 
 def _task5_mesh_session():
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     atlas = """p.png
 size: 16,2
@@ -799,7 +799,7 @@ def test_task5_no_batch_setting_changes_never_rebuild_even_with_active_output(se
 )
 @pytest.mark.parametrize("route", ["pixel", "rename"])
 def test_task5_rerun_setters_repack_pixel_and_structural_batches_once(setter, route):
-    from atlas_toolkit.engine.session import RepackResult
+    from spine_atlas_toolkit.engine.session import RepackResult
 
     loaded, _raster = _task5_mesh_session()
     if route == "pixel":
@@ -883,7 +883,7 @@ def test_task5_no_batch_settings_on_pristine_and_multi_page_sessions_do_not_allo
 def test_task5_repack_mesh_masks_pma_premultiplied():
     # Spec 2026-10-26 §3.2/§4: pma pages now get mesh geometry; the mask
     # clears RGB together with alpha outside the hull (left half here).
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
 
     raster = PillowRasterBackend()
     pma_atlas = """p.png
@@ -924,7 +924,7 @@ def test_task5_repack_mesh_gate_skips_added_keys():
 
 
 def test_task5_toggle_repack_reuses_mod_add_and_pristine_sources_without_handle_growth(monkeypatch):
-    from atlas_toolkit.engine.modifier import AtlasModifier
+    from spine_atlas_toolkit.engine.modifier import AtlasModifier
 
     loaded, raster = _task5_mesh_session()
     mod_pixels = _pattern_png(4, 2, 101)

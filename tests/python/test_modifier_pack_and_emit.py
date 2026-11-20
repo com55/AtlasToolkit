@@ -10,9 +10,9 @@ import io
 
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import AtlasModifier, region_meta
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import AtlasModifier, region_meta
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 PAGE_TEXT = "\n".join([
     "p.png", "size: 64,64", "format: RGBA8888", "filter: Linear, Linear", "repeat: none",
@@ -100,7 +100,7 @@ def _python_result(text, specs, full_canvas_regions, nest_options):
         name: _sprite(raster, spec["w"], spec["h"], spec["content"])
         for name, spec in specs.items()
     }
-    from atlas_toolkit.engine.modifier import js_object_key_order
+    from spine_atlas_toolkit.engine.modifier import js_object_key_order
 
     region_names = js_object_key_order(modifier.region_names)
     regions = {name: region_meta(modifier.regions[name]) for name in region_names}

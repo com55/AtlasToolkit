@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from atlas_toolkit.packer import _type_name
+from spine_atlas_toolkit.packer import _type_name
 
 
 class AlphaMode(StrEnum):

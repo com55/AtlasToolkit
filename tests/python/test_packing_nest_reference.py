@@ -12,9 +12,9 @@ import random
 
 import pytest
 
-from atlas_toolkit.domain import packing
-from atlas_toolkit.domain.packing import dilate, nest_pack, rotate180, rotate90_ccw, rotate90_cw
-from atlas_toolkit.domain.region_ops import round_up_to_multiple
+from spine_atlas_toolkit.domain import packing
+from spine_atlas_toolkit.domain.packing import dilate, nest_pack, rotate180, rotate90_ccw, rotate90_cw
+from spine_atlas_toolkit.domain.region_ops import round_up_to_multiple
 
 
 def _ref_rot_cw(mask, w, h):

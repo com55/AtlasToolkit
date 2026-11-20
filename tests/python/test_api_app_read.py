@@ -6,9 +6,9 @@ from dataclasses import FrozenInstanceError
 import pytest
 from PIL import Image
 
-import atlas_toolkit
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
+import spine_atlas_toolkit
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
 
 TEXT_DECLARED_256 = "p.png\nsize: 256,256\na\n bounds: 10,10,20,20\n"
 TEXT = (
@@ -77,8 +77,8 @@ def test_region_views_packed_literal_names_rotation_and_missing_region():
 def test_region_view_is_exported_and_frozen():
     view = two_region_atlas().region_views()[0]
     assert isinstance(view, api.RegionView)
-    assert atlas_toolkit.RegionView is api.RegionView
-    assert "RegionView" in api.__all__ and "RegionView" in atlas_toolkit.__all__
+    assert spine_atlas_toolkit.RegionView is api.RegionView
+    assert "RegionView" in api.__all__ and "RegionView" in spine_atlas_toolkit.__all__
     with pytest.raises(FrozenInstanceError):
         view.x = 99
 

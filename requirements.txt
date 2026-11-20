@@ -13,13 +13,13 @@ clr-loader==0.2.10 ; sys_platform == 'win32'
 idna==3.11
     # via requests
 numpy==2.4.6 ; python_full_version < '3.12'
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 numpy==2.5.3 ; python_full_version >= '3.12'
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 packaging==26.0 ; sys_platform == 'openbsd6'
     # via qtpy
 pillow==12.1.1
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 proxy-tools==0.1.0
     # via pywebview
 pycparser==3.0 ; implementation_name != 'PyPy' and sys_platform == 'win32'
@@ -50,13 +50,13 @@ pyobjc-framework-webkit==12.1 ; sys_platform == 'darwin'
 pythonnet==3.0.5 ; sys_platform == 'win32'
     # via pywebview
 pywebview==6.1
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 qtpy==2.4.3 ; sys_platform == 'openbsd6'
     # via pywebview
 requests==2.32.5
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@78537b2fca1522830a767597211f7a79fb0e1877
-    # via atlastoolkit
+    # via spine-atlas-toolkit
 typing-extensions==4.15.0
     # via pywebview
 urllib3==2.6.3

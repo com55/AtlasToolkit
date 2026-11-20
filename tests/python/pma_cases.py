@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import atlas_toolkit.api as api
+import spine_atlas_toolkit.api as api
 
 QUAD = [0, 1, 2, 0, 2, 3]
 GLOW_IN = (90, 60, 30, 0)     # additive alpha-0 pixel inside a hull

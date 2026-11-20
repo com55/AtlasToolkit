@@ -8,7 +8,7 @@ cross-page split under rect ownership. Regenerate ONLY from 54b9ace.
     uv run python tests/python/gen_pma_straight_baseline.py          # write
     uv run python tests/python/gen_pma_straight_baseline.py --check  # compare
 
-Writing refuses to run unless atlas_toolkit/ is identical to 54b9ace, so a
+Writing refuses to run unless spine_atlas_toolkit/ is identical to 54b9ace, so a
 failing baseline can never be "fixed" by regenerating it from new code.
 """
 from __future__ import annotations
@@ -24,10 +24,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.packer import PackOptions
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.packer import PackOptions
 
 FIXTURE = Path(__file__).with_name("fixtures") / "pma_straight_baseline.json"
 BASELINE_COMMIT = "54b9ace"
@@ -152,22 +152,22 @@ def generate() -> dict:
 
 
 def product_matches_baseline() -> str | None:
-    """None when atlas_toolkit/ equals BASELINE_COMMIT (tracked and untracked
+    """None when spine_atlas_toolkit/ equals BASELINE_COMMIT (tracked and untracked
     files), else the reason it does not."""
     try:
-        diff = subprocess.run(["git", "diff", "--quiet", BASELINE_COMMIT, "--", "atlas_toolkit"], cwd=REPO)
+        diff = subprocess.run(["git", "diff", "--quiet", BASELINE_COMMIT, "--", "spine_atlas_toolkit"], cwd=REPO)
         extra = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard", "--", "atlas_toolkit"],
+            ["git", "ls-files", "--others", "--exclude-standard", "--", "spine_atlas_toolkit"],
             cwd=REPO, capture_output=True, text=True,
         )
     except OSError as error:
         return f"cannot run git: {error}"
     if diff.returncode == 1:
-        return f"atlas_toolkit/ differs from {BASELINE_COMMIT}"
+        return f"spine_atlas_toolkit/ differs from {BASELINE_COMMIT}"
     if diff.returncode != 0 or extra.returncode != 0:
-        return f"git could not compare atlas_toolkit/ with {BASELINE_COMMIT}"
+        return f"git could not compare spine_atlas_toolkit/ with {BASELINE_COMMIT}"
     if extra.stdout.strip():
-        return f"atlas_toolkit/ has untracked files: {extra.stdout.split()}"
+        return f"spine_atlas_toolkit/ has untracked files: {extra.stdout.split()}"
     return None
 
 

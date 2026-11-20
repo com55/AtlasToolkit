@@ -3,13 +3,13 @@
 # tests/python/test_packing_footprint_mesh.py
 
 
-from atlas_toolkit.domain.packing import footprint_for_canonical, solid_mask, union_masks
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.domain.packing import footprint_for_canonical, solid_mask, union_masks
+from spine_atlas_toolkit.engine.modifier import (
     combine_mesh_geometry,
     group_names_by_sprite_identity,
     mask_crop_rect_for_offsets,
 )
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 def _ctx(raster, sprites, regions, mesh_lookup_fn, modded_sprites=None, added_sprites=None):
     return {

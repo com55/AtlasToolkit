@@ -220,12 +220,12 @@ def test_assemble_stamps_and_generates_complete_site(tmp_path, monkeypatch):
     monkeypatch.setattr(build_web, 'ROOT', tmp_path)
     out = tmp_path / 'site'
     monkeypatch.setattr(build_web, 'bundle_page', lambda out: 'js/stub.js')
-    build_web.assemble_site(out, [runtime], {'atlas_toolkit': wheel})
+    build_web.assemble_site(out, [runtime], {'spine_atlas_toolkit': wheel})
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()) == [
         'index.html', 'pyodide/runtime.wasm', 'script.js', 'sw.js',
         'wheels/engine.whl', 'wheels/manifest.json',
     ]
-    assert json.loads((out / 'wheels/manifest.json').read_text()) == {'atlas_toolkit': 'engine.whl'}
+    assert json.loads((out / 'wheels/manifest.json').read_text()) == {'spine_atlas_toolkit': 'engine.whl'}
     assert '<title>Atlas Toolkit v1.2.3</title>' in (out / 'index.html').read_text()
     assert 'name="app-version" content="1.2.3"' in (out / 'index.html').read_text()
     assert (out / 'sw.js').read_text() == build_web.generate_sw(out, template)

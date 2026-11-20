@@ -6,9 +6,13 @@ the full notes and screenshots.
 
 ## [1.0.0] - 2026-11-21 - Python engine
 
-A Python port of the atlas engine, usable as a library (`atlas_toolkit`). The
+A Python port of the atlas engine, usable as a library (`spine_atlas_toolkit`). The
 apps run the Python engine too: the web/PWA app in a Pyodide worker, the
 desktop app through a local server.
+
+### Breaking: package name
+- The library is the `spine-atlas-toolkit` distribution and is imported as
+  `spine_atlas_toolkit` (it was `atlas_toolkit`, never published).
 
 ### Breaking: `PackOptions`
 - `build()`, `save()`, `pack()` and `pack_is_cached()` take one

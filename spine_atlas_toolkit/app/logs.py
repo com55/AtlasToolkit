@@ -9,9 +9,9 @@ import platform
 import sys
 import threading
 
-from atlas_toolkit.app.config import get_config_dir
-from atlas_toolkit.app import build_info
-from atlas_toolkit.update.updater import get_current_version
+from spine_atlas_toolkit.app.config import get_config_dir
+from spine_atlas_toolkit.app import build_info
+from spine_atlas_toolkit.update.updater import get_current_version
 
 
 def log_dir() -> Path:

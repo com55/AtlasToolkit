@@ -7,15 +7,15 @@ import io
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.modifier import (
     canvas_hash,
     extract_raw_sprite,
     js_object_key_order,
     region_meta,
     rotate_sprite_for_pack,
 )
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 def test_integer_like_names_sort_before_string_names():
     # The exact divergence this helper exists for: text order 10, 2, a

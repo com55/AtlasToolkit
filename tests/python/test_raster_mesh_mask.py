@@ -4,7 +4,7 @@
 
 import pytest
 
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 def _alpha_flat(backend, handle):
     w, h = backend.size(handle)
@@ -188,7 +188,7 @@ def test_vectorized_rasterizer_matches_the_banded_oracle(case, path):
     bytes on every synthetic mesh."""
     import numpy as np
 
-    from atlas_toolkit.raster import pillow_backend as pb
+    from spine_atlas_toolkit.raster import pillow_backend as pb
 
     _, uvs, triangles, width, height = case
 
@@ -235,14 +235,14 @@ def test_crossings_use_int64_so_wasm32_computes_the_same_keys():
     not depend on it."""
     import numpy as np
 
-    from atlas_toolkit.raster.pillow_backend import mesh_crossings
+    from spine_atlas_toolkit.raster.pillow_backend import mesh_crossings
 
     row, k, d = mesh_crossings([0, 0, 1, 0, 0, 1], [0, 1, 2], 50, 40)
     assert row.dtype == k.dtype == d.dtype == np.int64
 
 
 def test_a_large_sparse_mask_takes_the_runs_writer(monkeypatch):
-    from atlas_toolkit.raster import pillow_backend as pb
+    from spine_atlas_toolkit.raster import pillow_backend as pb
 
     calls = []
     monkeypatch.setattr(pb, "alpha_from_runs", lambda *a: calls.append("runs") or pb.alpha_from_dense(*a))

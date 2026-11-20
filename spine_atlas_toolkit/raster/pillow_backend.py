@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """PillowRasterBackend -- the only concrete RasterBackend Phase 3 ships.
 
-Implements atlas_toolkit.raster.base.RasterBackend's full surface,
+Implements spine_atlas_toolkit.raster.base.RasterBackend's full surface,
 including the mesh-masking primitives (rasterize_mesh_mask,
 composite_destination_in) added in the "mesh" stage.
 """
@@ -14,9 +14,9 @@ import io
 import numpy as np
 from PIL import Image, ImageChops
 
-from atlas_toolkit.raster.base import ImageHandle
-from atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
-from atlas_toolkit.raster.premultiplied import premultiplied_over
+from spine_atlas_toolkit.raster.base import ImageHandle
+from spine_atlas_toolkit.raster.lanczos import lanczos_resize_premultiplied, lanczos_resize_rgba
+from spine_atlas_toolkit.raster.premultiplied import premultiplied_over
 
 
 def _without_metadata(img: Image.Image) -> Image.Image:

@@ -20,8 +20,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit.api import SpineAtlas
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit.api import SpineAtlas
 
 FIXTURE = Path(__file__).with_name("fixtures") / "packer_refactor_golden.json"
 

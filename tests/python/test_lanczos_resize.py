@@ -5,7 +5,7 @@
 import numpy as np
 import pytest
 
-from atlas_toolkit.raster.lanczos import lanczos_resize_rgba
+from spine_atlas_toolkit.raster.lanczos import lanczos_resize_rgba
 
 
 def test_transparent_neighbours_stay_transparent_and_do_not_darken():

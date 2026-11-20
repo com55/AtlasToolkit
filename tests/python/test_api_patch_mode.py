@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import atlas_toolkit.api as api
-from atlas_toolkit import CanvasTooLarge, PackOptions, SpineAtlas
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.domain.converter import auto_convert_atlas
+import spine_atlas_toolkit.api as api
+from spine_atlas_toolkit import CanvasTooLarge, PackOptions, SpineAtlas
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.domain.converter import auto_convert_atlas
 
 TEXT = "p.png\nsize: 64,32\nA\n bounds: 0,0,16,16\nB\n bounds: 16,0,16,16\n"
 
@@ -291,7 +291,7 @@ def test_patch_on_a_large_page_is_not_slow():
 
 
 def test_repack_then_keep_layout_hits_the_first_entry(monkeypatch):
-    from atlas_toolkit.engine.session import AtlasSession
+    from spine_atlas_toolkit.engine.session import AtlasSession
     calls = []
     original = AtlasSession.pack_pending
     monkeypatch.setattr(AtlasSession, "pack_pending", lambda self, **kw: calls.append(kw) or original(self, **kw))

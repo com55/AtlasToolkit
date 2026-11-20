@@ -7,11 +7,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.document import AtlasDocument
-from atlas_toolkit.engine.extraction import AtlasProcessor
-from atlas_toolkit.engine.session import AtlasSession
-from atlas_toolkit.raster.lanczos import lanczos_resize_rgba
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.document import AtlasDocument
+from spine_atlas_toolkit.engine.extraction import AtlasProcessor
+from spine_atlas_toolkit.engine.session import AtlasSession
+from spine_atlas_toolkit.raster.lanczos import lanczos_resize_rgba
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 # 12x6 page. "big" (0,0,8,4) has a transparent right half so whatever is
 # underneath shows through; "small" (8,0,2,4) and "wide" (0,4,10,2) are opaque
@@ -131,7 +131,7 @@ def test_resized_scratch_images_are_disposed():
 def test_forced_resizing_with_a_zero_size_region(pma):
     """A 0x0 region adds nothing to a forced-resize composite (it used to
     raise ZeroDivisionError in the Lanczos kernels)."""
-    from atlas_toolkit.api import SpineAtlas
+    from spine_atlas_toolkit.api import SpineAtlas
 
     header = "page.png\nsize: 12,6\n" + ("pma: true\n" if pma else "")
     text = header + "Head\n bounds: 0,0,6,4\nDot\n bounds: 6,0,0,0\n"

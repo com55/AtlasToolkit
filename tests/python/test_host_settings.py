@@ -3,9 +3,9 @@
 """Requested preferences, effective engine options, and atomic rebuilds."""
 import pytest
 
-from atlas_toolkit import api
-from atlas_toolkit.api import PackOptions, SpineAtlas
-from atlas_toolkit.host import AppHost
+from spine_atlas_toolkit import api
+from spine_atlas_toolkit.api import PackOptions, SpineAtlas
+from spine_atlas_toolkit.host import AppHost
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes
 from .test_api_app_read import MESH
 

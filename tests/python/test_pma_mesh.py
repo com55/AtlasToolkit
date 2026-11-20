@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from atlas_toolkit.api import SpineAtlas
-from atlas_toolkit.packer import PackOptions
+from spine_atlas_toolkit.api import SpineAtlas
+from spine_atlas_toolkit.packer import PackOptions
 from tests.python.pma_cases import (
     GLOW_IN, GLOW_OUT, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow,
 )

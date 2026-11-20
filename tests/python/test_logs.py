@@ -6,7 +6,7 @@ import sys
 import threading
 
 import pytest
-from atlas_toolkit.app import logs
+from spine_atlas_toolkit.app import logs
 
 
 @pytest.fixture(autouse=True)

@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pinned tests for engine/modifier.py's pure mesh/identity helpers."""
 
-from atlas_toolkit.engine.modifier import (
+from spine_atlas_toolkit.engine.modifier import (
     combine_mesh_geometry,
     group_names_by_sprite_identity,
 )
-from atlas_toolkit.raster.pillow_backend import PillowRasterBackend
+from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 def test_group_names_by_sprite_identity_groups_real_backend_handles_by_value():
     # A clone has identical pixels but a distinct handle -- it must NOT
