@@ -7,7 +7,7 @@ View atlas regions, extract individual sprites, replace sprites with other image
 
 ## Usage
 
-- **Web app** — use it directly, no installation required: 👉 **[https://com55.github.io/AtlasToolkit/](https://com55.github.io/AtlasToolkit/)**
+- **[Web app](https://com55.github.io/AtlasToolkit/)** — use it directly, no installation required
 - **Desktop app** — download the pre-built executables from [Releases](https://github.com/com55/AtlasToolkit/releases/latest).
   - Windows is distributed as an **installer** (`AtlasToolkit-Setup-x64.exe`, per-user, no admin) plus a **portable** zip. The installed build updates itself silently in-app; the portable build links to the releases page.
   - **One-time migration:** builds made before the installer switch used the old single-exe auto-update and will report "asset not found" when checking for this release — download and run the new installer once manually.
@@ -19,38 +19,44 @@ View atlas regions, extract individual sprites, replace sprites with other image
 
 ## Setup & Run (desktop app, from source)
 
-Once you are inside the project directory, choose your preferred method:
+Needs Python 3.11 or later and Node.js (for the page bundler). Once you are
+inside the project directory, choose your preferred method:
 
 - **Using [uv](https://github.com/astral-sh/uv#installation) (Recommended)**
   ```bash
   uv sync --extra app
+  npm ci
+  uv run python scripts/build_web.py --target desktop
   uv run python main.py
   ```
 - **Using pip**
   ```bash
-  pip install -r requirements.txt
+  pip install -e ".[app]"
+  npm ci
+  python scripts/build_web.py --target desktop
   python main.py
   ```
-  or
-  ```bash
-  pip install pillow pywebview requests
-  python main.py
-  ```
+
+Rebuild the page (`build_web.py --target desktop`) after changing anything in `www/`.
 
 ## Setup & Run (web app, from source)
 
 ```bash
-cd www
-# Open index.html in your browser, or serve it: python3 -m http.server
+uv sync
+npm ci
+uv run python scripts/build_web.py        # writes dist/web (downloads Pyodide once)
+uv run python scripts/serve_www.py        # http://127.0.0.1:8000/
 ```
+
+The web app runs the same Python engine in [Pyodide](https://pyodide.org/)
+inside a Web Worker. `www/` itself cannot be opened directly: its service
+worker is a template that the build fills in.
 
 ## Python library
 
-The `atlas_toolkit` package also contains a Python port of the atlas engine,
-usable from scripts without the app. Its output matches the app's (checked
-against the app's own code running in a real browser), apart from the
-differences listed in [CHANGELOG.md](CHANGELOG.md). The desktop and web apps
-still run the JavaScript engine in `www/js/`.
+The `atlas_toolkit` package is the atlas engine both apps run, and it can be
+used from scripts without the app. Differences from the JavaScript engine of
+0.4.x are listed in [CHANGELOG.md](CHANGELOG.md).
 
 Install from source (Python 3.11 or later):
 
@@ -173,10 +179,11 @@ built = atlas.build()                           # a new SpineAtlas; `atlas` is u
 
 - **Atlas Preview** — View the full atlas image with region overlays
 - **Region Extraction** — Extract individual sprites or all regions at once
-- **Sprite Modification** — Replace sprites with mod images; the atlas is automatically repacked into a compact, square-ish layout after every modification
-- **Smart Repack** — Regions are deduplicated and tightly packed, favoring a near-square canvas over the smallest possible one (up to 15% larger, if it makes the sheet noticeably squarer)
-- **Drag & Drop** — Load `.atlas` files by dragging them into the app; in Modify Mode, drop a `.png` image directly to apply it as a mod
-- **Copy to Clipboard** — Right-click the preview image to copy it to clipboard (Extract Mode)
+- **Sprite Modification** — Replace sprites with mod images, and add, rename or remove regions (Edit Mode)
+- **Packing** — Shelf, Rectangles or Polygons (nests regions by their mesh outline), or Auto; with **Try to Keep Layout** (on by default) an edited page keeps its existing positions when the edit fits, and is repacked otherwise. Identical sprites are deduplicated
+- **Mesh support** — With a `.skel` next to the atlas, Mesh Cropping trims previews and extracts to each region's mesh, and Mesh-Aware packing cuts pixels outside it
+- **Drag & Drop** — Load `.atlas` files by dragging them into the app; in Edit Mode, drop a `.png` image directly to apply it as a mod
+- **Copy to Clipboard** — Right-click the preview image to copy it to clipboard (View Mode)
 - **Auto Format Conversion** — Automatically converts LibGDX atlas format (`xy`/`orig`/`offset`) to the Spine format on load
 - **Multi-page Atlas** — Supports atlas files that reference multiple page images
 - **File Association** (desktop app) — Can be set as the default app for `.atlas` files; opening an atlas file directly will launch the app and load it automatically
