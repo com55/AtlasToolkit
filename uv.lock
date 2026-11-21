@@ -639,7 +639,7 @@ wheels = [
 [[package]]
 name = "skel-mesh-parser"
 version = "0.3.0"
-source = { git = "https://github.com/com55/skel-mesh-parser.git?tag=py-v0.3.0#78537b2fca1522830a767597211f7a79fb0e1877" }
+source = { git = "https://github.com/com55/skel-mesh-parser.git?tag=py-v0.3.0#12e09427f751eaaba6f54b04ff6ef5abe39f2de5" }
 
 [[package]]
 name = "spine-atlas-toolkit"

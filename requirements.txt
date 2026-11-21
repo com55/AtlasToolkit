@@ -53,7 +53,7 @@ pywebview==6.1
 qtpy==2.4.3 ; sys_platform == 'openbsd6'
     # via pywebview
 requests==2.32.5
-skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@78537b2fca1522830a767597211f7a79fb0e1877
+skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@12e09427f751eaaba6f54b04ff6ef5abe39f2de5
     # via spine-atlas-toolkit
 typing-extensions==4.15.0
     # via pywebview
