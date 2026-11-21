@@ -28,7 +28,7 @@ Needs Python 3.11+, [uv](https://github.com/astral-sh/uv#installation) and Node.
 ```bash
 git clone https://github.com/com55/AtlasToolkit.git
 cd AtlasToolkit
-uv sync --extra app
+uv sync --group app
 npm ci
 ```
 

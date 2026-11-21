@@ -639,11 +639,10 @@ wheels = [
 [[package]]
 name = "skel-mesh-parser"
 version = "0.3.0"
-source = { git = "https://github.com/com55/skel-mesh-parser.git?rev=py-v0.3.0#78537b2fca1522830a767597211f7a79fb0e1877" }
+source = { git = "https://github.com/com55/skel-mesh-parser.git?tag=py-v0.3.0#78537b2fca1522830a767597211f7a79fb0e1877" }
 
 [[package]]
 name = "spine-atlas-toolkit"
-version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -652,13 +651,11 @@ dependencies = [
     { name = "skel-mesh-parser" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 app = [
     { name = "pywebview" },
     { name = "requests" },
 ]
-
-[package.dev-dependencies]
 dev = [
     { name = "pytest" },
 ]
@@ -667,13 +664,14 @@ dev = [
 requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pillow", specifier = ">=10.0,<13" },
-    { name = "pywebview", marker = "extra == 'app'", specifier = "==6.1" },
-    { name = "requests", marker = "extra == 'app'", specifier = "==2.32.5" },
-    { name = "skel-mesh-parser", git = "https://github.com/com55/skel-mesh-parser.git?rev=py-v0.3.0" },
+    { name = "skel-mesh-parser", git = "https://github.com/com55/skel-mesh-parser.git?tag=py-v0.3.0" },
 ]
-provides-extras = ["app"]
 
 [package.metadata.requires-dev]
+app = [
+    { name = "pywebview", specifier = "==6.1" },
+    { name = "requests", specifier = "==2.32.5" },
+]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]

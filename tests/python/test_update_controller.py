@@ -3,7 +3,7 @@
 
 
 def test_local_installer(tmp_path, monkeypatch):
-    from spine_atlas_toolkit.update import controller
+    from atlas_toolkit_app.update import controller
     source = tmp_path / "input.exe"
     source.write_bytes(b"installer")
     output = tmp_path / "updates"
@@ -28,7 +28,7 @@ def test_local_installer(tmp_path, monkeypatch):
 
 
 def test_local_installer_same_path(tmp_path, monkeypatch):
-    from spine_atlas_toolkit.update import controller
+    from atlas_toolkit_app.update import controller
     source = tmp_path / "AtlasToolkit-Setup-x64.exe"
     source.write_bytes(b"installer")
     monkeypatch.setattr(controller, "get_update_dir", lambda: tmp_path)
@@ -42,7 +42,7 @@ def test_local_installer_same_path(tmp_path, monkeypatch):
 
 
 def test_local_installer_copy_error(tmp_path, monkeypatch):
-    from spine_atlas_toolkit.update import controller
+    from atlas_toolkit_app.update import controller
     monkeypatch.setattr(controller, "get_update_dir", lambda: tmp_path)
     monkeypatch.setattr(controller, "is_running_as_exe", lambda: True)
     def fail(*args):
@@ -71,7 +71,7 @@ class FakeProcess:
 
 def _ready_controller(tmp_path, monkeypatch, process, *, watcher_claims=True, watcher_error=None,
                       timeout=0.3):
-    from spine_atlas_toolkit.update import controller
+    from atlas_toolkit_app.update import controller
     installer = tmp_path / "setup.exe"
     installer.write_bytes(b"MZ installer")
     executable = tmp_path / "app.exe"
@@ -185,8 +185,8 @@ def test_missing_watcher_still_hands_over(tmp_path, monkeypatch):
 
 def test_install_result_round_trip(tmp_path, monkeypatch):
     import json
-    from spine_atlas_toolkit.update import controller
-    from spine_atlas_toolkit.app import launch
+    from atlas_toolkit_app.update import controller
+    from atlas_toolkit_app.app import launch
     log = tmp_path / "inno.log"
     (tmp_path / controller.RESULT_FILE_NAME).write_text(
         "\ufeff" + json.dumps({"exit_code": 5, "log_path": str(log), "release_url": "u"}),

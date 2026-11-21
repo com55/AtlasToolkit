@@ -13,11 +13,11 @@ import time
 import webbrowser
 from urllib.parse import urlparse
 
-from spine_atlas_toolkit.app.clipboard import copy_png, copy_rgba
-from spine_atlas_toolkit.app import build_info
-from spine_atlas_toolkit.app.logs import log_dir
-from spine_atlas_toolkit.update.controller import get_update_dir
-from spine_atlas_toolkit.update.updater import get_current_version
+from atlas_toolkit_app.app.clipboard import copy_png, copy_rgba
+from atlas_toolkit_app.app import build_info
+from atlas_toolkit_app.app.logs import log_dir
+from atlas_toolkit_app.update.controller import get_update_dir
+from atlas_toolkit_app.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
 RPC_METHODS = frozenset("""

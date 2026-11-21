@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -95,6 +97,33 @@ def build_wheel(source: Path, output: Path) -> Path:
     return wheels[0]
 
 
+def build_app_wheel(output: Path) -> Path:
+    """Wheel of the Worker's part of atlas_toolkit_app (the package and its
+    host), which the published library wheel leaves out. Fixed timestamps keep
+    its bytes, and so the service worker's cache name, stable."""
+    output.mkdir(parents=True, exist_ok=True)
+    for wheel in output.glob("*.whl"):
+        wheel.unlink()
+    version = load_version(ROOT)
+    package = ROOT / "atlas_toolkit_app"
+    sources = [package / "__init__.py", *sorted((package / "host").glob("*.py"))]
+    files = {source.relative_to(ROOT).as_posix(): source.read_bytes() for source in sources}
+    info = f"atlas_toolkit_app-{version}.dist-info"
+    files[f"{info}/METADATA"] = f"Metadata-Version: 2.1\nName: atlas-toolkit-app\nVersion: {version}\n".encode()
+    files[f"{info}/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: build_web\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+    record = []
+    for name, data in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        record.append(f"{name},sha256={digest},{len(data)}")
+    record.append(f"{info}/RECORD,,")
+    files[f"{info}/RECORD"] = ("\n".join(record) + "\n").encode()
+    path = output / f"atlas_toolkit_app-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in files.items():
+            archive.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), data)
+    return path
+
+
 def build_project_wheels(cache: Path) -> dict[str, Path]:
     """Build the local engine and the shallow-cloned, pinned parser."""
     parser_source = cache / f"skel-mesh-parser-{PARSER_TAG}"
@@ -105,6 +134,7 @@ def build_project_wheels(cache: Path) -> dict[str, Path]:
         )
     return {
         "spine_atlas_toolkit": build_wheel(ROOT, cache / "atlas-wheel"),
+        "atlas_toolkit_app": build_app_wheel(cache / "app-wheel"),
         "skel_mesh_parser": build_wheel(parser_source, cache / "parser-wheel"),
     }
 

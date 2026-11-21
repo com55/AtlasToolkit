@@ -14,10 +14,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from spine_atlas_toolkit.app.events import EventBroker
-from spine_atlas_toolkit.app.files import DesktopFiles
-from spine_atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
-from spine_atlas_toolkit.app.server import DesktopServer, _HTTPServer
+from atlas_toolkit_app.app.events import EventBroker
+from atlas_toolkit_app.app.files import DesktopFiles
+from atlas_toolkit_app.app.rpc_frame import decode_frame, encode_frame
+from atlas_toolkit_app.app.server import DesktopServer, _HTTPServer
 
 
 def test_broker_backlog_and_live():
@@ -378,7 +378,7 @@ def test_socket_dead_sse_unsubscribes_with_default_ping(tmp_path):
 
 
 def test_static_path_containment(tmp_path):
-    from spine_atlas_toolkit.app.server import _static_path
+    from atlas_toolkit_app.app.server import _static_path
 
     site = tmp_path / "site"
     site.mkdir()
@@ -401,7 +401,7 @@ def short_timeout_live(live):
 @pytest.mark.parametrize("partial", [b"", b"GET / HTTP/1.0\r\nHost:"])
 def test_socket_idle_and_partial_headers_timeout(short_timeout_live, caplog, partial):
     server, *_, url = short_timeout_live
-    caplog.set_level("DEBUG", logger="spine_atlas_toolkit.app.server")
+    caplog.set_level("DEBUG", logger="atlas_toolkit_app.app.server")
     started = time.monotonic()
     with socket.create_connection((url.hostname, url.port), timeout=2) as client:
         if partial:
@@ -433,7 +433,7 @@ def test_socket_quiet_sse_survives_connection_timeout(short_timeout_live):
 
 def test_socket_slow_rpc_body_survives_connection_timeout(short_timeout_live, caplog):
     server, *_, url = short_timeout_live
-    caplog.set_level("DEBUG", logger="spine_atlas_toolkit.app.server")
+    caplog.set_level("DEBUG", logger="atlas_toolkit_app.app.server")
     body = encode_frame({"target": "desktop", "method": "ping", "argsJson": "[]"}, [])
     conn = http.client.HTTPConnection(url.hostname, url.port, timeout=3)
     try:

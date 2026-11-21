@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 
+# The library's own version (PyPI: spine-atlas-toolkit). The apps have their
+# own version in APP_VERSION.
+__version__ = "1.0.0"
 
 _API_NAMES = frozenset({
-    "SpineAtlas", "Region", "RegionView", "AtlasError", "RegionNotFound", "DuplicateRegionName",
+    "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge", "Packer", "PackOptions", "AlphaMode", "MixedAlphaGroup",
     "DuplicatePage",
@@ -23,7 +26,4 @@ def __getattr__(name: str):
     if name in _API_NAMES:
         from spine_atlas_toolkit import api
         return getattr(api, name)
-    if name == "__version__":
-        from spine_atlas_toolkit.update.updater import get_current_version
-        return get_current_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

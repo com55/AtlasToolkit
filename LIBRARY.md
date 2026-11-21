@@ -1,145 +1,198 @@
-# AtlasToolkit Python library
+# spine-atlas-toolkit
 
-The `spine_atlas_toolkit` package is the atlas engine that the web and desktop apps
-run. It can also be used from your own scripts, without the app.
-Differences from the JavaScript engine of 0.4.x are listed in
-[CHANGELOG.md](CHANGELOG.md).
+Read, extract, edit and repack [Spine](http://esotericsoftware.com/) texture
+atlases (`.atlas` + page PNGs) from Python. This is the engine of the
+[AtlasToolkit](https://github.com/com55/AtlasToolkit) web and desktop apps.
 
 ## Install
 
-From source, Python 3.11 or later:
-
 ```bash
-uv sync                # library only; add --extra app for the desktop shell
-uv run python your_script.py
+pip install spine-atlas-toolkit
 ```
 
-## Quick start
-
-Open an atlas, look at it, edit it, and save the result:
+Python 3.11 or later. Dependencies: NumPy, Pillow and `skel-mesh-parser`.
 
 ```python
-from PIL import Image
-from spine_atlas_toolkit import SpineAtlas, CanvasTooLarge, PackOptions, Packer
+import spine_atlas_toolkit as sat
+```
 
-atlas = SpineAtlas.open("hero.atlas")          # page PNGs (and hero.skel, if any) next to it
+## Open and extract
+
+```python
+atlas = sat.SpineAtlas.open("hero.atlas")    # loads the page PNGs, and hero.skel if present
+
 for region in atlas.regions:
     print(region.name, region.page, region.bounds)
 
-atlas.extract("head").save("head.png")
-atlas.extract_all_to("sprites/")
+atlas.extract("head").save("head.png")       # a PIL image at the region's original size
+atlas.extract_all_to("sprites/")             # every region as a PNG
+```
 
-atlas.replace({"head": "new_head.png"})
-atlas.add_region("hat", Image.new("RGBA", (8, 8), (0, 255, 0, 255)), page="hero_2.png")
+## Edit and save
+
+Edits are recorded first; `save()` (or `build()`) packs them once.
+
+```python
+from PIL import Image
+
+atlas.replace({"head": "new_head.png"})      # a path or a PIL image
+atlas.add_region("hat", Image.open("hat.png"))
 atlas.rename_region("arm", "left_arm")
 atlas.remove_region("tail")
 
-try:
-    atlas.save("out/hero.atlas", options=PackOptions(packer=Packer.RECTANGLES, padding=4))  # + page PNGs
-except CanvasTooLarge as error:
-    print("too big:", error.page, error)
+atlas.save("out/hero.atlas")                 # writes the .atlas and its page PNGs
 ```
 
-Atlases can also be loaded from memory, and several regions can be edited as
-one picture:
+`build()` does the same in memory and returns a new `SpineAtlas`; the original
+is unchanged. `SpineAtlas.load(text, {"hero.png": image, ...})` opens an atlas
+from memory.
+
+## Edit several regions as one picture
 
 ```python
-atlas = SpineAtlas.load(text, {"hero.png": page_one, "hero_2.png": page_two})
 sheet = atlas.extract_composite(["head", "arm"], force_resize=True)
 # ... edit `sheet` in an image editor ...
 atlas.replace_composite(["head", "arm"], sheet)
-built = atlas.build()                           # a new SpineAtlas; `atlas` is unchanged
 ```
 
-Edits are only recorded. `build()` packs them once and returns a new
-`SpineAtlas`; `save()` builds and writes. A region added with `add_region`
-can be extracted only after `build()`, and removing a region added since the
-atlas was loaded or built undoes the add.
+By default the edited picture is cut back into one piece per region.
 
 ## Pack options
 
-`build()` and `save()` take `options=PackOptions(...)`, for example
-`atlas.build(options=PackOptions(packer="polygons", padding=4))`.
+```python
+atlas.save("out/hero.atlas", options=sat.PackOptions(packer="rectangles", padding=4))
+```
 
-- `packer`: `"auto"` (default), `"shelf"`, `"rectangles"` or `"polygons"`.
-  A string or a `Packer` member. `"auto"` picks `"polygons"` when the atlas
-  has usable mesh data (a `.skel` next to it, or a skeleton passed to
-  `load()`), otherwise `"rectangles"`. `"shelf"` puts one row of images, no
-  nesting; `"rectangles"` is Smart Packing on solid rects; `"polygons"` is
-  Smart Packing on mesh silhouettes and needs mesh data
-  (`PackOptions(mesh_aware=False)` with it raises `ValueError`). With
-  `"polygons"`, a region's rect can contain pixels of neighbours nested into
-  its empty corners; extract with `mesh_crop=True` to see only the region.
-  Auto's size-aware choice (Polygons > Rectangles > Shelf by region count
-  and each region's size) comes later.
-- `padding`: pixels between packed images, default 2, 1 to 256.
-- `mesh_aware`: cut each region's pixels outside its mesh hull before
-  packing. Default on whenever the atlas has usable mesh data, so a `.skel`
-  next to the atlas changes the default output.
-- `try_keep_layout` (default on): an edited page first tries to keep its
-  layout. Removed regions leave empty space; a replacement fits when it is
-  the size `extract()` returns for that region (its full canvas), shows
-  nothing outside the region's trimmed rect (outside its mesh hull is
-  ignored when mesh-aware), and leaves pixels it shares with an overlapping
-  neighbour unchanged; regions that share one rect must be replaced alike;
-  additions go into its free space and may grow the page right/down.
-  Free space is everything outside existing regions' rects and visible
-  pixels; with mesh data, outside their mesh hulls. New regions may be
-  stored rotated 90/180/270. A page with any other edit, whose image is not
-  the size its text declares, or that holds a shared-image composite
-  replace is repacked with `packer`. `try_keep_layout=False` repacks every
-  edited page.
-- `bleed`: Spine's packer Bleed. On every page the pack writes that is not
-  pma, transparent pixels within 2 px of an image take its colour (alpha
-  stays 0) so linear filtering draws no dark edges. Default: on when the
-  pack splits composite images (the default), off when it shares them.
-- `share_composite_image`: `replace_composite` only. Off (default) cuts the
-  image back into one piece per region: the inverse of
-  `extract_composite(force_resize=True)`. On, every region of the group uses
-  the whole image at the image's own size (offsets dropped), and a page
-  holding such a replace is repacked.
+| Option | Default | What it does |
+|---|---|---|
+| `packer` | `"auto"` | `"shelf"` (rows), `"rectangles"` (nests rects), `"polygons"` (nests by mesh outline; needs a `.skel`). `"auto"` is `"polygons"` with mesh data, else `"rectangles"`. |
+| `padding` | `2` | Pixels between packed images (1–256). |
+| `mesh_aware` | on with mesh data | Cut pixels outside each region's mesh before packing. |
+| `try_keep_layout` | `True` | An edited page keeps its existing positions when the edit fits (same size, no new overlap; additions go into free space); otherwise it is repacked. `False` always repacks edited pages. |
+| `bleed` | auto | Fill transparent pixels next to images with their colour (alpha stays 0), so filtering draws no dark edges. On when composites are split. |
+| `share_composite_image` | `False` | For `replace_composite`: give every region the whole picture instead of cutting it into pieces. |
 
-## Mesh data
+## Mesh data (`.skel`)
 
-`mesh_crop=True` on the extract methods and `packer="polygons"` or
-`PackOptions(mesh_aware=True)` on `build()` / `save()` use the meshes from
-the `.skel` file; without usable mesh data they raise `SkeletonUnavailable`.
+With a `.skel` next to the atlas (or passed to `load()`), these use the mesh
+outlines:
 
-An added region whose name has a mesh in the `.skel` is cut to its hull when
-`mesh_aware` is on, and stays a mesh region in the built atlas.
+- `extract(..., mesh_crop=True)` cuts pixels outside the region's mesh.
+- `packer="polygons"` and `mesh_aware` (see above).
+
+Without usable mesh data they raise `SkeletonUnavailable`.
 
 ## Premultiplied alpha
 
-On a `pma: true` page, images are read and written premultiplied: extracts
-return premultiplied pixels, additive colour on alpha-0 pixels included, and
-`replace` / `replace_composite` take premultiplied images. Mesh Cropping and
-mesh-aware packing clear all four channels outside the hull. A composite
-that mixes pma and non-pma pages is stacked as straight alpha and warns.
-
-For straight-alpha images, such as PNGs from an ordinary image editor, pass
-`alpha_mode="straight"` (or `AlphaMode.STRAIGHT`) to `replace`,
+Pages marked `pma: true` are read and written premultiplied. For ordinary
+(straight-alpha) PNGs, pass `alpha_mode="straight"` to `replace`,
 `replace_composite`, `add_region` and the extract methods:
-`atlas.replace({"head": "new_head.png"}, alpha_mode="straight")`. Each image
-is converted to or from its page's own space; `"premultiplied"` does the same
-for straight pages. Without `alpha_mode` nothing is converted. On a pma page
-only its own space (no `alpha_mode`, or `"premultiplied"`) round-trips
-exactly: a straight extract drops additive colour (RGB above alpha,
-including colour on alpha-0 pixels). A composite group that mixes pma and
-non-pma pages raises `MixedAlphaGroup` when `alpha_mode` is given.
+
+```python
+atlas.replace({"head": "new_head.png"}, alpha_mode="straight")
+```
 
 ## Multi-page atlases
 
-Only the pages that own an edited
-region are repacked; the others are kept as they are. `add_region(page=...)`
-picks the page, otherwise the page whose regions cover the least area is
-used.
+Only the pages that own an edited region are repacked. `add_region(page=...)`
+picks the page; otherwise the least-filled page is used.
 
 ## Errors
 
-Errors derive from `AtlasError`: `RegionNotFound`, `DuplicateRegionName`,
+All errors derive from `sat.AtlasError`: `RegionNotFound`,
+`DuplicateRegionName`, `InvalidRegionName`, `MissingPageImage`,
+`SkeletonUnavailable`, `CanvasTooLarge` (a page over 10000 px; `.page` names
+it), `MixedAlphaGroup` and `DuplicatePage`.
+
+## API reference
+
+Everything below is importable from `spine_atlas_toolkit`. Arguments after `*`
+are keyword-only; `alpha_mode` is `None`, `"straight"` or `"premultiplied"`
+(see [Premultiplied alpha](#premultiplied-alpha)).
+
+### `SpineAtlas`
+
+**Open**
+
+| | |
+|---|---|
+| `SpineAtlas.open(atlas_path, *, images=None, skeleton=None)` | Open an `.atlas` file. Its page PNGs and a `.skel` with the same name are read from its folder unless given: `images` as `{page file name: image or path}` (or one image for a one-page atlas), `skeleton` as bytes or a path. |
+| `SpineAtlas.load(atlas_text, pages, *, skeleton=None)` | Open from memory: the atlas text and `{page file name: PIL image or path}` (or one image for a one-page atlas). |
+
+**Properties**
+
+| | |
+|---|---|
+| `regions` | All regions, as `Region` objects. |
+| `pages` | `{page file name: PIL image}`. |
+| `atlas_text` | The `.atlas` text. |
+| `has_changes` | `True` while there are edits not yet built. |
+| `mesh_unavailable_reason` | `None` when mesh data is usable, otherwise why not. |
+
+**Read**
+
+| | |
+|---|---|
+| `region(name)` | One `Region`. |
+| `page_image(name)` | A copy of one page as loaded. |
+| `page_is_pma(page)` | Whether a page is premultiplied (`pma: true`). |
+
+**Extract**
+
+| | |
+|---|---|
+| `extract(names, *, mesh_crop=False, alpha_mode=None)` | One name → a PIL image at the region's original size; a list → `{name: image}`. |
+| `extract_all(*, mesh_crop=False, alpha_mode=None)` | `{name: image}` for every region. |
+| `extract_to(names, path, *, mesh_crop=False, alpha_mode=None)` | Save as PNG: one name to the file `path`, a list into the folder `path`. |
+| `extract_all_to(directory, *, mesh_crop=False, alpha_mode=None)` | Save every region as a PNG into `directory`. |
+| `extract_composite(names, *, force_resize=False, mesh_crop=False, alpha_mode=None)` | Several regions stacked into one image; `force_resize` scales them to the largest one. |
+| `extract_composite_to(names, path, *, force_resize=False, mesh_crop=False, alpha_mode=None)` | Save `extract_composite()` as a PNG. |
+
+**Edit** (recorded until `build()` / `save()`)
+
+| | |
+|---|---|
+| `replace(images, *, alpha_mode=None)` | `{name: image or path}`: new pixels for regions. |
+| `replace_composite(names, image, *, alpha_mode=None)` | One image for several regions (the inverse of `extract_composite`). |
+| `add_region(name, image, page=None, *, alpha_mode=None)` | Add a region; `page` picks the page, otherwise the least-filled one. |
+| `rename_region(name, new_name)` | Rename a region. |
+| `remove_region(names)` | Remove one region or a list. |
+| `reset()` | Discard all recorded edits. |
+| `set_skeleton(skeleton)` | Replace the mesh data (`.skel` bytes, or `None` to drop it) without discarding edits. |
+
+**Pack and save**
+
+| | |
+|---|---|
+| `build(*, options=None)` | Pack the edits and return a new `SpineAtlas`; this one is unchanged. |
+| `save(atlas_path, *, options=None)` | `build()`, then write the `.atlas` and its page PNGs next to it. |
+
+`options` is a `PackOptions` (see [Pack options](#pack-options)).
+
+### `Region`
+
+A frozen dataclass: `name`, `original_name` (the name in the loaded atlas;
+`None` for an added region), `page`, `bounds` (`(x, y, w, h)` on the page),
+`rotate` (0, 90, 180 or 270) and `offsets` (`(left, bottom, original_w,
+original_h)` as in the atlas, or `None`), plus the properties `renamed` and
+`added`.
+
+### `PackOptions`, `Packer`, `AlphaMode`
+
+- `PackOptions(*, packer="auto", padding=2, mesh_aware=None, try_keep_layout=True, bleed=None, share_composite_image=False)`
+  (`None` means automatic; see the table above).
+- `Packer`: `AUTO`, `SHELF`, `RECTANGLES`, `POLYGONS` (or the same names as
+  lowercase strings).
+- `AlphaMode`: `STRAIGHT`, `PREMULTIPLIED` (or `"straight"` / `"premultiplied"`).
+
+### Exceptions
+
+`AtlasError` is the base class of `RegionNotFound`, `DuplicateRegionName`,
 `InvalidRegionName`, `MissingPageImage`, `SkeletonUnavailable`,
-`CanvasTooLarge`, `MixedAlphaGroup` and `DuplicatePage`. `CanvasTooLarge`
-is raised when a packed page would be over 10000 px on a side; `.page`
-names the page on a multi-page atlas. `DuplicatePage` is raised on load
-when one page file is listed twice. A region bigger than its page image
-raises `ValueError` when it is read.
+`CanvasTooLarge`, `MixedAlphaGroup` and `DuplicatePage`.
+
+## More
+
+- Changes: [CHANGELOG](https://github.com/com55/AtlasToolkit/blob/main/CHANGELOG.md)
+- Source and issues: [github.com/com55/AtlasToolkit](https://github.com/com55/AtlasToolkit)
+- License: Apache-2.0. Not affiliated with Esoteric Software (Spine).

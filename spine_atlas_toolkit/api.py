@@ -34,7 +34,7 @@ from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 from spine_atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
 
 __all__ = [
-    "SpineAtlas", "Region", "RegionView", "AtlasError", "RegionNotFound", "DuplicateRegionName",
+    "SpineAtlas", "Region", "AtlasError", "RegionNotFound", "DuplicateRegionName",
     "InvalidRegionName", "MissingPageImage", "SkeletonUnavailable",
     "CanvasTooLarge", "MixedAlphaGroup", "DuplicatePage",
 ]
@@ -399,7 +399,7 @@ class SpineAtlas:
 
     # -- mesh --------------------------------------------------------------
 
-    def region_views(
+    def _app_region_views(
         self, packed_text: str | None = None,
         page_sizes: Mapping[str, tuple[int, int]] | None = None,
     ) -> tuple[RegionView, ...]:
@@ -462,7 +462,7 @@ class SpineAtlas:
         )
         self._build_cache = None
 
-    def mesh_hull_layout(self, names: list[str], force_resize: bool = False) -> list[dict]:
+    def _app_mesh_hull_layout(self, names: list[str], force_resize: bool = False) -> list[dict]:
         """Mesh outlines in composite-preview pixels, omitting missing hulls."""
         keys = [self._built_key(name) for name in names]
         layout = self._session.get_mesh_hull_layout(keys, force_resize)
@@ -663,7 +663,7 @@ class SpineAtlas:
         return hit[1:]
 
     @contextmanager
-    def transaction(self):
+    def _app_transaction(self):
         """Roll back recorded edits, names and cached output if the block fails."""
         if self._transaction_active:
             raise RuntimeError("nested edit transactions are not supported")
@@ -694,7 +694,7 @@ class SpineAtlas:
         except KeyError:
             raise ValueError(f"unknown page {name!r}") from None
 
-    def validate_region_name(self, name: str, exclude: str | None = None) -> str:
+    def _app_validate_region_name(self, name: str, exclude: str | None = None) -> str:
         """Validate and trim a name, optionally excluding an existing region."""
         key = self._key(exclude) if exclude is not None else None
         try:
@@ -901,7 +901,7 @@ class SpineAtlas:
             session.set_nest_gap_distance(4)
             session.set_mesh_aware_repack_enabled(False)
 
-    def pack(self, *, options: PackOptions | None = None) -> tuple[str, dict[str, Image.Image]]:
+    def _app_pack(self, *, options: PackOptions | None = None) -> tuple[str, dict[str, Image.Image]]:
         """Pack edits without creating a child atlas.
 
         Returned images must not be mutated: untouched pages are the pristine
@@ -913,10 +913,10 @@ class SpineAtlas:
         text, pages, _ = self._cached_pack(resolved)
         return text, pages
 
-    def pack_is_cached(self, *, options: PackOptions | None = None) -> bool:
-        """True when pack() with these settings returns without packing: the
+    def _app_pack_is_cached(self, *, options: PackOptions | None = None) -> bool:
+        """True when _app_pack() with these settings returns without packing: the
         atlas has no edits, or the result is cached (see pack). Raises like
-        pack() for invalid settings, SkeletonUnavailable included."""
+        _app_pack() for invalid settings, SkeletonUnavailable included."""
         resolved = self._resolve(options)
         if not self.has_changes:
             return True

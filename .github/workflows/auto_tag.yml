@@ -1,11 +1,11 @@
-name: Auto Tag from Version
+name: Release app
 
 on:
   push:
     branches:
       - main
     paths:
-      - "pyproject.toml"
+      - "APP_VERSION"
 
 permissions:
   contents: write
@@ -18,10 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Version from pyproject.toml 📋
+      - name: Get app version from APP_VERSION 📋
         id: get_version
         run: |
-          VERSION=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)
+          VERSION=$(tr -d '[:space:]' < APP_VERSION)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Found version: $VERSION"
 

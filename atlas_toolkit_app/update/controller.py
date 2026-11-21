@@ -15,8 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from spine_atlas_toolkit.app.config import get_config_dir
-from spine_atlas_toolkit.update.updater import (
+from atlas_toolkit_app.app.config import get_config_dir
+from atlas_toolkit_app.update.updater import (
     check_for_updates,
     download_update_asset,
     find_windows_installer_asset,

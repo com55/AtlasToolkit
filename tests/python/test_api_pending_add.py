@@ -20,9 +20,9 @@ def atlas_with_adds(*names, pma=False):
 
 def test_replace_on_a_pending_add_keeps_its_order_and_key():
     atlas = atlas_with_adds('n1', 'n2')
-    keys = [v.key for v in atlas.region_views()]
+    keys = [v.key for v in atlas._app_region_views()]
     atlas.replace({'n1': decode(page_bytes(4, 5))})
-    assert [v.key for v in atlas.region_views()] == keys
+    assert [v.key for v in atlas._app_region_views()] == keys
     assert atlas.build().extract('n1').tobytes() == decode(page_bytes(4, 5)).tobytes()
 
 
@@ -69,7 +69,7 @@ def test_alpha_converts_to_the_adds_page():
 
 def test_extract_still_refuses_a_pending_add():
     atlas = atlas_with_adds('n1')
-    for call in [lambda: atlas.extract('n1'), lambda: atlas.extract_composite(['n1']), lambda: atlas.mesh_hull_layout(['n1'])]:
+    for call in [lambda: atlas.extract('n1'), lambda: atlas.extract_composite(['n1']), lambda: atlas._app_mesh_hull_layout(['n1'])]:
         with pytest.raises(AtlasError, match='added since'):
             call()
 
@@ -78,7 +78,7 @@ def test_removing_a_replaced_add_undoes_it():
     atlas = atlas_with_adds('n1')
     atlas.replace({'n1': decode(page_bytes(4, 5))})
     atlas.remove_region(['n1'])
-    assert [v.label for v in atlas.build().region_views()] == ['a', 'b']
+    assert [v.label for v in atlas.build()._app_region_views()] == ['a', 'b']
 
 
 def test_validation_is_atomic():
@@ -117,7 +117,7 @@ def test_pending_source_pin_survives_rollback(composite):
     atlas = atlas_with_adds('n1')
     before = list(atlas._session._mod_batches)
     with pytest.raises(RuntimeError, match='rollback'):
-        with atlas.transaction():
+        with atlas._app_transaction():
             if composite:
                 atlas.replace_composite(['a', 'n1'], decode(page_bytes(4, 5)))
             else:

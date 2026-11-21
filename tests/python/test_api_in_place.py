@@ -632,33 +632,33 @@ def _pad_atlas(monkeypatch):
 def test_in_place_fit_ignores_padding(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.replace({"A": img(10, 8)})  # fits its slot: no repack, no add
-    first = atlas.pack(options=keeping(padding=2))
-    again = atlas.pack(options=keeping(padding=9))
+    first = atlas._app_pack(options=keeping(padding=2))
+    again = atlas._app_pack(options=keeping(padding=9))
     assert len(calls) == 1 and again[0] is first[0] and again[1] is first[1]
-    assert atlas.pack_is_cached(options=keeping(padding=30))
-    assert not atlas.pack_is_cached(options=repacking(padding=30))
+    assert atlas._app_pack_is_cached(options=keeping(padding=30))
+    assert not atlas._app_pack_is_cached(options=repacking(padding=30))
 
 
 def test_in_place_add_or_repack_keeps_padding_in_the_key(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.add_region("N", img(3, 3))  # placed into free space with the padding as gap
-    atlas.pack(options=keeping(padding=2))
-    atlas.pack(options=keeping(padding=3))
+    atlas._app_pack(options=keeping(padding=2))
+    atlas._app_pack(options=keeping(padding=3))
     assert len(calls) == 2
     atlas, calls = _pad_atlas(monkeypatch)
     atlas.replace({"A": img(20, 14)})  # does not fit: the page repacks
-    atlas.pack(options=keeping(padding=2))
-    atlas.pack(options=keeping(padding=3))
+    atlas._app_pack(options=keeping(padding=2))
+    atlas._app_pack(options=keeping(padding=3))
     assert len(calls) == 2
 
 
 def test_pack_is_cached_without_edits_and_after_a_pack(monkeypatch):
     atlas, calls = _pad_atlas(monkeypatch)
-    assert atlas.pack_is_cached(options=repacking(padding=7))
+    assert atlas._app_pack_is_cached(options=repacking(padding=7))
     atlas.replace({"A": img(20, 14)})
-    assert not atlas.pack_is_cached()
-    atlas.pack()
-    assert atlas.pack_is_cached(options=keeping()) and not atlas.pack_is_cached(options=repacking())
+    assert not atlas._app_pack_is_cached()
+    atlas._app_pack()
+    assert atlas._app_pack_is_cached(options=keeping()) and not atlas._app_pack_is_cached(options=repacking())
     assert len(calls) == 1
     with pytest.raises(TypeError):
-        atlas.pack_is_cached(packer="rectangles")
+        atlas._app_pack_is_cached(packer="rectangles")

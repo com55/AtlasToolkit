@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Application layer — config and pywebview launch glue."""
 
-from spine_atlas_toolkit.app.config import AppConfig
+from atlas_toolkit_app.app.config import AppConfig
 
 __all__ = [
     "AppConfig",

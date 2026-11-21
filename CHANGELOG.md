@@ -6,16 +6,31 @@ the full notes and screenshots.
 
 ## [1.0.0] - 2026-11-21 - Python engine
 
-A Python port of the atlas engine, usable as a library (`spine_atlas_toolkit`). The
-apps run the Python engine too: the web/PWA app in a Pyodide worker, the
-desktop app through a local server.
+App 1.0.0 and library `spine-atlas-toolkit` 1.0.0. From here on the two have
+separate versions: the app's is `APP_VERSION`, the library's
+`spine_atlas_toolkit.__version__`.
 
-### Breaking: package name
+A Python port of the atlas engine, usable as a library (`spine_atlas_toolkit`,
+on PyPI as `spine-atlas-toolkit`). The apps run the Python engine too: the
+web/PWA app in a Pyodide worker, the desktop app through a local server.
+
+### Added
+- About dialog (the "i" at the right of the status bar): app and library
+  versions, the runtime and the third-party packages this build uses, and the
+  license texts.
+
+### Breaking: package name and public API
 - The library is the `spine-atlas-toolkit` distribution and is imported as
   `spine_atlas_toolkit` (it was `atlas_toolkit`, never published).
+- The app's own code (the host the UI calls, the desktop shell and the
+  updater) moved to a separate `atlas_toolkit_app` package that is not
+  published. `SpineAtlas` methods that exist only for the app are now
+  `_app_pack`, `_app_pack_is_cached`, `_app_transaction`, `_app_region_views`,
+  `_app_mesh_hull_layout` and `_app_validate_region_name`, and `RegionView` is
+  no longer exported.
 
 ### Breaking: `PackOptions`
-- `build()`, `save()`, `pack()` and `pack_is_cached()` take one
+- `build()` and `save()` take one
   `options=PackOptions(...)` instead of `packer=`, `packer_options=` and
   `split_composite=`. `PackerOptions` is gone; the old keywords raise
   `TypeError`.
@@ -52,9 +67,6 @@ desktop app through a local server.
   filtering draws no dark edges. `None` (default) bleeds when the build
   splits composites (with `share_composite_image=False`, the default);
   `True` / `False` force it. Untouched and rename-only pages keep their pixels.
-- `SpineAtlas.pack()` returns the packed text and page images without
-  creating a child atlas; `pack_is_cached()` tells whether a pack with the
-  given settings would return at once.
 - `PackOptions(try_keep_layout=True)` (default): a page whose edits
   fit keeps its layout. Removed regions leave empty space; a replaced region
   whose new pixels fit its old slot (the canvas size `extract()` gives,

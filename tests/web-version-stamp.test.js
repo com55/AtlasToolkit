@@ -9,10 +9,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PYPROJECT = fs.readFileSync(path.join(ROOT, 'pyproject.toml'), 'utf8');
-const VERSION = (PYPROJECT.match(/^version\s*=\s*"([^"]+)"/m) || [])[1];
+const VERSION = fs.readFileSync(path.join(ROOT, 'APP_VERSION'), 'utf8').trim();
 
-test('web_version.py prints the pyproject.toml version', () => {
+test('web_version.py prints the APP_VERSION version', () => {
   const r = spawnSync('uv', ['run', 'python', 'scripts/web_version.py'], {
     cwd: ROOT,
     encoding: 'utf8',

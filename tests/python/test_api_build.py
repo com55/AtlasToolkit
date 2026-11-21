@@ -315,15 +315,15 @@ def _counted_atlas(monkeypatch):
 
 def test_switching_settings_back_does_not_repack(monkeypatch):
     atlas, calls = _counted_atlas(monkeypatch)
-    shelf = atlas.pack(options=PackOptions(packer="shelf"))
-    rects = atlas.pack(options=PackOptions(packer="rectangles"))
+    shelf = atlas._app_pack(options=PackOptions(packer="shelf"))
+    rects = atlas._app_pack(options=PackOptions(packer="rectangles"))
     assert len(calls) == 2
-    assert atlas.pack(options=PackOptions(packer="shelf")) == shelf
-    assert atlas.pack(options=PackOptions(packer="rectangles")) == rects
-    assert atlas.pack(options=PackOptions(packer="shelf"))[1] is shelf[1]
+    assert atlas._app_pack(options=PackOptions(packer="shelf")) == shelf
+    assert atlas._app_pack(options=PackOptions(packer="rectangles")) == rects
+    assert atlas._app_pack(options=PackOptions(packer="shelf"))[1] is shelf[1]
     assert len(calls) == 2
     atlas.rename_region("Head", "H2")  # any edit drops every entry
-    atlas.pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
     assert len(calls) == 3
 
 
@@ -332,44 +332,44 @@ def test_build_cache_evicts_the_least_recently_used(monkeypatch):
     atlas, calls = _counted_atlas(monkeypatch)
     paddings = range(1, api._BUILD_CACHE_SIZE + 1)
     for padding in paddings:
-        atlas.pack(options=PackOptions(packer="shelf", padding=padding, try_keep_layout=False))
-    atlas.pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))  # refresh the oldest
+        atlas._app_pack(options=PackOptions(packer="shelf", padding=padding, try_keep_layout=False))
+    atlas._app_pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))  # refresh the oldest
     assert len(calls) == api._BUILD_CACHE_SIZE
-    atlas.pack(options=PackOptions(packer="shelf", padding=99, try_keep_layout=False))  # evicts padding=2
+    atlas._app_pack(options=PackOptions(packer="shelf", padding=99, try_keep_layout=False))  # evicts padding=2
     assert len(atlas._build_cache) == api._BUILD_CACHE_SIZE
-    atlas.pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))
+    atlas._app_pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))
     assert len(calls) == api._BUILD_CACHE_SIZE + 1
-    atlas.pack(options=PackOptions(packer="shelf", padding=2, try_keep_layout=False))
+    atlas._app_pack(options=PackOptions(packer="shelf", padding=2, try_keep_layout=False))
     assert len(calls) == api._BUILD_CACHE_SIZE + 2
 
 
 def test_failed_transaction_restores_every_cached_pack(monkeypatch):
     atlas, calls = _counted_atlas(monkeypatch)
-    atlas.pack(options=PackOptions(packer="shelf"))
-    atlas.pack(options=PackOptions(packer="rectangles"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="rectangles"))
     cache = atlas._build_cache
     with pytest.raises(RuntimeError):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.rename_region("Head", "H2")
-            atlas.pack(options=PackOptions(packer="shelf"))
+            atlas._app_pack(options=PackOptions(packer="shelf"))
             raise RuntimeError("boom")
     assert atlas._build_cache is cache
-    atlas.pack(options=PackOptions(packer="shelf"))
-    atlas.pack(options=PackOptions(packer="rectangles"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="rectangles"))
     assert len(calls) == 3
 
 
 def test_build_cache_keeps_its_page_bytes_under_budget(monkeypatch):
     atlas, calls = _counted_atlas(monkeypatch)
     monkeypatch.setattr(api, "_BUILD_CACHE_BYTES", 1)  # room for the newest pack only
-    atlas.pack(options=PackOptions(packer="shelf"))
-    atlas.pack(options=PackOptions(packer="rectangles"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="rectangles"))
     assert len(atlas._build_cache) == 1
-    atlas.pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
     assert len(calls) == 3
     monkeypatch.setattr(api, "_BUILD_CACHE_BYTES", 10 ** 9)
-    atlas.pack(options=PackOptions(packer="rectangles"))
-    atlas.pack(options=PackOptions(packer="shelf"))
+    atlas._app_pack(options=PackOptions(packer="rectangles"))
+    atlas._app_pack(options=PackOptions(packer="shelf"))
     assert len(calls) == 4 and len(atlas._build_cache) == 2
 
 
@@ -379,6 +379,6 @@ def test_build_cache_budget_ignores_shared_untouched_pages(monkeypatch):
     atlas.replace({"Arm": sprite(5, 3, 7)})  # q.png stays untouched and shared
     edited = 16 * 8 * 4  # page.png after a shelf repack is never larger than this here
     monkeypatch.setattr(api, "_BUILD_CACHE_BYTES", 3 * edited)
-    atlas.pack(options=PackOptions(packer="shelf", try_keep_layout=False))
-    atlas.pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))
+    atlas._app_pack(options=PackOptions(packer="shelf", try_keep_layout=False))
+    atlas._app_pack(options=PackOptions(packer="shelf", padding=1, try_keep_layout=False))
     assert len(atlas._build_cache) == 2

@@ -78,9 +78,9 @@ def main():
     if args.config is None:
         parser.error("--config is required when serving")
     args.config.mkdir(parents=True, exist_ok=True)
-    from spine_atlas_toolkit.app import config
+    from atlas_toolkit_app.app import config
     config.CONFIG_PATH = args.config / "config.json"
-    from spine_atlas_toolkit.app.desktop import build_desktop
+    from atlas_toolkit_app.app.desktop import build_desktop
     window = FakeWindow()
     urls = []
 

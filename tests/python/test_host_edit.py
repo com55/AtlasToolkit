@@ -8,7 +8,7 @@ from PIL import UnidentifiedImageError
 
 from spine_atlas_toolkit.api import AtlasError, InvalidRegionName, RegionNotFound, SpineAtlas
 from spine_atlas_toolkit.document import png_names_for_save
-from spine_atlas_toolkit.host import AppHost, wire
+from atlas_toolkit_app.host import AppHost, wire
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes, two_pages
 from .test_host_view import loaded
 
@@ -61,7 +61,7 @@ def test_failure_keeps_state_and_preview(failure, monkeypatch):
     if failure == 'pack':
         def fail(*args, **kwargs):
             raise MemoryError('synthetic pack failure')
-        monkeypatch.setattr(SpineAtlas, 'pack', fail)
+        monkeypatch.setattr(SpineAtlas, '_app_pack', fail)
         with pytest.raises(MemoryError):
             host.rename('a', 'lost')
     elif failure == 'modify':
@@ -146,7 +146,7 @@ def test_add_modify_composite_order_and_overlay(monkeypatch):
     assert result['regionPages'][key] == 'q.png'
     assert result['regions'][key][2:4] == [2, 3]
     text, pages = host._packed
-    views = host._atlas.region_views(text, {n: im.size for n, im in pages.items()})
+    views = host._atlas._app_region_views(text, {n: im.size for n, im in pages.items()})
     assert result['regions'] == {v.key: [v.x, v.y, v.w, v.h, v.rotate] for v in views}
 
 
@@ -282,7 +282,7 @@ def test_failed_pending_modify_restores_source_and_preview(keys, monkeypatch):
     def fail(*args, **kwargs):
         raise MemoryError('synthetic pack failure')
     with monkeypatch.context() as patch:
-        patch.setattr(SpineAtlas, 'pack', fail)
+        patch.setattr(SpineAtlas, '_app_pack', fail)
         with pytest.raises(MemoryError):
             host.modify([key if k == 'fresh' else k for k in keys], page_bytes(4, 5), 'straight')
     assert host._state() == before

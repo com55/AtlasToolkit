@@ -6,7 +6,7 @@ import pytest
 
 from spine_atlas_toolkit import api
 from spine_atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
-from spine_atlas_toolkit.host import AppHost, wire
+from atlas_toolkit_app.host import AppHost, wire
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, pixel, two_pages
 
 
@@ -312,3 +312,16 @@ def test_extract_and_save_image_encode_png_at_level_3_and_save_output_at_the_def
     host.save_output()
     host.page_png(0, "straight")
     assert levels and set(levels) == {None}
+
+
+def test_about_reports_the_library_runtime_and_loaded_packages():
+    import platform
+
+    import spine_atlas_toolkit
+
+    about = AppHost.about()
+    assert about["library"] == spine_atlas_toolkit.__version__
+    assert about["runtime"] == {"name": "Python", "version": platform.python_version()}
+    assert {"NumPy", "Pillow", "skel-mesh-parser"} <= set(about["components"])
+    assert all(about["components"][name] for name in ("NumPy", "Pillow", "skel-mesh-parser"))
+    assert json.loads(wire.call(AppHost(), "about", "[]", [])[0])["value"] == about

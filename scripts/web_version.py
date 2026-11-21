@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Stamp the PWA index.html with the version from pyproject.toml.
+"""Stamp the PWA index.html with the app version from APP_VERSION.
 
-Single source of truth stays pyproject.toml (exe builds already copy it
-into VERSION). This module is stdlib-only so GitHub Pages can run it
-without installing the app.
+APP_VERSION is the apps' version (exe builds copy it into VERSION); the
+library's own version lives in spine_atlas_toolkit/__init__.py. This module
+is stdlib-only so CI can run it without installing anything.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from pathlib import Path
 
 _TITLE_RE = re.compile(r"<title>[^<]*</title>")
 _META_RE = re.compile(r'<meta\s+name="app-version"\s+content="[^"]*"\s*/?>', re.I)
-_TOML_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.M)
 
 
 def repo_root() -> Path:
@@ -23,9 +22,11 @@ def repo_root() -> Path:
 
 def load_version(root: Path | None = None) -> str:
     root = root or repo_root()
-    toml = (root / "pyproject.toml").read_text(encoding="utf-8-sig")
-    match = _TOML_VERSION_RE.search(toml)
-    return match.group(1) if match else "0.0.0"
+    try:
+        version = (root / "APP_VERSION").read_text(encoding="utf-8-sig").strip()
+    except FileNotFoundError:
+        return "0.0.0"
+    return version or "0.0.0"
 
 
 def stamp_index_html(html: str, version: str) -> str:
@@ -51,7 +52,7 @@ def main() -> None:
     parser.add_argument(
         "--stamp",
         type=Path,
-        help="Rewrite this index.html in place with the pyproject.toml version",
+        help="Rewrite this index.html in place with the APP_VERSION version",
     )
     args = parser.parse_args()
     version = load_version()

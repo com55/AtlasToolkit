@@ -9,7 +9,7 @@ import pytest
 def isolate_config_path(tmp_path, monkeypatch):
     """Keep every test away from the developer's real preferences."""
     try:
-        from spine_atlas_toolkit.app import config
+        from atlas_toolkit_app.app import config
     except ImportError:
         return
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.json")

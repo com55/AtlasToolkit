@@ -19,6 +19,19 @@ from spine_atlas_toolkit.document import png_names_for_save
 EXPORT_PNG_LEVEL = 3
 
 
+def _package_version(module, distribution: str) -> str:
+    """A package's version: its __version__, else its installed metadata
+    (missing in some frozen builds), else ""."""
+    version = getattr(module, "__version__", "")
+    if version:
+        return str(version)
+    try:
+        from importlib.metadata import version as metadata_version
+        return metadata_version(distribution)
+    except Exception:
+        return ""
+
+
 def _png(image: Image.Image, compress_level: int | None = None) -> bytes:
     output = BytesIO()
     if compress_level is None:
@@ -129,7 +142,7 @@ class AppHost:
         previous = self._pack_settings
         self._pack_settings = {**previous, **settings}
         try:
-            return not atlas.pack_is_cached(**self._pack_arguments())
+            return not atlas._app_pack_is_cached(**self._pack_arguments())
         except Exception:  # e.g. a missing skeleton: set_settings reports it
             return True
         finally:
@@ -149,8 +162,8 @@ class AppHost:
         try:
             if self._packed is None:
                 return self._state()
-            with atlas.transaction():
-                packed = atlas.pack(**self._pack_arguments())
+            with atlas._app_transaction():
+                packed = atlas._app_pack(**self._pack_arguments())
         except BaseException:
             self._pack_settings = previous
             raise
@@ -162,6 +175,45 @@ class AppHost:
             self._revision += 1
         self._packed = packed
         return {"state": self._state(), "unchanged": True} if unchanged else self._edit_result()
+
+    @staticmethod
+    def about() -> dict:
+        """Versions for the About dialog: the library, the runtime this host
+        runs in, and the third-party packages it actually loaded."""
+        import platform
+        import sys
+
+        import numpy
+        import PIL
+        import skel_mesh_parser
+        import spine_atlas_toolkit
+
+        components = {
+            "NumPy": numpy.__version__,
+            "Pillow": PIL.__version__,
+            "skel-mesh-parser": _package_version(skel_mesh_parser, "skel-mesh-parser"),
+        }
+        if sys.platform == "emscripten":
+            import pyodide
+            runtime = {"name": "Pyodide", "version": pyodide.__version__}
+        else:
+            runtime = {"name": "Python", "version": platform.python_version()}
+            try:
+                import webview
+                components["pywebview"] = _package_version(webview, "pywebview")
+            except ImportError:
+                pass
+            try:
+                import requests
+                components["requests"] = requests.__version__
+            except ImportError:
+                pass
+        return {
+            "library": spine_atlas_toolkit.__version__,
+            "python": platform.python_version(),
+            "runtime": runtime,
+            "components": components,
+        }
 
     @staticmethod
     def required_pages(atlas_text: str) -> list[str]:
@@ -186,7 +238,7 @@ class AppHost:
 
     def _state(self) -> dict:
         atlas = self._require_atlas()
-        views = atlas.region_views()
+        views = atlas._app_region_views()
         pages = list(self._page_names)
         reason = atlas.mesh_unavailable_reason
         return {
@@ -224,7 +276,7 @@ class AppHost:
         self._atlas_name = atlas_name
         self._skeleton_name = skeleton_name
         self._skeleton = skeleton
-        self._pristine_regions = [{"key": view.key, "label": view.label} for view in atlas.region_views()]
+        self._pristine_regions = [{"key": view.key, "label": view.label} for view in atlas._app_region_views()]
         return self._state()
 
     def set_skeleton(self, name: str, data: bytes) -> dict:
@@ -232,9 +284,9 @@ class AppHost:
         previous = self._skeleton
         if self._packed is not None:
             try:
-                with atlas.transaction():
+                with atlas._app_transaction():
                     atlas.set_skeleton(data)
-                    packed = atlas.pack(**self._pack_arguments())
+                    packed = atlas._app_pack(**self._pack_arguments())
             except BaseException:
                 atlas.set_skeleton(previous)
                 raise
@@ -264,12 +316,12 @@ class AppHost:
             return None
         return {
             "width": image.width, "height": image.height, "rgba": image.tobytes(),
-            "hulls": atlas.mesh_hull_layout(labels, force_resize) if want_hulls else None,
+            "hulls": atlas._app_mesh_hull_layout(labels, force_resize) if want_hulls else None,
         }
 
     def extract(self, keys: list[str] | None, mesh_crop: bool, alpha: str) -> list[dict]:
         atlas = self._require_atlas()
-        views = atlas.region_views()
+        views = atlas._app_region_views()
         wanted = [view.key for view in views] if keys is None else keys
         names = self._labels(wanted)
         images = atlas.extract(
@@ -294,7 +346,7 @@ class AppHost:
         return _png(image, EXPORT_PNG_LEVEL)
 
     def _labels(self, keys: list[str]) -> list[str]:
-        labels = {view.key: view.label for view in self._require_atlas().region_views()}
+        labels = {view.key: view.label for view in self._require_atlas()._app_region_views()}
         for key in keys:
             if key not in labels:
                 raise RegionNotFound(key)
@@ -312,7 +364,7 @@ class AppHost:
     def _edit_result(self) -> dict:
         atlas = self._require_edit()
         text, pages = self._packed
-        views = atlas.region_views(text, {name: image.size for name, image in pages.items()})
+        views = atlas._app_region_views(text, {name: image.size for name, image in pages.items()})
         names = self.required_pages(text)
         return {
             "image": self._raster(pages[names[0]]),
@@ -325,18 +377,18 @@ class AppHost:
 
     def _edit(self, operation) -> dict:
         atlas = self._require_edit()
-        with atlas.transaction():
+        with atlas._app_transaction():
             operation(atlas)
-            packed = atlas.pack(**self._pack_arguments())
+            packed = atlas._app_pack(**self._pack_arguments())
         self._packed = packed
         self._revision += 1
         return self._edit_result()
 
     def enter_edit(self) -> dict:
         atlas = self._require_atlas()
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.reset()
-            packed = atlas.pack(**self._pack_arguments())
+            packed = atlas._app_pack(**self._pack_arguments())
         self._packed = packed
         self._revision += 1
         return self._edit_result()
@@ -401,7 +453,7 @@ class AppHost:
         atlas = self._require_edit()
         exclude = self._labels([exclude_key])[0] if exclude_key is not None else None
         try:
-            value = atlas.validate_region_name(name, exclude=exclude)
+            value = atlas._app_validate_region_name(name, exclude=exclude)
         except InvalidRegionName as error:
             return {"ok": False, "reason": error.reason}
         return {"ok": True, "value": value}

@@ -10,6 +10,7 @@ import { initSaveSplitMenu, enterEditMode, exitEditMode, ReplaceSelected, resetM
 import { initAppBar } from './js/app-bar.js';
 import { initSettingsPanel } from './js/settings-panel.js';
 import { initOverlayMotion } from './js/overlay-motion.js';
+import { initAbout } from './js/about.js';
 import { initOptionsPopover } from './js/options-popover.js';
 import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
@@ -90,7 +91,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     onDesktopEvent('drop', e => handleDesktopDrop(e, actions).catch(console.error));
     onDesktopEvent('confirm-close', handleConfirmClose);
     onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
-    const installButton = document.getElementById('btn-install-update-file');
+    // Desktop-only buttons are created here so the web build carries none.
+    const installButton = document.createElement('button');
+    installButton.type = 'button';
+    installButton.className = 'hidden';
+    installButton.id = 'btn-install-update-file';
+    installButton.textContent = 'Install update from file…';
+    document.getElementById('status-text').after(installButton);
     const logButton = document.createElement('button');
     logButton.className = 'hidden';
     logButton.id = 'btn-open-log-folder';
@@ -142,7 +149,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initPanelResizer();
   initAppBar();
   initOptionsPopover();
-  initOverlayMotion(); initSettingsPanel();
+  initOverlayMotion(); initSettingsPanel(); initAbout();
   initOptionsRowCollapse();
   // Stamp the initial body.mode-extract class setMode()'s CSS-gated
   // #mesh-mask-toggle-row depends on -- setMode() is otherwise only called

@@ -212,7 +212,7 @@ def test_assemble_stamps_and_generates_complete_site(tmp_path, monkeypatch):
     (source / 'index.html').write_text('<title>Atlas Toolkit</title>')
     (source / 'sw.js').write_text(template)
     (source / 'script.js').write_text('retained')
-    (tmp_path / 'pyproject.toml').write_text('version = "1.2.3"')
+    (tmp_path / 'APP_VERSION').write_text('1.2.3\n')
     runtime = tmp_path / 'runtime.wasm'
     runtime.write_bytes(b'runtime')
     wheel = tmp_path / 'engine.whl'
@@ -264,7 +264,7 @@ def test_desktop_build(tmp_path, monkeypatch, flags, expected):
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-    (tmp_path / 'pyproject.toml').write_text('version = "1.2.3"')
+    (tmp_path / 'APP_VERSION').write_text('1.2.3\n')
     monkeypatch.setattr(build_web, 'ROOT', tmp_path)
     monkeypatch.setattr(sys, 'argv', ['build_web.py', '--target', 'desktop', *flags])
 
@@ -334,7 +334,7 @@ def bundled_root(tmp_path, monkeypatch):
     (root / "www/index.html").write_text(
         '<title>Atlas Toolkit</title><script type="module" src="script.js"></script>')
     (root / "www/sw.js").write_text('const assets = __CORE_ASSETS__; const cache = __CACHE_NAME__;')
-    (root / "pyproject.toml").write_text('version = "1.2.3"')
+    (root / "APP_VERSION").write_text("1.2.3\n")
     monkeypatch.setattr(build_web, "ROOT", root)
     return root
 

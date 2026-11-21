@@ -35,13 +35,13 @@ def live(atlas):
 def test_a_failed_pack_rolls_back_the_edit():
     atlas = two_region_atlas()
     atlas.replace({'a': PATTERN})
-    first = atlas.pack()
+    first = atlas._app_pack()
     with pytest.raises(CanvasTooLarge):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.replace({'b': Image.new('RGBA', (11000, 4))})
-            atlas.pack()
-    assert packed_bytes(atlas.pack()) == packed_bytes(first)
-    assert atlas.region_views(first[0])
+            atlas._app_pack()
+    assert packed_bytes(atlas._app_pack()) == packed_bytes(first)
+    assert atlas._app_region_views(first[0])
 
 
 def test_rollback_restores_a_sprite_the_edit_replaced():
@@ -49,7 +49,7 @@ def test_rollback_restores_a_sprite_the_edit_replaced():
     atlas.replace({'a': PATTERN})
     before = live(atlas)
     with pytest.raises(RuntimeError, match='rollback'):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.replace({'a': pattern(2)})
             raise RuntimeError('rollback')
     assert live(atlas) == before
@@ -61,7 +61,7 @@ def test_rollback_of_a_remove_that_undid_an_add_restores_the_add():
     atlas.add_region('new', PATTERN)
     before = live(atlas)
     with pytest.raises(RuntimeError, match='rollback'):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.remove_region('new')
             raise RuntimeError('rollback')
     assert live(atlas) == before
@@ -71,12 +71,12 @@ def test_rollback_of_a_remove_that_undid_an_add_restores_the_add():
 def test_a_failed_edit_inside_keeps_generation_and_saved_state():
     atlas = two_region_atlas()
     atlas.replace({'a': PATTERN})
-    atlas.pack()
+    atlas._app_pack()
     session = atlas._session
     session._modifications_saved = True
     before = session.snapshot(), live(atlas), atlas._build_cache
     with pytest.raises(api.RegionNotFound):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.replace({'missing': PATTERN})
     assert (session.snapshot(), live(atlas), atlas._build_cache) == before
     assert session._modifications_saved is True
@@ -86,7 +86,7 @@ def test_commit_releases_pinned_handles():
     atlas = two_region_atlas()
     atlas.add_region('new', PATTERN)
     before = live(atlas)
-    with atlas.transaction():
+    with atlas._app_transaction():
         atlas.remove_region('new')
         assert live(atlas) == before
     assert live(atlas) == before - 1
@@ -94,7 +94,7 @@ def test_commit_releases_pinned_handles():
 
 def test_reset_clears_edits_and_the_next_edit_sees_no_old_sprite():
     atlas = two_region_atlas()
-    pristine = packed_bytes(atlas.pack())
+    pristine = packed_bytes(atlas._app_pack())
     roots = live(atlas)
     atlas.replace({'a': pattern(2)})
     atlas.rename_region('b', 'renamed')
@@ -104,7 +104,7 @@ def test_reset_clears_edits_and_the_next_edit_sees_no_old_sprite():
     assert not atlas.has_changes
     assert live(atlas) == roots
     assert atlas._session.snapshot().generation == generation
-    assert packed_bytes(atlas.pack()) == pristine
+    assert packed_bytes(atlas._app_pack()) == pristine
     atlas.replace({'b': PATTERN})
     assert atlas._session.snapshot().generation > generation
     assert atlas.build().extract('a').tobytes() == two_region_atlas().extract('a').tobytes()
@@ -117,7 +117,7 @@ def test_pack_returns_same_result_as_build(packer, monkeypatch):
     monkeypatch.setattr(api, '_parse_skeleton', lambda data: {'attachments': {'a': mesh, 'b': mesh}})
     atlas = SpineAtlas.load(TEXT, two_region_atlas().pages, skeleton=b'x')
     atlas.replace({'a': PATTERN})
-    packed = atlas.pack(options=PackOptions(packer=packer))
+    packed = atlas._app_pack(options=PackOptions(packer=packer))
     cache = atlas._build_cache
     built = atlas.build(options=PackOptions(packer=packer))
     assert atlas._build_cache is cache
@@ -125,7 +125,7 @@ def test_pack_returns_same_result_as_build(packer, monkeypatch):
     atlas._build_cache = None
     built = atlas.build(options=PackOptions(packer=packer))
     cache = atlas._build_cache
-    assert packed_bytes(atlas.pack(options=PackOptions(packer=packer))) == packed_bytes((built.atlas_text, built.pages))
+    assert packed_bytes(atlas._app_pack(options=PackOptions(packer=packer))) == packed_bytes((built.atlas_text, built.pages))
     assert atlas._build_cache is cache
 
 
@@ -134,25 +134,25 @@ def test_pack_does_not_create_a_child_atlas(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError('child created')
     monkeypatch.setattr(SpineAtlas, '_create', forbidden)
-    assert atlas.pack()[0] == TEXT
+    assert atlas._app_pack()[0] == TEXT
     atlas.replace({'a': PATTERN})
-    assert atlas.pack()[1]
+    assert atlas._app_pack()[1]
 
 
 def test_pack_shares_untouched_pages_and_never_alters_them():
     text = TEXT + '\np2.png\nsize: 4,4\nc\n bounds: 0,0,4,4\n'
     atlas = SpineAtlas.load(text, {'p1.png': two_region_atlas().pages['p1.png'], 'p2.png': pattern(3)})
-    pristine = atlas.pack()[1]['p2.png']
+    pristine = atlas._app_pack()[1]['p2.png']
     before = pristine.tobytes()
     atlas.replace({'a': PATTERN})
-    assert atlas.pack()[1]['p2.png'] is pristine
+    assert atlas._app_pack()[1]['p2.png'] is pristine
     atlas.replace({'b': pattern(2)})
-    assert atlas.pack()[1]['p2.png'] is pristine
+    assert atlas._app_pack()[1]['p2.png'] is pristine
     assert pristine.tobytes() == before
     assert atlas.build().pages['p2.png'] is not pristine
     atlas._build_cache = None
     atlas.build()
-    assert atlas.pack()[1]['p2.png'] is pristine
+    assert atlas._app_pack()[1]['p2.png'] is pristine
     assert pristine.tobytes() == before
 
 
@@ -160,25 +160,25 @@ def test_page_image_copies_only_requested_page(monkeypatch):
     atlas = two_region_atlas()
     monkeypatch.setattr(atlas._session, 'export_pages', lambda: pytest.fail('all pages copied'))
     image = atlas.page_image('p1.png')
-    assert image is not atlas.pack()[1]['p1.png']
-    assert image.tobytes() == atlas.pack()[1]['p1.png'].tobytes()
+    assert image is not atlas._app_pack()[1]['p1.png']
+    assert image.tobytes() == atlas._app_pack()[1]['p1.png'].tobytes()
     with pytest.raises(ValueError):
         atlas.page_image('missing')
 
 
 def test_validate_region_name_and_nested_transaction():
     atlas = two_region_atlas()
-    assert atlas.validate_region_name(' clean ') == 'clean'
-    assert atlas.validate_region_name(' a ', exclude='a') == 'a'
+    assert atlas._app_validate_region_name(' clean ') == 'clean'
+    assert atlas._app_validate_region_name(' a ', exclude='a') == 'a'
     for name in ('a', '', 'bad\nname'):
         with pytest.raises(InvalidRegionName) as error:
-            atlas.validate_region_name(name)
+            atlas._app_validate_region_name(name)
         assert error.value.reason
-    with atlas.transaction():
+    with atlas._app_transaction():
         with pytest.raises(RuntimeError):
-            with atlas.transaction():
+            with atlas._app_transaction():
                 pass
-    with atlas.transaction():
+    with atlas._app_transaction():
         atlas.rename_region('a', 'renamed')
     assert atlas.region('renamed')
 
@@ -203,14 +203,14 @@ def test_reset_inside_transaction_can_roll_back():
     atlas = two_region_atlas()
     atlas.add_region('new', PATTERN)
     atlas.replace({'a': pattern(2)})
-    expected = packed_bytes(atlas.pack())
+    expected = packed_bytes(atlas._app_pack())
     count = live(atlas)
     with pytest.raises(RuntimeError, match='rollback'):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.reset()
             raise RuntimeError('rollback')
     assert live(atlas) == count
-    assert packed_bytes(atlas.pack()) == expected
+    assert packed_bytes(atlas._app_pack()) == expected
     assert atlas.build().extract('new').tobytes() == PATTERN.tobytes()
 
 
@@ -223,7 +223,7 @@ def test_pack_validates_settings_like_build(edited):
         with pytest.raises(Exception) as expected:
             atlas.build(options=PackOptions(packer=packer))
         with pytest.raises(type(expected.value)) as actual:
-            atlas.pack(options=PackOptions(packer=packer))
+            atlas._app_pack(options=PackOptions(packer=packer))
         assert str(actual.value) == str(expected.value)
 
 
@@ -237,7 +237,7 @@ def test_build_shares_cache_without_changing_output(packer, monkeypatch):
     text = TEXT + '\np2.png\nsize: 4,4\nc\n bounds: 0,0,4,4\n'
     atlas = SpineAtlas.load(text, {'p1.png': two_region_atlas().pages['p1.png'],
                                  'p2.png': pattern(3)}, skeleton=b'x')
-    pristine = atlas.pack()[1]['p2.png']
+    pristine = atlas._app_pack()[1]['p2.png']
     atlas.replace({'a': PATTERN})
     resolved, _ = resolve_packer(PackOptions(packer=packer), mesh_ready=True)
     expected = packed_bytes(atlas._pack(resolved))
@@ -245,19 +245,19 @@ def test_build_shares_cache_without_changing_output(packer, monkeypatch):
     assert packed_bytes((built.atlas_text, built.pages)) == expected
     assert built._session._raster.view(built._session._page_images['p2.png']) is not pristine
     assert atlas._build_cache[-1][2]['p2.png'] is pristine
-    assert atlas.pack(options=PackOptions(packer=packer))[1] is atlas._build_cache[-1][2]
+    assert atlas._app_pack(options=PackOptions(packer=packer))[1] is atlas._build_cache[-1][2]
 
 
 def test_rollback_after_a_successful_pack_inside_the_block():
     atlas = two_region_atlas()
     atlas.replace({'a': PATTERN})
-    first = packed_bytes(atlas.pack())
+    first = packed_bytes(atlas._app_pack())
     with pytest.raises(RuntimeError, match='late'):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.replace({'b': pattern(2)})
-            assert packed_bytes(atlas.pack()) != first
+            assert packed_bytes(atlas._app_pack()) != first
             raise RuntimeError('late failure after pack')
-    assert packed_bytes(atlas.pack()) == first
+    assert packed_bytes(atlas._app_pack()) == first
 
 
 def test_generation_after_rollback_of_a_recorded_edit():
@@ -265,7 +265,7 @@ def test_generation_after_rollback_of_a_recorded_edit():
     atlas.replace({'a': PATTERN})
     gen = atlas._session.snapshot().generation
     with pytest.raises(RuntimeError):
-        with atlas.transaction():
+        with atlas._app_transaction():
             atlas.replace({'b': pattern(2)})
             assert atlas._session.snapshot().generation == gen + 1
             raise RuntimeError('x')

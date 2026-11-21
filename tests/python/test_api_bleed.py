@@ -67,26 +67,26 @@ def test_bleed_skips_pma_pages():
 def test_default_bleed_follows_composite_splitting(packer, split, expected):
     a = atlas()
     keeping = PackOptions(packer=packer, share_composite_image=not split)
-    auto = a.pack(options=keeping)
-    explicit = a.pack(options=dataclasses.replace(keeping, bleed=expected))
+    auto = a._app_pack(options=keeping)
+    explicit = a._app_pack(options=dataclasses.replace(keeping, bleed=expected))
     assert np.asarray(auto[1]["p.png"]).tobytes() == np.asarray(explicit[1]["p.png"]).tobytes()
-    other = a.pack(options=dataclasses.replace(keeping, bleed=not expected))
+    other = a._app_pack(options=dataclasses.replace(keeping, bleed=not expected))
     assert np.asarray(other[1]["p.png"]).tobytes() != np.asarray(auto[1]["p.png"]).tobytes()
 
 
 def test_explicit_bleed_off_is_the_same_auto_entry_when_the_pack_is_shared():
     # A shared composite image does not split, so auto bleed is off there too.
     a = atlas()
-    auto = a.pack(options=PackOptions(share_composite_image=True))
-    explicit = a.pack(options=PackOptions(share_composite_image=True, bleed=False))
+    auto = a._app_pack(options=PackOptions(share_composite_image=True))
+    explicit = a._app_pack(options=PackOptions(share_composite_image=True, bleed=False))
     assert auto[1] is explicit[1]
 
 
 def test_bleed_defaults_on_with_the_default_split_and_is_cached_separately():
     a = atlas()
-    on = a.pack()
-    off = a.pack(options=PackOptions(bleed=False))
-    assert a.pack(options=PackOptions(bleed=True))[1] is on[1]
+    on = a._app_pack()
+    off = a._app_pack(options=PackOptions(bleed=False))
+    assert a._app_pack(options=PackOptions(bleed=True))[1] is on[1]
     assert np.asarray(on[1]["p.png"]).tobytes() != np.asarray(off[1]["p.png"]).tobytes()
 
 

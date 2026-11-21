@@ -47,7 +47,7 @@ jobs:
           version: "latest"
 
       - name: Install Dependencies
-        run: uv export --no-hashes --extra app --no-emit-project -o requirements.txt && pip install -r requirements.txt
+        run: uv export --no-hashes --group app --no-emit-project -o requirements.txt && pip install -r requirements.txt
 
       - name: Get version for build
         id: build_version
@@ -57,7 +57,7 @@ jobs:
             throw "Invalid test_version. Expected format: X.Y.Z (digits only)."
           }
 
-          # Priority: tag from workflow_call -> git tag -> manual test_version -> pyproject.toml
+          # Priority: tag from workflow_call -> git tag -> manual test_version -> APP_VERSION
           if ("${{ inputs.tag_name }}" -ne "") {
             $version = "${{ inputs.tag_name }}".TrimStart("v")
           } elseif ("${{ github.ref }}" -match "refs/tags/v(.+)") {
@@ -65,7 +65,7 @@ jobs:
           } elseif ("${{ env.MANUAL_TEST_VERSION }}" -ne "") {
             $version = "${{ env.MANUAL_TEST_VERSION }}"
           } else {
-            $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
+            $version = (Get-Content APP_VERSION -Raw).Trim()
           }
           if (-not $version) { $version = "0.0.0" }
           echo "version=$version" >> $env:GITHUB_OUTPUT
@@ -84,7 +84,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
-          f=spine_atlas_toolkit/app/build_info.py
+          f=atlas_toolkit_app/app/build_info.py
           grep -q '^DEV_BUILD = False[[:space:]]*$' "$f" || { echo "DEV_BUILD = False line not found in $f"; exit 1; }
           sed -i 's/^DEV_BUILD = False\([[:space:]]*\)$/DEV_BUILD = True\1/' "$f"
           grep -q '^DEV_BUILD = True[[:space:]]*$' "$f" || { echo "rewrite did not land"; exit 1; }
@@ -105,7 +105,9 @@ jobs:
             NOTICE=NOTICE
             THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md
           include-package-data: webview
-          include-package: spine_atlas_toolkit
+          include-package: |
+            spine_atlas_toolkit
+            atlas_toolkit_app
           nofollow-import-to: |
             PyQt5
             PyQt6

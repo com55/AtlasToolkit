@@ -9,15 +9,15 @@ User-facing changes are in `CHANGELOG.md`.
 - `spine_atlas_toolkit/` is the atlas engine, in Python: `api.py` (`SpineAtlas`),
   `packer.py` (`PackOptions`), `document.py`, and `domain/`, `engine/`,
   `mesh/`, `raster/`. It is also usable as a library.
-- `spine_atlas_toolkit/host/` (`AppHost`) is the app's interface to the engine: the
+- `atlas_toolkit_app/host/` (`AppHost`) is the app's interface to the engine: the
   UI calls it with JSON arguments plus binary buffers.
 - `www/` is the UI. `scripts/build_web.py` builds it into `dist/web` (the web
   app / PWA: the engine runs in Pyodide inside a Worker) or, with
   `--target desktop`, into the page the desktop app serves. `www/sw.js` is a
   template, so serve a build, never `www/` itself.
-- `spine_atlas_toolkit/app/` is the desktop shell: a pywebview window that loads the
+- `atlas_toolkit_app/app/` is the desktop shell: a pywebview window that loads the
   UI from a token-guarded local server running the same `AppHost` in CPython,
-  plus native dialogs, disk I/O and the self-updater (`spine_atlas_toolkit/update/`).
+  plus native dialogs, disk I/O and the self-updater (`atlas_toolkit_app/update/`).
 - The JS engine that shipped up to v0.4.2 is archived on `legacy/js-app`;
   nothing in this tree depends on it. Comments that say "port of X.js" name
   where a function came from.
@@ -26,9 +26,12 @@ User-facing changes are in `CHANGELOG.md`.
 
 - `main` receives releases. `legacy/js-app`, `legacy/js-project` and
   `legacy/python-engine` are archives, never pushed to.
-- Bump `version` in `pyproject.toml` and run `uv lock` in the same commit. A
-  push to `main` that changes `pyproject.toml` runs `auto_tag.yml`, which tags
-  `vX.Y.Z` and calls `build_release.yml` (Windows installer + portable zip).
+- App release: bump `APP_VERSION`. A push to `main` that changes it runs
+  `auto_tag.yml`, which tags `vX.Y.Z` and calls `build_release.yml` (Windows
+  installer + portable zip).
+- Library release: bump `__version__` in `spine_atlas_toolkit/__init__.py` and
+  run `uv lock` in the same commit. A push to `main` runs `publish_lib.yml`,
+  which tags `lib-vX.Y.Z` and publishes to PyPI. See "Packaging and versions".
 - `deploy_pages.yml` builds the web app and deploys it to GitHub Pages.
 - Both workflows can be run by hand (`workflow_dispatch`) against any branch
   for a test build; a manual `build_release.yml` run sets `DEV_BUILD`, which
@@ -175,17 +178,27 @@ each other.
   `tests/python/gen_packer_refactor_golden.py` pins the pre-refactor layouts
   at the session layer.
 
-## Packaging
+## Packaging and versions
 
-The core engine (`spine_atlas_toolkit/{document,domain,engine,mesh,raster}`) needs only
-`numpy`, `pillow` (a range, `>=10.0,<13`; the suite passes on 10.0.1 and 12.x)
-and `skel-mesh-parser`. The desktop shell (`spine_atlas_toolkit.app`,
-`spine_atlas_toolkit.update`) needs `pywebview` and `requests`, which live in the
-`app` extra: `uv sync --extra app`, and `uv export --extra app` in the release
-workflow. `spine_atlas_toolkit/app/paths.py` is desktop-only for the same reason.
-
-`skel-mesh-parser` is a `git+https://` URL dependency pinned to the tag
-`py-v0.3.0` (Python tags are `py-v*`). `micropip` cannot install a URL
-dependency inside Pyodide, so `build_web.py` builds `py3-none-any` wheels of
-the parser and of `spine_atlas_toolkit`, ships them in `dist/web/wheels/`, and the
-Worker unpacks them before starting the host.
+- **Two packages, one repo.** `spine_atlas_toolkit` is the library, published
+  to PyPI as `spine-atlas-toolkit` (the only package in its wheel and sdist).
+  `atlas_toolkit_app` holds the apps: `host/` (what the UI calls), `app/`
+  (desktop shell), `update/` (self-updater). It is never published.
+- **Two versions.** The library's is `__version__` in
+  `spine_atlas_toolkit/__init__.py` (hatch reads it for `pyproject.toml`);
+  bumping it on `main` makes `publish_lib.yml` tag `lib-v<version>` and publish
+  to PyPI (trusted publishing, environment `pypi`). The apps' is `APP_VERSION`;
+  bumping it on `main` makes `auto_tag.yml` tag `v<version>` and run
+  `build_release.yml`. The About dialog shows both.
+- **App-only methods** on `SpineAtlas` start with `_app_` (`_app_pack`,
+  `_app_transaction`, `_app_region_views`, ...): the host needs the atlas's
+  internals, but they are not public API.
+- The core engine needs only `numpy`, `pillow` (`>=10.0,<13`; the suite passes
+  on 10.0.1 and 12.x) and `skel-mesh-parser` (`>=0.3.0,<0.4` from PyPI;
+  `[tool.uv.sources]` pins development to the `py-v0.3.0` git tag). The
+  desktop shell's `pywebview` and `requests` are the `app` dependency group:
+  `uv sync --group app`, and `uv export --group app` in the release workflow.
+- The web build: `build_web.py` builds wheels of the parser and the library
+  plus a small wheel of `atlas_toolkit_app` (package + `host/`), ships them in
+  `dist/web/wheels/`, and the Worker unpacks them before starting the host.
+  The desktop build includes both packages through Nuitka.

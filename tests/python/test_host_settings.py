@@ -5,7 +5,7 @@ import pytest
 
 from spine_atlas_toolkit import api
 from spine_atlas_toolkit.api import PackOptions, SpineAtlas
-from spine_atlas_toolkit.host import AppHost
+from atlas_toolkit_app.host import AppHost
 from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes
 from .test_api_app_read import MESH
 
@@ -25,11 +25,11 @@ def mesh(monkeypatch):
 @pytest.fixture
 def calls(monkeypatch):
     recorded = []
-    original = SpineAtlas.pack
+    original = SpineAtlas._app_pack
     def record(self, **kwargs):
         recorded.append(kwargs)
         return original(self, **kwargs)
-    monkeypatch.setattr(SpineAtlas, 'pack', record)
+    monkeypatch.setattr(SpineAtlas, '_app_pack', record)
     return recorded
 
 
@@ -188,7 +188,7 @@ def test_failed_setting_restores_everything(monkeypatch):
     def fail(self, **kwargs):
         self.rename_region('renamed', 'lost')
         raise MemoryError('synthetic overflow')
-    monkeypatch.setattr(SpineAtlas, 'pack', fail)
+    monkeypatch.setattr(SpineAtlas, '_app_pack', fail)
     with pytest.raises(MemoryError):
         host.set_settings({'padding': 256})
     assert host._state() == before and host._packed is packed
@@ -207,7 +207,7 @@ def test_late_skeleton_edit_rebuilds_and_failure_restores(mesh, monkeypatch, cal
     state, packed, preview = host._state(), host._packed, host.page_preview(0)
     def fail(self, **kwargs):
         raise MemoryError('synthetic rebuild failure')
-    monkeypatch.setattr(SpineAtlas, 'pack', fail)
+    monkeypatch.setattr(SpineAtlas, '_app_pack', fail)
     with pytest.raises(MemoryError):
         host.set_skeleton('bad.skel', b'bad')
     assert host._state() == state and host._packed is packed
@@ -244,7 +244,7 @@ def test_failed_skeleton_restores_loaded_skeleton(initial, mesh, monkeypatch):
     before, packed = host._state(), host._packed
     def fail(self, **kwargs):
         raise MemoryError('synthetic rebuild failure')
-    monkeypatch.setattr(SpineAtlas, 'pack', fail)
+    monkeypatch.setattr(SpineAtlas, '_app_pack', fail)
     with pytest.raises(MemoryError):
         host.set_skeleton('new.skel', b'new')
     assert host._state() == before and host._packed is packed
@@ -472,7 +472,7 @@ def test_share_composite_image_reaches_pack(calls):
     text, pages = one_page()
     atlas = SpineAtlas.load(text, {name: decode(data) for name, data in pages.items()})
     atlas.replace_composite(['a', 'b'], decode(page_bytes(8, 6)), alpha_mode='straight')
-    expected_text, expected_pages = atlas.pack(options=PackOptions(share_composite_image=True, bleed=True))
+    expected_text, expected_pages = atlas._app_pack(options=PackOptions(share_composite_image=True, bleed=True))
     actual_text, actual_pages = host._packed
     assert actual_text == expected_text
     assert actual_pages.keys() == expected_pages.keys()

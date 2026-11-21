@@ -485,9 +485,27 @@ try {
   await idleApp.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
   await idleApp.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout: 120000, polling: 500});
   if (await idleApp.locator('#status-text').textContent() !== 'Ready') throw new Error('Idle app status is not Ready');
+  if (await idleApp.locator('#btn-install-update-file').count()) throw new Error('Desktop-only install button is in the web page');
+  await idleApp.locator('#btn-about').click();
+  await idleApp.locator('#about-overlay:not(.hidden)').waitFor();
+  const appVersion = await idleApp.locator('meta[name="app-version"]').getAttribute('content');
+  if (!(await idleApp.locator('.about-head').textContent()).includes(`v${appVersion}`)) throw new Error('About shows no app version');
+  await idleApp.waitForFunction(() => /spine-atlas-toolkit \d/.test(document.querySelector('.about-body').textContent), null, {polling: 500});
+  if (!/Pyodide \d/.test(await idleApp.locator('.about-body').textContent())) throw new Error('About shows no Pyodide runtime');
+  await idleApp.locator('.about-tab[data-tab="credits"]').click();
+  const credits = await idleApp.locator('.about-body').textContent();
+  if (!credits.includes('Pyodide') || !credits.includes('NumPy') || credits.includes('pywebview')) throw new Error('Web credits list the wrong packages: ' + credits);
+  await idleApp.locator('.about-tab[data-tab="licenses"]').click();
+  await idleApp.locator('.about-body .about-table td', {hasText: 'Pyodide'}).first().waitFor();
+  if (await idleApp.locator('.about-file-btn').count() !== 3) throw new Error('Licenses tab does not offer all three files');
+  await idleApp.locator('.about-file-btn[data-file="LICENSE"]').click();
+  await idleApp.waitForFunction(() => document.querySelector('.about-body').textContent.includes('Apache License'), null, {polling: 500});
+  if (await idleApp.locator('.about-license').evaluate(el => getComputedStyle(el).whiteSpace) !== 'pre') throw new Error('License text wraps');
+  await idleApp.locator('#about-close').click();
+  await idleApp.locator('#about-overlay.hidden').waitFor({state: 'attached'});
   await idleApp.evaluate(async () => (await window.__appModule('engine-client')).stopEngine());
   await idleApp.close();
-  console.log('PASS fresh app startup status becomes Ready without loading');
+  console.log('PASS fresh app startup status becomes Ready without loading; About shows versions, web-only credits and licenses');
 
   // A file opened while the engine is still starting waits under the busy
   // overlay; the .skel button is always shown; tooltips use the help popover.

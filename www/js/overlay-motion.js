@@ -6,7 +6,7 @@
  * watcher sees the class change and keeps the overlay drawn, unclickable,
  * while it fades out. Showing it again cancels the fade.
  */
-const SELECTOR = '#modal-overlay, #rename-modal, #add-region-modal, #packer-info-overlay, .missing-images-overlay';
+const SELECTOR = '#modal-overlay, #rename-modal, #add-region-modal, #packer-info-overlay, #about-overlay, .missing-images-overlay';
 const LEAVING = 'overlay-leaving';
 const DURATION_MS = 250;
 const timers = new WeakMap();

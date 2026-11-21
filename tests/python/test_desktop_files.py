@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from spine_atlas_toolkit.app.files import DesktopFiles, _atlas_page_filenames
+from atlas_toolkit_app.app.files import DesktopFiles, _atlas_page_filenames
 
 
 def asset_id(item):
@@ -28,7 +28,7 @@ def test_page_parser():
     "a/../../x.png", r"a\..\..\x.png", r"\x.png",
 ])
 def test_page_candidate_rejects_before_filesystem(tmp_path, monkeypatch, name):
-    from spine_atlas_toolkit.app.files import _page_candidate
+    from atlas_toolkit_app.app.files import _page_candidate
 
     calls = []
 
@@ -141,7 +141,7 @@ def test_token_and_resolved_paths(tmp_path, monkeypatch):
     def token(size):
         calls.append(size)
         return str(len(calls))
-    monkeypatch.setattr("spine_atlas_toolkit.app.files.secrets.token_urlsafe", token)
+    monkeypatch.setattr("atlas_toolkit_app.app.files.secrets.token_urlsafe", token)
     registry = DesktopFiles()
     path = tmp_path / "nested" / ".." / "file.bin"
     assert registry.register(path) == {"name": "file.bin", "url": "asset/1"}

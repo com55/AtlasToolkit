@@ -10,12 +10,12 @@ from typing import Any, Optional
 
 import webview
 
-from spine_atlas_toolkit.app.desktop import build_desktop, desktop_site
-from spine_atlas_toolkit.app import build_info
-from spine_atlas_toolkit.app.desktop_commands import DesktopCommands, window_title
-from spine_atlas_toolkit.app.paths import is_source_run
-from spine_atlas_toolkit.app.logs import start_session_log, install_excepthooks
-from spine_atlas_toolkit.update.controller import get_update_dir, read_install_result
+from atlas_toolkit_app.app.desktop import build_desktop, desktop_site
+from atlas_toolkit_app.app import build_info
+from atlas_toolkit_app.app.desktop_commands import DesktopCommands, window_title
+from atlas_toolkit_app.app.paths import is_source_run
+from atlas_toolkit_app.app.logs import start_session_log, install_excepthooks
+from atlas_toolkit_app.update.controller import get_update_dir, read_install_result
 
 log = logging.getLogger(__name__)
 

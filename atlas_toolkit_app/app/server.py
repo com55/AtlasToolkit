@@ -14,8 +14,8 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 
-from spine_atlas_toolkit.app.rpc_frame import decode_frame, encode_frame
-from spine_atlas_toolkit.host import wire
+from atlas_toolkit_app.app.rpc_frame import decode_frame, encode_frame
+from atlas_toolkit_app.host import wire
 
 
 EDIT_METHODS = frozenset({

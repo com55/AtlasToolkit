@@ -443,6 +443,7 @@ export const AtlasAPI = {
   get_settings() { return _state?.settings || null; },
   /** Settings state for a draft of requested values; stores and packs nothing. */
   preview_settings(requested) { return callHost('preview_settings', [requested]); },
+  about() { return callHost('about', []); },
   async init_settings_from_prefs() {
     const partial = {}, stored = {};
     for (const [key, pref, value] of SETTING_PREFS) {

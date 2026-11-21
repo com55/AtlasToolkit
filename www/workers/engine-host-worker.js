@@ -19,13 +19,13 @@ async function start() {
     await pyodide.loadPackage(['numpy', 'pillow']);
     self.postMessage({ type: 'status', message: 'Loading engine wheels', progress: 0.65 });
     const manifest = await (await fetchLocal('../wheels/manifest.json')).json();
-    for (const name of ['skel_mesh_parser', 'spine_atlas_toolkit']) {
+    for (const name of ['skel_mesh_parser', 'spine_atlas_toolkit', 'atlas_toolkit_app']) {
       const buffer = await (await fetchLocal(`../wheels/${manifest[name]}`)).arrayBuffer();
       pyodide.unpackArchive(buffer, 'wheel');
     }
     self.postMessage({ type: 'status', message: 'Starting application host', progress: 0.9 });
     pyodide.runPython(`
-from spine_atlas_toolkit.host import AppHost, wire
+from atlas_toolkit_app.host import AppHost, wire
 _host = AppHost()
 def _call_host(method, args_json, buffers):
     return wire.call(_host, method, args_json, buffers)

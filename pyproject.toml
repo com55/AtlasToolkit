@@ -4,40 +4,54 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spine-atlas-toolkit"
-version = "1.0.0"
-description = "Spine Atlas Toolkit - Extract, modify, and repack atlas sprites."
-readme = "README.md"
+dynamic = ["version"]
+description = "Read, extract, edit and repack Spine texture atlases (.atlas + page PNGs)."
+readme = "LIBRARY.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11"
+keywords = ["spine", "atlas", "texture-atlas", "sprites", "texture-packer"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Graphics",
+]
 dependencies = [
     "numpy>=2.4.6",
     "pillow>=10.0,<13",
-    "skel-mesh-parser @ git+https://github.com/com55/skel-mesh-parser.git@py-v0.3.0",
+    "skel-mesh-parser>=0.3.0,<0.4",
 ]
 
 [project.urls]
 Homepage = "https://github.com/com55/AtlasToolkit"
 Source = "https://github.com/com55/AtlasToolkit"
 Issues = "https://github.com/com55/AtlasToolkit/issues"
+Changelog = "https://github.com/com55/AtlasToolkit/blob/main/CHANGELOG.md"
 
-[project.optional-dependencies]
-# Desktop shell only (spine_atlas_toolkit.app / spine_atlas_toolkit.update): the core
-# engine imports none of these, so a library or Pyodide install omits them.
-app = [
-    "pywebview==6.1",
-    "requests==2.32.5",
-]
+
+[tool.hatch.version]
+path = "spine_atlas_toolkit/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["spine_atlas_toolkit"]
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[tool.hatch.build.targets.sdist]
+include = ["spine_atlas_toolkit", "LIBRARY.md", "README.md", "CHANGELOG.md"]
+
+# Development resolves the parser from its git tag; the published metadata
+# only says skel-mesh-parser>=0.3.0,<0.4 (from PyPI).
+[tool.uv.sources]
+skel-mesh-parser = { git = "https://github.com/com55/skel-mesh-parser.git", tag = "py-v0.3.0" }
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+]
+# The desktop app (atlas_toolkit_app.app / .update), not the published
+# library: `uv sync --group app`.
+app = [
+    "pywebview==6.1",
+    "requests==2.32.5",
 ]
 
 [tool.pytest.ini_options]

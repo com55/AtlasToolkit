@@ -5,7 +5,7 @@ import json
 import pytest
 
 from spine_atlas_toolkit.api import CanvasTooLarge
-from spine_atlas_toolkit.host import AppHost, wire
+from atlas_toolkit_app.host import AppHost, wire
 from .host_fixtures import one_page
 
 

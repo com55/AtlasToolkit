@@ -173,12 +173,12 @@ def test_equivalent_settings_share_the_build_cache(monkeypatch):
 def test_auto_shares_the_cache_with_the_packer_it_picks(monkeypatch):
     calls = count_packs(monkeypatch)
     atlas = golden.edited_atlas("single")  # .skel: auto is polygons
-    atlas.pack()
-    assert atlas.pack_is_cached(options=PackOptions(packer="polygons"))
+    atlas._app_pack()
+    assert atlas._app_pack_is_cached(options=PackOptions(packer="polygons"))
     assert len(calls) == 1
     plain = golden.edited_atlas("single", skeleton=False)  # no mesh: auto is rectangles
-    plain.pack()
-    assert plain.pack_is_cached(options=PackOptions(packer="rectangles"))
+    plain._app_pack()
+    assert plain._app_pack_is_cached(options=PackOptions(packer="rectangles"))
     assert len(calls) == 2
 
 
