@@ -24,6 +24,7 @@ export function initPanelResizer() {
   const advanceToolbar = document.getElementById('advance-toolbar');
   const optionsRowWrap = document.getElementById('options-row-wrap');
   const statusBar     = document.getElementById('status-bar');
+  const startCard     = document.getElementById('start-card');
   if (!splitter || !leftPanel || !rightPanel || !mainContent || !sidebarHead || !advanceToolbar || !optionsRowWrap || !statusBar) return;
 
   let dragging  = false;
@@ -44,8 +45,11 @@ export function initPanelResizer() {
   // base 42px when it wraps -- eating into the space actually left for the
   // panels. The wide left/right layout is locked to a fixed width, matching
   // the Python app -- it is not user-resizable.
+  // While the start card shows (no atlas open), the preview keeps room for
+  // all of it plus the 12px margin above and below (style.css #start-card).
+  const startCardRoom = () => (startCard && startCard.offsetParent ? startCard.scrollHeight + 24 : 0);
   const minRightHeight = () =>
-    optionsRowWrap.getBoundingClientRect().height + statusBar.getBoundingClientRect().height;
+    optionsRowWrap.getBoundingClientRect().height + statusBar.getBoundingClientRect().height + startCardRoom();
   const maxRightHeight = () => Math.max(
     minRightHeight(),
     mainContent.getBoundingClientRect().height

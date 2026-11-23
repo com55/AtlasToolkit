@@ -986,6 +986,22 @@ try {
   console.log('PASS pending Add/Modify UI, Auto/chosen page, single-page selector hidden, late skeleton, polygon locks, skeleton during Edit rebuild');
 
 
+  // Portrait phone with a preview dragged almost shut: the start card still fits.
+  const cardPage = await context.newPage();
+  await cardPage.setViewportSize({width: 400, height: 860});
+  await cardPage.addInitScript(() => { try { localStorage.setItem('atlastoolkit-py.layout.portrait.previewHeight', '60'); } catch (_) {} });
+  await cardPage.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await cardPage.locator('#start-card').waitFor({state: 'visible'});
+  const cardFit = await cardPage.evaluate(() => {
+    const card = document.getElementById('start-card').getBoundingClientRect();
+    const preview = document.getElementById('preview-container').getBoundingClientRect();
+    const el = document.getElementById('start-card');
+    return {inside: card.top >= preview.top && card.bottom <= preview.bottom, full: el.scrollHeight <= el.clientHeight + 1};
+  });
+  if (!cardFit.inside || !cardFit.full) throw new Error('start card squeezed in portrait: ' + JSON.stringify(cardFit));
+  await cardPage.close();
+  console.log('PASS portrait splitter leaves room for the whole start card');
+
   const keys = await app.evaluate(() => Object.keys(localStorage));
   if (!keys.length || keys.some(key => !key.startsWith('atlastoolkit-py.'))) {
     throw new Error('App preferences escaped the Python storage namespace');
