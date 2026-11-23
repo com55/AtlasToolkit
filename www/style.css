@@ -1893,3 +1893,74 @@ body.mode-extract #advance-toolbar {
 .about-table th, .about-table td { padding: 3px 8px; border: 1px solid #454545; text-align: left; }
 .about-table th { color: #ddd; background: #252526; }
 #about .modal-buttons { margin-top: 12px; }
+
+/* Engine start: a ring before the status text fills with the worker's progress. */
+#engine-ring {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-right: 8px;
+  transform: rotate(-90deg);
+}
+#engine-ring.hidden { display: none; }
+#engine-ring circle { fill: none; stroke-width: 2.5; }
+#engine-ring .ring-track { stroke: #4a4a4a; }
+#engine-ring .ring-fill {
+  stroke: #1a8ad4;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+/* Start card: the whole card opens the file picker until an atlas is open. */
+#start-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(400px, calc(100% - 32px));
+  max-height: calc(100% - 24px);
+  height: auto;
+  box-sizing: border-box;
+  padding: 26px 26px 22px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  font: inherit;
+  color: #eee;
+  background: #252526;
+  border: 1px dashed #5a5a5e;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+body.atlas-open #start-card { display: none; }
+#start-card:hover { border-color: #1a8ad4; transform: translate(-50%, -50%) scale(1.03); }
+#start-card:focus-visible { outline: 2px solid #1a8ad4; outline-offset: 3px; }
+.start-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #1f3a50;
+  display: grid;
+  place-items: center;
+}
+.start-card-icon svg { width: 26px; height: 26px; fill: #1a8ad4; }
+.start-card-title { font-size: 17px; font-weight: 600; }
+.start-card-action { font-size: 13px; color: #ddd; }
+.start-card-text { font-size: 12.5px; line-height: 1.5; color: #aaa; }
+.start-card-hint { font-size: 11.5px; color: #888; }
+#start-card code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: #ddd;
+  background: #333;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  #engine-ring .ring-fill, #start-card { transition: none; }
+}

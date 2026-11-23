@@ -109,6 +109,37 @@ test('bundle fetch loads atlas, page bytes and captured skeleton; missing pages 
   assert.equal(await AtlasAPI.load_atlas_bundle({...bundle,pages:{'page.png':{...file,url:'asset/absent'}}}), true);
   assert.equal(calls.filter(c => c.method === 'load').length,2);
 });
+for (const [label, skels, expected] of [
+  ['the one .skel, whatever its name', ['hero-pro.skel'], 'hero-pro.skel'],
+  ['the same-stem .skel among several', ['other.skel', 'HERO.skel'], 'hero.skel'],
+  ['no .skel when several match nothing', ['a.skel', 'b.skel'], null],
+]) test(`files picked together load ${label}`, async t => {
+  let captured;
+  fakeDesktopServer(t, {...engineHandlers, load: (...args) => {captured = args; return {mesh:{}};}}, assets);
+  await boot(t);
+  const files = [new File([assets['asset/atlas']], 'hero.atlas'), new File(['png'], 'page.png', {type: 'image/png'}),
+    ...skels.map(name => new File([name], name))];
+  assert.equal(await AtlasAPI.load_from_files(files), true);
+  assert.equal(captured[3], expected);
+  if (expected) assert.equal(new TextDecoder().decode(captured[4]), skels.find(n => n.toLowerCase() === expected) || expected);
+  else assert.equal(captured[4], null);
+});
+test('a bundle .skel with another name is loaded as given', async t => {
+  let captured;
+  fakeDesktopServer(t, {...engineHandlers, load: (...args) => {captured = args; return {mesh:{}};}}, assets);
+  await boot(t);
+  assert.equal(await AtlasAPI.load_atlas_bundle({...bundle, skel: {name: 'hero-pro.skel', url: 'asset/skel'}}), true);
+  assert.equal(captured[3], 'hero-pro.skel');
+});
+test('a lone .skel is not taken when two atlas files are picked', async t => {
+  let captured;
+  fakeDesktopServer(t, {...engineHandlers, load: (...args) => {captured = args; return {mesh:{}};}}, assets);
+  await boot(t);
+  const files = [new File([assets['asset/atlas']], 'hero.atlas'), new File([assets['asset/atlas']], 'villain.atlas'),
+    new File(['png'], 'page.png', {type: 'image/png'}), new File(['skel'], 'hero-pro.skel')];
+  assert.equal(await AtlasAPI.load_from_files(files), true);
+  assert.equal(captured[3], null);
+});
 test('choose_file cancellation, bundle and HostError use pick_atlas', async t => {
   let picked = null;
   const calls = fakeDesktopServer(t, {...engineHandlers, pick_atlas: () => {if (picked instanceof Error) throw picked; return picked;}}, assets);

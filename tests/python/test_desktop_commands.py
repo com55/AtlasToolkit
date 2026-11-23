@@ -424,8 +424,12 @@ def test_dialog_arguments(commands, tmp_path):
     atlas = tmp_path / "a.atlas"
     atlas.write_text("a.png\n")
     commands._files.atlas_bundle(atlas)
+    commands._window.results = [None]
+    assert commands.pick_atlas() is None
+    assert commands._window.calls[-1] == (commands._file_dialog.OPEN, {
+        "allow_multiple": True, "directory": str(tmp_path),
+        "file_types": ("Atlas Files (*.atlas)", "Atlas, images and skeleton (*.atlas;*.png;*.skel)", "All files (*.*)")})
     for method, args, filters in [
-        ("pick_atlas", [], ("Atlas Files (*.atlas)", "All files (*.*)")),
         ("pick_mod_image", [], ("PNG Files (*.png)", "All files (*.*)")),
         ("pick_skel", [], ("Skeleton Files (*.skel)", "All files (*.*)")),
         ("pick_page_image", ["a.png"], ("PNG images (*.png)",)),
@@ -640,3 +644,25 @@ def test_take_foreground_shares_input_only_around_the_call(owner):
         assert calls == [("attach", current, owner, True), *middle, ("attach", current, owner, False)]
     else:
         assert calls == middle
+
+
+def test_files_opened_together_bring_their_skel(commands, tmp_path):
+    atlas = tmp_path / "hero.atlas"
+    atlas.write_text("hero.png\n")
+    (tmp_path / "hero.png").write_bytes(b"png")
+    pro = tmp_path / "hero-pro.skel"
+    pro.write_bytes(b"skel")
+    picked = [tmp_path / "hero.png", pro, atlas]
+    commands._window.results = [[str(p) for p in picked]]
+    bundle = commands.pick_atlas()
+    assert (bundle["atlas"]["name"], bundle["skel"]["name"], set(bundle["pages"])) == ("hero.atlas", "hero-pro.skel", {"hero.png"})
+    commands._window.results = [[str(tmp_path / "hero.png")]]
+    with pytest.raises(ValueError):
+        commands.pick_atlas()
+    sub = commands._events.subscribe()
+    commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(p)} for p in picked]}})
+    event = sub.get(timeout=2)
+    assert (event["type"], event["bundle"]["skel"]["name"]) == ("atlas", "hero-pro.skel")
+    commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(atlas)}]}})
+    assert sub.get(timeout=2)["bundle"]["skel"] is None
+    sub.close()

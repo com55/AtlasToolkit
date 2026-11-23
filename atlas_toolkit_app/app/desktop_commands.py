@@ -14,6 +14,7 @@ import webbrowser
 from urllib.parse import urlparse
 
 from atlas_toolkit_app.app.clipboard import copy_png, copy_rgba
+from atlas_toolkit_app.app.files import given_atlas
 from atlas_toolkit_app.app import build_info
 from atlas_toolkit_app.app.logs import log_dir
 from atlas_toolkit_app.update.controller import get_update_dir
@@ -26,6 +27,10 @@ pick_page_image pick_save_folder pick_save_file existing_output_names write_file
 open_url open_update_log get_update_download_progress download_update
 restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster
 """.split())
+
+
+# The first entry is the dialog's default filter.
+ATLAS_FILE_TYPES = ("Atlas Files (*.atlas)", "Atlas, images and skeleton (*.atlas;*.png;*.skel)", "All files (*.*)")
 
 
 def window_title():
@@ -139,13 +144,22 @@ class DesktopCommands:
             title = window_title()
             self._window.set_title(f"{title} - {atlas_filename}" if atlas_filename else title)
 
-    def _dialog(self, kind, **kwargs):
+    def _dialog_paths(self, kind, **kwargs) -> list[str]:
         if self._window is None:
-            return None
+            return []
         result = self._window.create_file_dialog(kind, **kwargs)
         if not result:
-            return None
-        return str(result[0] if isinstance(result, (tuple, list)) else result)
+            return []
+        return [str(item) for item in result] if isinstance(result, (tuple, list)) else [str(result)]
+
+    def _dialog(self, kind, **kwargs):
+        paths = self._dialog_paths(kind, **kwargs)
+        return paths[0] if paths else None
+
+    def _open_together(self, paths: list[Path]):
+        """Bundle the atlas among files opened together, or None if none is."""
+        atlas = given_atlas(paths)
+        return self._files.atlas_bundle(atlas, paths) if atlas else None
 
     def _pick(self, filters, extension):
         path = self._dialog(self._file_dialog.OPEN, allow_multiple=False,
@@ -154,10 +168,15 @@ class DesktopCommands:
             return self._files.register(Path(path))
 
     def pick_atlas(self):
-        path = self._dialog(self._file_dialog.OPEN, allow_multiple=False,
-                            directory=str(self._files.atlas_dir or ""),
-                            file_types=("Atlas Files (*.atlas)", "All files (*.*)"))
-        return self._files.atlas_bundle(Path(path)) if path else None
+        paths = self._dialog_paths(self._file_dialog.OPEN, allow_multiple=True,
+                                   directory=str(self._files.atlas_dir or ""),
+                                   file_types=ATLAS_FILE_TYPES)
+        if not paths:
+            return None
+        bundle = self._open_together([Path(p) for p in paths])
+        if bundle is None:
+            raise ValueError("Select an atlas file together with its images.")
+        return bundle
 
     def pick_mod_image(self):
         return self._pick(("PNG Files (*.png)", "All files (*.*)"), ".png")
@@ -201,14 +220,18 @@ class DesktopCommands:
             files = event.get("dataTransfer", {}).get("files", [])
             if not files or not files[0].get("pywebviewFullPath"):
                 return
-            path = Path(files[0]["pywebviewFullPath"])
+            paths = [Path(f["pywebviewFullPath"]) for f in files if isinstance(f, dict) and f.get("pywebviewFullPath")]
+            path = paths[0]
             x = event.get("clientX")
             x = event.get("x") if x is None else x
             y = event.get("clientY")
             y = event.get("y") if y is None else y
             data = dict(x=x, y=y)
             try:
-                if str(path).lower().endswith(".atlas"):
+                atlas = given_atlas(paths) if len(paths) > 1 else None
+                if atlas is not None:
+                    data.update(type="atlas", bundle=self._files.atlas_bundle(atlas, paths))
+                elif str(path).lower().endswith(".atlas"):
                     data.update(type="atlas", bundle=self._files.atlas_bundle(path))
                 else:
                     data.update(type="file", file=self._files.register(path))

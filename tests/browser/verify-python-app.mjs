@@ -202,6 +202,8 @@ try {
   if (!await app.locator('.btn-open').isEnabled()) throw new Error('Open disabled before engine ready');
   if (await app.locator('#region-list').count() !== 1) throw new Error('Region list missing before engine ready');
   if (await app.locator('#status-text').textContent() !== 'Preparing AtlasToolkit engine...') throw new Error('Preparing status missing before ready');
+  if (!await app.locator('#engine-ring').isVisible()) throw new Error('Engine ring hidden while preparing');
+  if (!await app.locator('#start-card').isVisible()) throw new Error('Start card hidden before an atlas is open');
   await app.evaluate(async () => {
     const {AtlasAPI} = await window.__appModule('atlas-api');
     await AtlasAPI.set_forced_resizing(false);
@@ -231,6 +233,8 @@ try {
   await app.waitForFunction(() => document.getElementById('status-text').textContent !== 'Preparing AtlasToolkit engine...', null, {timeout: 120000, polling: 500});
   await app.evaluate(() => window.pendingStartupLoad);
   if (await app.locator('#status-text').textContent() === 'Preparing AtlasToolkit engine...') throw new Error('Preparing status remains after load');
+  if (await app.locator('#engine-ring').isVisible()) throw new Error('Engine ring still shown after start');
+  if (await app.locator('#start-card').isVisible()) throw new Error('Start card still shown with an atlas open');
   if (await app.locator('.region-item').count() !== 2) throw new Error('Region list count mismatch');
   await app.locator('.region-item').nth(0).click();
   await app.waitForFunction(() => {
@@ -485,6 +489,8 @@ try {
   await idleApp.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
   await idleApp.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout: 120000, polling: 500});
   if (await idleApp.locator('#status-text').textContent() !== 'Ready') throw new Error('Idle app status is not Ready');
+  if (await idleApp.locator('#engine-ring').isVisible()) throw new Error('Idle app still shows the engine ring');
+  if (!await idleApp.locator('#start-card').isVisible()) throw new Error('Idle app has no start card');
   if (await idleApp.locator('#btn-install-update-file').count()) throw new Error('Desktop-only install button is in the web page');
   await idleApp.locator('#btn-about').click();
   await idleApp.locator('#about-overlay:not(.hidden)').waitFor();

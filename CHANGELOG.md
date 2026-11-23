@@ -5,6 +5,21 @@ tags and the [GitHub Releases](https://github.com/com55/AtlasToolkit/releases),
 which carry the full notes and screenshots. The `spine-atlas-toolkit` library
 has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
 
+## [Unreleased]
+
+### Added
+- Before an atlas is open, a card in the preview area says which files to
+  open together; click it to open them.
+- A ring before "Preparing AtlasToolkit engine..." fills as the engine loads.
+
+### Changed
+- The .skel opened together with an atlas is used even when its name differs
+  from the atlas's (`hero.atlas` with `hero-pro.skel`), as long as one atlas
+  and one .skel are given. With several, the one named like the atlas wins.
+- Desktop: Open can select the atlas, its images and its .skel together
+  (default filter `*.atlas`; also `*.atlas;*.png;*.skel` and All files), and a
+  drop of several files opens the atlas among them with its .skel.
+
 ## [1.0.1] - 2026-11-23 - app
 
 App only; the library is unchanged.

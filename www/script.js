@@ -144,12 +144,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   const statusText = document.getElementById('status-text');
   const preparingText = 'Preparing AtlasToolkit engine...';
   statusText.textContent = preparingText;
-  startEngine().then(async () => {
+  const engineRing = document.getElementById('engine-ring');
+  const setEngineProgress = (_message, progress) => {
+    const fill = engineRing.querySelector('.ring-fill');
+    if (typeof progress === 'number') fill.style.strokeDashoffset = String(100 - 100 * Math.min(1, Math.max(0, progress)));
+  };
+  const hideEngineRing = () => engineRing.classList.add('hidden');
+  document.getElementById('start-card').addEventListener('mousedown', event => event.stopPropagation());
+  startEngine(setEngineProgress).then(async () => {
     logStage('engine ready');
     await AtlasAPI.init_settings_from_prefs();
     logStage('settings applied/Ready');
+    hideEngineRing();
     if (statusText.textContent === preparingText) statusText.textContent = 'Ready';
   }).catch(error => {
+    hideEngineRing();
     setEngineStartupError(error);
     if (statusText.textContent === preparingText) statusText.textContent = 'AtlasToolkit failed to start';
   });

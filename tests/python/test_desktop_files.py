@@ -292,3 +292,27 @@ def test_grants_expire_on_issue_and_successful_write(tmp_path):
     files.write_files(second, [{"name": "out.png", "data": b"new"}])
     with pytest.raises(PermissionError):
         files.write_files(second, [{"name": "out.png", "data": b"again"}])
+
+
+@pytest.mark.parametrize("given,expected", [
+    (["hero-pro.skel"], "hero-pro.skel"),
+    (["other.skel", "HERO.skel"], "HERO.skel"),
+    (["a.skel", "b.skel"], "hero.skel"),
+    ([], "hero.skel"),
+])
+def test_bundle_prefers_a_skel_opened_together(tmp_path, given, expected):
+    atlas = tmp_path / "hero.atlas"
+    atlas.write_text("hero.png\n", encoding="utf-8")
+    for name in {"hero.skel", *given}:
+        (tmp_path / name).write_bytes(b"skel")
+    bundle = DesktopFiles().atlas_bundle(atlas, [atlas, *(tmp_path / n for n in given)])
+    assert bundle["skel"]["name"] == expected
+
+
+def test_bundle_ignores_a_lone_skel_when_two_atlases_are_given(tmp_path):
+    atlas = tmp_path / "hero.atlas"
+    atlas.write_text("", encoding="utf-8")
+    other = tmp_path / "villain.atlas"
+    skel = tmp_path / "hero-pro.skel"
+    skel.write_bytes(b"skel")
+    assert DesktopFiles().atlas_bundle(atlas, [atlas, other, skel])["skel"] is None

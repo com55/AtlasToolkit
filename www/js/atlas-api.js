@@ -340,6 +340,8 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
     _currentSkel = skel;
     _sourceFiles = { atlas: atlasFile, pages: finalMap, skel: _currentSkel };
     _currentAtlasFilename = atlasFile.name;
+    // Hides the start card (style.css) once any open path loads an atlas.
+    globalThis.document?.body?.classList?.add('atlas-open');
     _currentAtlasDirectory = sourceDir;
     _loadEpoch++;
     _previewCache.invalidateAll();
@@ -352,9 +354,10 @@ async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFil
   }
 }
 
-/** Hold the sibling `.skel` (same stem as the atlas) so Save As can copy it.
- *  Desktop: load from the atlas folder (Python `Path.with_suffix(".skel")`).
- *  Browser: only if the user included the .skel in the picked/dropped files. */
+/** Hold the `.skel` given with the atlas so Save As can copy it.
+ *  Desktop: the bundle brings the one in the atlas folder (Python `Path.with_suffix(".skel")`).
+ *  Browser: one of the picked/dropped files: the one with the atlas's stem, else
+ *  the only `.skel` when the files hold one atlas and one `.skel`, whatever its name. */
 async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
 
   const skelName = siblingSkelFilename(atlasFile?.name);
@@ -363,6 +366,13 @@ async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
   const fromList = pickSiblingSkelFile(atlasFile.name, extraFiles);
   if (fromList) {
     return { name: skelName, blob: fromList };
+  }
+
+  const files = extraFiles || [];
+  const skels = files.filter(file => isSkelFilename(file?.name));
+  const atlases = files.filter(file => file && !_isImageFile(file) && !isSkelFilename(file.name));
+  if (skels.length === 1 && atlases.length === 1) {
+    return { name: skels[0].name, blob: skels[0] };
   }
 
   return null;
@@ -562,7 +572,8 @@ export const AtlasAPI = {
       try { skelFile = await fileFromUrl(bundle.skel, 'application/octet-stream'); }
       catch (e) { console.warn('Failed to load skeleton file; loading atlas without it.', e); }
     }
-    return _loadAtlasFiles(atlasFile, pages, bundle.dir, skelFile ? [skelFile] : []);
+    // The host already chose the bundle's .skel, whatever its name.
+    return _loadAtlasFiles(atlasFile, pages, bundle.dir, skelFile ? [atlasFile, skelFile] : []);
   },
 
   /** Load atlas from a mixed file list (used by drag-and-drop). */

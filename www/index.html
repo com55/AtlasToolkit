@@ -166,12 +166,20 @@
           </button>
         </div>
         <div id="status-bar">
+          <svg id="engine-ring" viewBox="0 0 14 14" aria-hidden="true"><circle class="ring-track" cx="7" cy="7" r="5"/><circle class="ring-fill" cx="7" cy="7" r="5" pathLength="100"/></svg>
           <span id="status-text">Preparing AtlasToolkit engine...</span>
           <button id="btn-about" type="button" aria-label="About AtlasToolkit" data-help="About AtlasToolkit">i</button>
         </div>
         <div id="preview-container">
           <img id="preview-img" src="" alt="Preview" />
           <canvas id="region-overlay"></canvas>
+          <button type="button" id="start-card" onclick="openFile()">
+            <span class="start-card-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" aria-hidden="true"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H447l-80-80H160v480l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Zm84-80h516l72-240H316l-72 240Zm0 0 72-240-72 240Zm-84-400v-80 80Z"/></svg></span>
+            <span class="start-card-title">Open a Spine atlas</span>
+            <span class="start-card-action">Click here or drop files to open.</span>
+            <span class="start-card-text">Select the <code>.atlas</code>, its <code>.png</code> page images and the <code>.skel</code> together, in one go.</span>
+            <span class="start-card-hint">The <code>.skel</code> adds Mesh Cropping and mesh-aware packing.</span>
+          </button>
           <div id="preview-busy" class="hidden" aria-live="polite" aria-busy="true">
             <div id="preview-busy-spinner" aria-hidden="true"></div>
             <p id="preview-busy-label">Processing...</p>

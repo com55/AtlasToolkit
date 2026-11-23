@@ -36,6 +36,25 @@ def _page_candidate(atlas_dir: Path, name: str) -> Path | None:
     return candidate
 
 
+def given_atlas(paths: list[Path]) -> Path | None:
+    """The atlas among files opened together: the first that is neither a PNG
+    nor a .skel, preferring a .atlas name (the web app's order)."""
+    candidates = [p for p in paths if p.suffix.lower() not in (".png", ".skel")]
+    return next((p for p in candidates if p.suffix.lower() == ".atlas"), None) or next(iter(candidates), None)
+
+
+def _given_skel(atlas: Path, given: list[Path]) -> Path | None:
+    """The .skel opened together with the atlas: the one with its stem, else
+    the only one when the files hold one atlas and one .skel (as the web app)."""
+    skels = [p for p in given if p.suffix.lower() == ".skel"]
+    want = atlas.with_suffix(".skel").name.lower()
+    same = next((p for p in skels if p.name.lower() == want), None)
+    if same is not None:
+        return same
+    atlases = [p for p in given if p.suffix.lower() not in (".png", ".skel")]
+    return skels[0] if len(skels) == 1 and len(atlases) == 1 else None
+
+
 class DesktopFiles:
     """Keep filesystem paths behind opaque asset and grant identifiers."""
 
@@ -64,7 +83,10 @@ class DesktopFiles:
         with self._lock:
             return self._assets.get(id)
 
-    def atlas_bundle(self, path: Path) -> dict:
+    def atlas_bundle(self, path: Path, given: list[Path] = ()) -> dict:
+        """Register an atlas with its pages and .skel from its folder. `given`
+        are all the files opened together with it; a .skel among them wins
+        over the folder's same-name one."""
         with self._lock:
             text = path.read_text(encoding="utf-8")
             self._assets.clear()
@@ -75,7 +97,7 @@ class DesktopFiles:
                 candidate = _page_candidate(path.parent, name)
                 if candidate is not None and candidate.is_file():
                     pages[name] = self._register(candidate)
-            skel = path.with_suffix(".skel")
+            skel = _given_skel(path, list(given)) or path.with_suffix(".skel")
             return {
                 "atlas": atlas,
                 "pages": pages,
