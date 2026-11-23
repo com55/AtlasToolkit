@@ -986,21 +986,35 @@ try {
   console.log('PASS pending Add/Modify UI, Auto/chosen page, single-page selector hidden, late skeleton, polygon locks, skeleton during Edit rebuild');
 
 
-  // Portrait phone with a preview dragged almost shut: the start card still fits.
+  // Portrait phone: the split opens fitted to the start card (no remembered
+  // split), and opening an atlas leaves the splitter where it is.
   const cardPage = await context.newPage();
   await cardPage.setViewportSize({width: 400, height: 860});
   await cardPage.addInitScript(() => { try { localStorage.setItem('atlastoolkit-py.layout.portrait.previewHeight', '60'); } catch (_) {} });
-  await cardPage.goto(origin + '/index.html', {waitUntil: 'domcontentloaded'});
+  await cardPage.goto(origin + '/index.html?test-hooks', {waitUntil: 'domcontentloaded'});
   await cardPage.locator('#start-card').waitFor({state: 'visible'});
   const cardFit = await cardPage.evaluate(() => {
-    const card = document.getElementById('start-card').getBoundingClientRect();
-    const preview = document.getElementById('preview-container').getBoundingClientRect();
     const el = document.getElementById('start-card');
-    return {inside: card.top >= preview.top && card.bottom <= preview.bottom, full: el.scrollHeight <= el.clientHeight + 1};
+    const card = el.getBoundingClientRect();
+    const preview = document.getElementById('preview-container').getBoundingClientRect();
+    return {top: card.top - preview.top, bottom: preview.bottom - card.bottom, full: el.scrollHeight <= el.clientHeight + 1,
+      panel: document.getElementById('right-panel').getBoundingClientRect().height};
   });
-  if (!cardFit.inside || !cardFit.full) throw new Error('start card squeezed in portrait: ' + JSON.stringify(cardFit));
+  if (!cardFit.full || Math.abs(cardFit.top - 12) > 3 || Math.abs(cardFit.bottom - 12) > 3) throw new Error('start card not fitted in portrait: ' + JSON.stringify(cardFit));
+  await cardPage.waitForFunction(() => document.getElementById('status-text').textContent === 'Ready', null, {timeout: 120000, polling: 500});
+  await cardPage.evaluate(async () => {
+    const c = new OffscreenCanvas(12, 12); const ctx = c.getContext('2d');
+    ctx.fillStyle = '#d02030'; ctx.fillRect(0, 0, 12, 12);
+    const png = await c.convertToBlob({type: 'image/png'});
+    const {AtlasAPI} = await window.__appModule('atlas-api');
+    if (!await AtlasAPI.load_from_files([new File(['p.png\nsize: 12,12\na\n bounds: 0,0,10,2\n'], 'card.atlas'), new File([png], 'p.png', {type: 'image/png'})])) throw new Error('load failed');
+    (await window.__appModule('modify-mode')).updateMeshCroppingUI();
+  });
+  await cardPage.locator('#start-card').waitFor({state: 'hidden'});
+  const panelAfter = await cardPage.evaluate(() => document.getElementById('right-panel').getBoundingClientRect().height);
+  if (Math.abs(panelAfter - cardFit.panel) > 1) throw new Error(`splitter moved after opening an atlas: ${cardFit.panel} -> ${panelAfter}`);
   await cardPage.close();
-  console.log('PASS portrait splitter leaves room for the whole start card');
+  console.log('PASS portrait split opens fitted to the start card and stays put after an atlas opens');
 
   const keys = await app.evaluate(() => Object.keys(localStorage));
   if (!keys.length || keys.some(key => !key.startsWith('atlastoolkit-py.'))) {

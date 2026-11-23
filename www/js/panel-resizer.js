@@ -30,6 +30,10 @@ export function initPanelResizer() {
   let dragging  = false;
   let startPos  = 0;
   let startSize = 0;
+  // Portrait preview height for this visit only: people re-drag it while
+  // they work, so it is not remembered. null = not placed yet.
+  let portraitHeight = null;
+  try { localStorage.removeItem('atlastoolkit-py.layout.portrait.previewHeight'); } catch (_) { /* storage off */ }
 
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
@@ -66,14 +70,16 @@ export function initPanelResizer() {
       leftPanel.style.removeProperty('min-width');
       leftPanel.style.removeProperty('flex');
 
-      const stored   = Number(localStorage.getItem('atlastoolkit-py.layout.portrait.previewHeight'));
-      const fallback = Math.round(window.innerHeight * 0.44);
-      const minH     = minRightHeight();
-      const maxH     = maxRightHeight();
-      const nextH    = clamp(Number.isFinite(stored) && stored > 0 ? stored : fallback, minH, maxH);
+      // First placement: just tall enough for the start card when it shows,
+      // else 44% of the window. Later calls only re-clamp, so the splitter
+      // stays where it is when an atlas opens and the card goes away.
+      const minH  = minRightHeight();
+      const maxH  = maxRightHeight();
+      const first = startCardRoom() > 0 ? minH : Math.round(window.innerHeight * 0.44);
+      portraitHeight = clamp(portraitHeight ?? first, minH, maxH);
 
       rightPanel.style.flex   = 'none';
-      rightPanel.style.height = `${nextH}px`;
+      rightPanel.style.height = `${portraitHeight}px`;
     } else {
       splitter.setAttribute('aria-orientation', 'vertical');
       rightPanel.style.removeProperty('height');
@@ -119,10 +125,7 @@ export function initPanelResizer() {
     if (e?.pointerId !== undefined && splitter.hasPointerCapture(e.pointerId)) {
       splitter.releasePointerCapture(e.pointerId);
     }
-    localStorage.setItem(
-      'atlastoolkit-py.layout.portrait.previewHeight',
-      String(Math.round(rightPanel.getBoundingClientRect().height)),
-    );
+    portraitHeight = Math.round(rightPanel.getBoundingClientRect().height);
   };
 
   splitter.addEventListener('pointerup', stopDragging);
