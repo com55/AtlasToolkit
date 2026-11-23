@@ -270,6 +270,43 @@ try {
     methods = await copyMethods();
     assert.equal(methods[0], 'copy_raster', methods.join());
   });
+  const returnArgs = folder => ['--return', folder, '--host-name', 'Example Host',
+    path.join(fixtures, 'one', 'one.atlas'), path.join(fixtures, 'one', 'one.png')].map(arg => `--launch-arg=${arg}`);
+  const result = folder => JSON.parse(fs.readFileSync(path.join(folder, 'result.json'), 'utf8'));
+  const returnSaved = path.join(temp, 'return-saved');
+  await scenario('11 --return: host UI and Save & Return', null, async ({page,regions,edit,nextLine}) => {
+    await regions(['a','b']);
+    assert.equal((await page.locator('#host-badge').textContent()).trim(), 'From Example Host');
+    for (const hidden of ['.btn-open', '#start-card', '#btn-save-menu']) {
+      assert.equal(await page.locator(hidden).isVisible(), false, hidden + ' visible');
+    }
+    await edit();
+    assert.match(await page.locator('#btn-save-mod').textContent(), /Save & Return/);
+    await page.locator('#btn-save-mod').click();
+    await nextLine(line => line === 'destroyed', 60000);
+    assert.deepEqual(fs.readdirSync(returnSaved).sort(), ['one.atlas', 'one.png', 'result.json']);
+    assert.deepEqual(result(returnSaved), {protocol: 1, status: 'saved', files: ['one.png', 'one.atlas'], message: null});
+    assert.equal(await page.locator('[title]').count(), 0);
+  }, returnArgs(returnSaved));
+  const returnCancelled = path.join(temp, 'return-cancelled');
+  await scenario('12 --return: closing without Save is cancelled', null, async ({regions,command}) => {
+    await regions(['a','b']);
+    assert.equal(await command('close', null), 'closed');
+    assert.equal(result(returnCancelled).status, 'cancelled');
+  }, returnArgs(returnCancelled));
+  const returnPrompt = path.join(temp, 'return-prompt');
+  await scenario('13 --return: close prompt names the host', null, async ({page,regions,edit,command}) => {
+    await regions(['a','b']); await edit();
+    assert.equal(await command('close', null), 'vetoed');
+    await page.locator('#modal-overlay:not(.hidden)').waitFor();
+    assert.match(await page.locator('#modal-message').textContent(), /not been sent to Example Host/);
+    assert.equal((await page.locator('#btn-modal-cancel').textContent()).trim(), 'Keep editing');
+    assert.equal((await page.locator('#btn-modal-confirm').textContent()).trim(), 'Discard');
+    await page.locator('#btn-modal-cancel').click();
+    await page.locator('#modal-overlay.hidden').waitFor({state: 'attached'});
+    assert.equal((await page.locator('#btn-modal-confirm').textContent()).trim(), 'Confirm');
+    assert.equal(fs.existsSync(path.join(returnPrompt, 'result.json')), false);
+  }, returnArgs(returnPrompt));
 } finally {
   await browser?.close();
   fs.rmSync(temp,{recursive:true,force:true});

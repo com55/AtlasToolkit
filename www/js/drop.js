@@ -9,6 +9,7 @@ import { previewContainer, previewImg, resetPreview, clearOverlay, updatePreview
 import { showToast, showConfirm, isAddRegionDialogOpen, applyMissingImageDrop, applyAddRegionImageDrop } from './dialogs.js';
 import { isBusy, noteBusyConflict } from './busy-overlay.js';
 import { platform, isPywebviewDesktop, fileFromUrl, isSkelFilename } from './platform.js';
+import { hostContext, atlasDropRefusal } from './host-mode.js';
 
 const dropOverlay = document.getElementById('drop-overlay');
 const contextMenu = document.getElementById('context-menu');
@@ -36,6 +37,12 @@ async function processDroppedFiles(files) {
   // Dropping a new atlas (a non-image, non-skel file is present) over an
   // in-progress edit session would discard unsaved modifications — confirm
   // first. A lone .skel drop does not replace the atlas, so skip this.
+  const host = hostContext();
+  if (host && atlasCandidates.length > 0) {
+    showToast(atlasDropRefusal(host), 'info');
+    return;
+  }
+
   if (atlasCandidates.length > 0 && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
       // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
@@ -144,6 +151,8 @@ export async function handleDesktopDrop(event, actions) {
   }
   if (isBusy()) { noteBusyConflict(); return; }
   if (type === 'atlas') {
+    const host = hostContext();
+    if (host) { showToast(atlasDropRefusal(host), 'info'); return; }
     if (AtlasAPI.has_pending_modifications() && !(await actions.confirmDiscard())) return;
     return actions.openAtlasBundle(bundle, {viaDrop: true});
   }

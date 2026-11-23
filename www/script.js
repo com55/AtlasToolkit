@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { desktopCall, onDesktopEvent, installDesktopLogging, logStage } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
-import { AtlasAPI, setEngineStartupError } from './js/atlas-api.js';
+import { AtlasAPI, setEngineStartupError, setSaveSink } from './js/atlas-api.js';
+import { hostContext, initDesktopHost, discardQuestion } from './js/host-mode.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
@@ -16,7 +17,7 @@ import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, handleDesktopDrop } from './js/drop.js';
-import { fileFromUrl, isPywebviewDesktop } from './js/platform.js';
+import { fileFromUrl, isPywebviewDesktop, writeFilesToFolder } from './js/platform.js';
 import { isBusy, noteBusyConflict, isModalOverlayOpen } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import * as atlasApiModule from './js/atlas-api.js';
@@ -53,7 +54,11 @@ export async function handleConfirmClose() {
   }
   closePromptOpen = true;
   try {
-    const ok = await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?');
+    const host = hostContext();
+    const question = host && discardQuestion(host);
+    const ok = question
+      ? await showConfirm(question.message, question.title, question.labels)
+      : await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?');
     await desktopCall('close_answer', [ok]);
   } catch (e) { console.error(e); }
   finally { closePromptOpen = false; }
@@ -122,6 +127,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       info = await desktopCall('startup');
       logStage('startup returned');
       if (info.updateFailure) window.showUpdateInstallFailed(info.updateFailure);
+      if (info.job) initDesktopHost(info.job, {desktopCall, writeFilesToFolder, setSaveSink});
       if (info?.devBuild) {
         installButton.classList.remove('hidden');
         logButton.classList.remove('hidden');

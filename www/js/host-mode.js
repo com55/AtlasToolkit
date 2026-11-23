@@ -45,3 +45,50 @@ export function acceptMessage(event, origin, parentWindow) {
 /** {kind: 'web'|'desktop', hostName, saveLabel} while in host mode, else null. */
 export function hostContext() { return context; }
 export function setHostContext(value) { context = value || null; }
+
+/** Badge, Save label and the controls host mode hides (style.css, body.host-mode). */
+export function applyHostUi(ctx) {
+  document.body.classList.add('host-mode');
+  const badge = document.getElementById('host-badge');
+  if (badge) {
+    badge.querySelector('.host-badge-text').textContent = `From ${ctx.hostName}`;
+    badge.dataset.help = `Opened from ${ctx.hostName}. Save sends the edited files back.`;
+    badge.classList.remove('hidden');
+  }
+  const save = document.getElementById('btn-save-mod');
+  const label = save && [...save.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
+  if (label) label.textContent = ` ${ctx.saveLabel} `;
+}
+
+/** Host-mode copy shared by drops and the close question. */
+export function atlasDropRefusal(ctx) {
+  return `This atlas was opened from ${ctx.hostName}. Only a .skel can be dropped.`;
+}
+export function discardQuestion(ctx) {
+  return {
+    message: `These changes have not been sent to ${ctx.hostName}.`,
+    title: 'Discard changes?',
+    labels: {confirmLabel: 'Discard', cancelLabel: 'Keep editing'},
+  };
+}
+
+/** Desktop --return: Save & Return writes into the caller's folder, then the app closes. */
+export function initDesktopHost(job, {desktopCall, writeFilesToFolder, setSaveSink}) {
+  const ctx = {kind: 'desktop', hostName: cleanLabel(job?.hostName, 'another app'), saveLabel: 'Save & Return'};
+  setHostContext(ctx);
+  applyHostUi(ctx);
+  setSaveSink({
+    async deliver(outputs) {
+      try {
+        const folder = await desktopCall('return_folder');
+        // The caller owns the folder: replace its files without asking.
+        await writeFilesToFolder(folder, outputs, async () => true);
+        return {ok: true, message: 'Saved. Returning...'};
+      } catch (e) {
+        return {ok: false, message: e?.message || String(e)};
+      }
+    },
+    afterSaved: outputs => desktopCall('finish_return', [outputs.map(o => o.name)]),
+  });
+  return ctx;
+}

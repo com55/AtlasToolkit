@@ -1964,3 +1964,30 @@ body.atlas-open #start-card { display: none; }
 @media (prefers-reduced-motion: reduce) {
   #engine-ring .ring-fill, #start-card { transition: none; }
 }
+
+/* Host mode (host-mode.js): opened from another app, which supplies the atlas
+   and takes the Save. The badge takes the Open button's place. */
+body.host-mode .btn-open,
+body.host-mode #start-card,
+body.host-mode #btn-save-menu {
+  display: none;
+}
+#host-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: #1f3a50;
+  border: 1px solid #2d5b80;
+  color: #cfd6dd;
+  font-size: 12px;
+  white-space: nowrap;
+  flex: none;
+}
+#host-badge.hidden { display: none; }
+#host-badge .btn-icon { width: 14px; height: 14px; fill: #1a8ad4; flex: none; }
+#host-badge .host-badge-text { overflow: hidden; text-overflow: ellipsis; }
+body.host-mode #btn-save-mod { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
