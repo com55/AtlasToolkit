@@ -1991,3 +1991,11 @@ body.host-mode #btn-save-menu {
 #host-badge .btn-icon { width: 14px; height: 14px; fill: #1a8ad4; flex: none; }
 #host-badge .host-badge-text { overflow: hidden; text-overflow: ellipsis; }
 body.host-mode #btn-save-mod { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+
+/* The preview's own pinch and pan (preview.js touch handlers). Standalone,
+   the viewport meta's user-scalable=no keeps the page from zooming; in a
+   host's frame the host page's viewport applies, so the browser would zoom
+   the page instead and leave one-finger drags stuck in that zoom. */
+#preview-container {
+  touch-action: none;
+}

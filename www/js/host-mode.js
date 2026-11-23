@@ -134,7 +134,9 @@ export function initWebHost(origin, deps) {
       post({type: 'open-failed', message: 'Cancelled'});
       return;
     }
-    await engineReady;
+    // Hosts send files right after "ready", usually while the engine is still
+    // starting: wait under the busy overlay, as a normal early open does.
+    await withBusy('Preparing AtlasToolkit engine...', () => engineReady);
     let result = false;
     try { result = await loadFiles(files); } catch (e) { console.error(e); }
     if (result === true) {

@@ -141,6 +141,9 @@ try {
       new File([new Uint8Array(skelBytes)], 'other.skel'),
     ]});
   }, skelBytes);
+  // The engine is still starting: the frame shows the busy overlay, not an idle app.
+  await waitInFrame(frame, () => !document.getElementById('busy-overlay').classList.contains('hidden')
+    && document.getElementById('busy-label').textContent === 'Preparing AtlasToolkit engine...', 30000);
   await page.waitForFunction(() => window.got('opened').length === 1 || window.got('open-failed').length > 0, null, {polling: 500, timeout: 120000});
   const opened = await page.evaluate(() => window.got('opened')[0]);
   if (!opened || opened.atlas !== 'hero.atlas') throw new Error('open failed: ' + JSON.stringify(await page.evaluate(() => window.__msgs)));
@@ -148,7 +151,9 @@ try {
   if ((await frame.locator('#host-badge').textContent()).trim() !== 'From Example Host') throw new Error('badge text');
   if (!(await frame.locator('#btn-save-mod').textContent()).includes('Apply to Example Host')) throw new Error('Save label');
   if (!await frame.locator('#chk-mesh-hull').isEnabled()) throw new Error('the .skel with another name was not used');
-  pass('1b open before engine ready loads atlas, page and differently named .skel; badge and Save label');
+  // In a frame the host page's viewport applies: the preview must keep pinch and pan for itself.
+  if (await frame.locator('#preview-container').evaluate(el => getComputedStyle(el).touchAction) !== 'none') throw new Error('preview touch-action is not none');
+  pass('1b open before engine ready waits under the busy overlay, loads atlas, page and differently named .skel; badge and Save label');
 
   // Edit, then Save: the host refuses once, then accepts.
   await frame.locator('#mode-modify').click();
