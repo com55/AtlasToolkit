@@ -3,7 +3,7 @@
 import { desktopCall, onDesktopEvent, installDesktopLogging, logStage } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
 import { AtlasAPI, setEngineStartupError, setSaveSink } from './js/atlas-api.js';
-import { hostContext, initDesktopHost, discardQuestion } from './js/host-mode.js';
+import { hostContext, initDesktopHost, initWebHost, webHostOrigin, discardQuestion } from './js/host-mode.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
 import { initPanelResizer } from './js/panel-resizer.js';
@@ -17,8 +17,8 @@ import { initOptionsRowCollapse } from './js/options-row.js';
 import { loadRegions, updateButtons, updateRemoveButtonState, updateRenameButtonState } from './js/region-list.js';
 import { previewImg, resetPreview, clearOverlay } from './js/preview.js';
 import { copyPreviewImage, savePreviewImageAs, handleDesktopDrop } from './js/drop.js';
-import { fileFromUrl, isPywebviewDesktop, writeFilesToFolder } from './js/platform.js';
-import { isBusy, noteBusyConflict, isModalOverlayOpen } from './js/busy-overlay.js';
+import { fileFromUrl, isPywebviewDesktop, writeFilesToFolder, setDownloadSink } from './js/platform.js';
+import { isBusy, noteBusyConflict, isModalOverlayOpen, withBusy } from './js/busy-overlay.js';
 import { formatAppTitle, versionFromDocument } from './js/app-title.js';
 import * as atlasApiModule from './js/atlas-api.js';
 import * as stateModule from './js/state.js';
@@ -157,7 +157,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   };
   const hideEngineRing = () => engineRing.classList.add('hidden');
   document.getElementById('start-card').addEventListener('mousedown', event => event.stopPropagation());
-  startEngine(setEngineProgress).then(async () => {
+  const engineReady = startEngine(setEngineProgress).then(async () => {
     logStage('engine ready');
     await AtlasAPI.init_settings_from_prefs();
     logStage('settings applied/Ready');
@@ -182,7 +182,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // show on first page load until the user toggles modes at least once
   // (found via adversarial DOM smoke test, 2026-08-31).
   setMode('extract');
-  if (!isPywebviewDesktop()) registerServiceWorker();
+  const hostOrigin = isPywebviewDesktop() ? null : webHostOrigin(location.search, window.parent !== window);
+  // Framed by a host: no service worker (its storage belongs to the host's site).
+  if (!isPywebviewDesktop() && !hostOrigin) registerServiceWorker();
 
   const copySkelPref = await AtlasAPI.get_pref('copySkel', true);
   document.getElementById('chk-copy-skel').checked = copySkelPref;
@@ -194,6 +196,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateMeshHullUI();
 
   initSaveSplitMenu();
+
+  if (hostOrigin) {
+    initWebHost(hostOrigin, {
+      appVersion, engineReady, setSaveSink, setDownloadSink, withBusy,
+      hasPending: () => AtlasAPI.has_pending_modifications(),
+      showConfirm,
+      loadFiles: async files => {
+        const ok = await AtlasAPI.load_from_files(files, {showNoAtlasToast: true});
+        if (ok === true) await _resetUiAfterFreshLoad();
+        return ok;
+      },
+    });
+  }
 
   // PWA open-with (File Handling API): the browser hands us the launched
   // file via launchQueue instead of process args.

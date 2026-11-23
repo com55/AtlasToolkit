@@ -97,6 +97,58 @@ the changes, the page is repacked. Turn it off to always repack edited pages.
 Settings also include **Mesh-Aware**, **Share Composite Image**, **Padding**,
 and **Bleed**.
 
+## Embedding
+
+Another app can open an atlas in AtlasToolkit and get the edited files back.
+The app shows "From <name>" in place of Open, and its Save sends the files to
+the caller instead of saving them.
+
+### Web: an iframe
+
+```html
+<iframe src="https://com55.github.io/AtlasToolkit/?host=https://your.site"></iframe>
+```
+
+`host` is your page's origin. The two sides talk with `postMessage`. Every
+message carries `atlasToolkitHost: 1`. Messages from any other origin or window
+are ignored, and AtlasToolkit posts only to that origin. Add your `message`
+listener before you set the iframe's `src`: `ready` is sent once.
+
+| Direction | Message | Meaning |
+| --- | --- | --- |
+| app → host | `ready {appVersion, protocol}` | Start-up finished; send `open`. |
+| host → app | `open {files, hostName?, saveLabel?}` | `files`: the atlas, its page PNGs and an optional `.skel`, as `File`s. |
+| app → host | `opened {atlas}` / `open-failed {message}` | The result of `open`. |
+| app → host | `save {id, files: [{name, blob}]}` | The user saved: the page PNGs, the atlas and the `.skel`. |
+| host → app | `progress {text}` | Optional busy text while you apply the save. |
+| host → app | `saved {id, ok, message?}` | Your answer. Only `ok: true` counts the edits as saved. |
+| host → app | `close-request` | Asks the user first when there are unsaved edits. |
+| app → host | `close {ok}` | `ok: false`: the user kept editing. |
+| app → host | `download {filename, blob}` | A file the user saved from inside the frame (Save Image, Extract). |
+
+Inside an iframe on another site, the browser keeps AtlasToolkit's storage
+separate from a normal visit, so the engine downloads once more (about 17 MB)
+and preferences start fresh.
+
+### Desktop: `--return`
+
+```
+AtlasToolkit --return <dir> [--host-name <name>] <file>...
+```
+
+`<file>...` are the atlas, its page PNGs and an optional `.skel`. **Save &
+Return** writes the outputs into `<dir>` (replacing files of the same names),
+then `result.json`, then closes the app. Closing without it writes
+`"cancelled"`. `result.json` is always written last:
+
+```json
+{"protocol": 1, "status": "saved", "files": ["hero.png", "hero.atlas"], "message": null}
+```
+
+`status` is `saved`, `cancelled` or `error`. The exit code is 0 for `saved`
+and 1 otherwise. Wait for the process to exit, then read `result.json`. In
+this mode the app does not check for updates.
+
 ## Python library
 
 The engine is available on PyPI as

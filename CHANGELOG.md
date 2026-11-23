@@ -11,6 +11,10 @@ has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
 - Before an atlas is open, a card in the preview area says which files to
   open together; click it to open them.
 - A ring before "Preparing AtlasToolkit engine..." fills as the engine loads.
+- Host mode: a web page can open an atlas in AtlasToolkit inside an iframe
+  (`?host=<origin>`) and get the edited files back over `postMessage`; a
+  desktop program can do the same with `--return <dir>`, which writes the
+  outputs and a `result.json`. See "Embedding" in the README.
 
 ### Changed
 - The .skel opened together with an atlas is used even when its name differs

@@ -92,3 +92,92 @@ export function initDesktopHost(job, {desktopCall, writeFilesToFolder, setSaveSi
   });
   return ctx;
 }
+
+/**
+ * Web host: this page is an <iframe> of the host at `origin`. Messages (all
+ * carry atlasToolkitHost: 1; see README "Embedding"):
+ *   app -> host  ready {appVersion, protocol} | opened {atlas} | open-failed {message}
+ *                save {id, files} | close {ok} | download {filename, blob}
+ *   host -> app  open {files, hostName?, saveLabel?} | progress {text} | saved {id, ok, message?} | close-request
+ * `deps` are the app pieces this needs, passed in so the module stays testable.
+ */
+export function initWebHost(origin, deps) {
+  const {appVersion, engineReady, loadFiles, hasPending, showConfirm, withBusy, setSaveSink, setDownloadSink} = deps;
+  const parent = window.parent;
+  const post = message => parent.postMessage({atlasToolkitHost: PROTOCOL, ...message}, origin);
+  const pendingSaves = new Map();
+  let saveSeq = 0;
+  let ctx = {kind: 'web', hostName: 'another app', saveLabel: 'Save'};
+  setHostContext(ctx);
+  applyHostUi(ctx);
+  setDownloadSink((filename, blob) => post({type: 'download', filename, blob}));
+  setSaveSink({
+    deliver: outputs => withBusy(`Sending to ${ctx.hostName}...`, () => new Promise(resolve => {
+      const id = ++saveSeq;
+      pendingSaves.set(id, resolve);
+      post({type: 'save', id, files: outputs.map(({name, data}) => ({
+        name, blob: data instanceof Blob ? data : new Blob([data], {type: 'text/plain'}),
+      }))});
+    })),
+  });
+
+  async function open(message) {
+    ctx = {
+      kind: 'web',
+      hostName: cleanLabel(message.hostName, 'another app'),
+      saveLabel: cleanLabel(message.saveLabel, 'Save'),
+    };
+    setHostContext(ctx);
+    applyHostUi(ctx);
+    const files = Array.isArray(message.files) ? message.files.filter(f => f instanceof Blob) : [];
+    if (hasPending() && !(await showConfirm('You have unsaved atlas modifications.\nContinue and discard them?', 'Discard modifications?'))) {
+      post({type: 'open-failed', message: 'Cancelled'});
+      return;
+    }
+    await engineReady;
+    let result = false;
+    try { result = await loadFiles(files); } catch (e) { console.error(e); }
+    if (result === true) {
+      const atlas = files.find(f => !/\.(png|skel)$/i.test(f.name || ''));
+      post({type: 'opened', atlas: atlas?.name || ''});
+    } else {
+      post({type: 'open-failed', message: result === 'cancelled' ? 'Cancelled' : 'Atlas Toolkit could not open these files.'});
+    }
+  }
+
+  async function closeRequest() {
+    let ok = true;
+    if (hasPending()) {
+      const question = discardQuestion(ctx);
+      ok = await showConfirm(question.message, question.title, question.labels);
+    }
+    post({type: 'close', ok});
+  }
+
+  window.addEventListener('message', event => {
+    const message = acceptMessage(event, origin, parent);
+    if (!message) return;
+    if (message.type === 'open') open(message).catch(console.error);
+    else if (message.type === 'progress') {
+      const label = document.getElementById('busy-label');
+      if (label && pendingSaves.size) label.textContent = cleanText(message.text);
+    } else if (message.type === 'saved') {
+      const resolve = pendingSaves.get(message.id);
+      pendingSaves.delete(message.id);
+      resolve?.({ok: message.ok === true, message: message.message == null ? '' : cleanText(message.message)});
+    } else if (message.type === 'close-request') closeRequest().catch(console.error);
+  });
+
+  // "ready" once the page is styled, so a host can show the frame without a flash.
+  const styled = Promise.all([...document.querySelectorAll('link[rel="stylesheet"]')].map(link =>
+    link.sheet ? null : new Promise(resolve => {
+      link.addEventListener('load', resolve, {once: true});
+      link.addEventListener('error', resolve, {once: true});
+    })));
+  styled.then(() => post({type: 'ready', appVersion, protocol: PROTOCOL}));
+}
+
+/** Host text shown in a status or busy label: a string, at most 200 characters. */
+function cleanText(text) {
+  return String(text ?? '').slice(0, 200);
+}
