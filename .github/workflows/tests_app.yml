@@ -1,8 +1,9 @@
-name: Tests
+name: Tests (app)
 
-# Python and JavaScript unit tests. Runs on pushes and pull requests, and is
-# called by the release workflows (auto_tag.yml, publish_lib.yml) before they
-# tag anything, so a red suite never becomes a release.
+# The app's Python tests (tests/python) and the JavaScript tests, against the
+# library in this repo. Runs on every push and pull request (the app depends
+# on the library, so a library change runs these too), and is called by
+# auto_tag.yml before it tags an app release.
 on:
   push:
     branches:
@@ -33,11 +34,11 @@ jobs:
       # node_modules gives test_build_web its real esbuild.
       - name: Install dependencies
         run: |
-          uv sync --group app
+          uv sync
           npm ci
 
       - name: Python tests
-        run: uv run pytest -q
+        run: uv run pytest -q tests/python
 
       - name: JavaScript tests
         run: npm test

@@ -184,7 +184,7 @@ def test_parser_cache_is_keyed_by_tag(tmp_path, monkeypatch):
     monkeypatch.setattr(build_web, "build_wheel", fake_build)
     monkeypatch.setattr(build_web.subprocess, "run", lambda *args, **kwargs: None)
     build_web.build_project_wheels(tmp_path)
-    assert built == [build_web.ROOT, source]
+    assert built == [build_web.LIBRARY, source]
 
 
 def test_generated_sw_inventory_and_content_identity(tmp_path):

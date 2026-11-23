@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 from spine_atlas_toolkit import PackOptions, SpineAtlas
-from tests.python import test_api_in_place as in_place
+from tests import test_api_in_place as in_place
 
 # Aliased survivors: A and B name one stored 10x8 rect with one offsets
 # canvas, so the shared 16x16 image is exactly what `place_in_place` accepts

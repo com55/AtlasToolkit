@@ -10,7 +10,7 @@ same app runs in the browser and on the desktop.
 
 - **[Web app](https://com55.github.io/AtlasToolkit/)** — use it directly, no installation required. It can be installed as a PWA for offline use.
 - **Desktop app (Windows)** — download from [Releases](https://github.com/com55/AtlasToolkit/releases/latest): an installer (`AtlasToolkit-Setup-x64.exe`, per-user, updates itself) or a portable zip.
-- **Python library** — use the engine from your own scripts: see [LIBRARY.md](LIBRARY.md).
+- **Python library** — use the engine from your own scripts: see [its README](packages/spine-atlas-toolkit/README.md).
 
 ## Features
 
@@ -28,7 +28,7 @@ Needs Python 3.11+, [uv](https://github.com/astral-sh/uv#installation) and Node.
 ```bash
 git clone https://github.com/com55/AtlasToolkit.git
 cd AtlasToolkit
-uv sync --group app
+uv sync
 npm ci
 ```
 

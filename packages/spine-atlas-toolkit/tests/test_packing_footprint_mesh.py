@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-# tests/python/test_packing_footprint_mesh.py
+# packages/spine-atlas-toolkit/tests/test_packing_footprint_mesh.py
 
 
 from spine_atlas_toolkit.domain.packing import footprint_for_canonical, solid_mask, union_masks

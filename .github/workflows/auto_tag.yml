@@ -11,16 +11,42 @@ permissions:
   contents: write
 
 jobs:
-  tests:
-    uses: ./.github/workflows/tests.yml
+  tests-app:
+    uses: ./.github/workflows/tests_app.yml
+
+  # The app ships the library from this repo, so its tests gate an app
+  # release too.
+  tests-lib:
+    uses: ./.github/workflows/tests_lib.yml
 
   create-tag:
-    needs: tests
+    needs: [tests-app, tests-lib]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # The About dialog shows the library version, so an app release must not
+      # ship library code that differs from the released library under the same
+      # version: bump __version__ (publish_lib.yml) first.
+      - name: Check the library version was bumped 🔍
+        run: |
+          LIB=packages/spine-atlas-toolkit/spine_atlas_toolkit
+          VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' "$LIB/__init__.py")
+          TAG="lib-v$VERSION"
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Library $VERSION is not released yet ($TAG missing)." >&2
+            exit 1
+          fi
+          # Compare trees, so a move of the package with no changes passes
+          # (lib-v1.0.0 has it at spine_atlas_toolkit/).
+          RELEASED=$(git rev-parse -q --verify "$TAG:$LIB" || git rev-parse "$TAG:spine_atlas_toolkit")
+          if [ "$RELEASED" != "$(git rev-parse "HEAD:$LIB")" ]; then
+            echo "The library changed since $TAG: bump __version__ and release it first." >&2
+            exit 1
+          fi
+          echo "Library code matches $TAG."
 
       - name: Get app version from APP_VERSION 📋
         id: get_version

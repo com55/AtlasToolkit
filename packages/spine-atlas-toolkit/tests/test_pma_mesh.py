@@ -8,7 +8,7 @@ from PIL import Image
 
 from spine_atlas_toolkit.api import SpineAtlas
 from spine_atlas_toolkit.packer import PackOptions
-from tests.python.pma_cases import (
+from tests.pma_cases import (
     GLOW_IN, GLOW_OUT, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow,
 )
 

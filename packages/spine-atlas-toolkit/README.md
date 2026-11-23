@@ -193,6 +193,6 @@ original_h)` as in the atlas, or `None`), plus the properties `renamed` and
 
 ## More
 
-- Changes: [CHANGELOG](https://github.com/com55/AtlasToolkit/blob/main/CHANGELOG.md)
+- Changes: [CHANGELOG](https://github.com/com55/AtlasToolkit/blob/main/packages/spine-atlas-toolkit/CHANGELOG.md)
 - Source and issues: [github.com/com55/AtlasToolkit](https://github.com/com55/AtlasToolkit)
 - License: Apache-2.0. Not affiliated with Esoteric Software (Spine).

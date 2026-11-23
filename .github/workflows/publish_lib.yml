@@ -1,7 +1,8 @@
 name: Release library
 
 # Publishes spine-atlas-toolkit to PyPI when its version changes on main.
-# The library version is __version__ in spine_atlas_toolkit/__init__.py; the
+# The library version is __version__ in
+# packages/spine-atlas-toolkit/spine_atlas_toolkit/__init__.py; the
 # apps have their own version (APP_VERSION, released by auto_tag.yml).
 # PyPI trusted publishing: the publisher on pypi.org names this file
 # (publish_lib.yml) and the "pypi" environment.
@@ -10,7 +11,7 @@ on:
     branches:
       - main
     paths:
-      - "spine_atlas_toolkit/__init__.py"
+      - "packages/spine-atlas-toolkit/spine_atlas_toolkit/__init__.py"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +19,7 @@ permissions:
 
 jobs:
   tests:
-    uses: ./.github/workflows/tests.yml
+    uses: ./.github/workflows/tests_lib.yml
 
   tag:
     needs: tests
@@ -35,7 +36,7 @@ jobs:
       - name: Tag lib-v<version> unless it exists
         id: check
         run: |
-          VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' spine_atlas_toolkit/__init__.py)
+          VERSION=$(grep -oP '(?<=^__version__ = ")[^"]+' packages/spine-atlas-toolkit/spine_atlas_toolkit/__init__.py)
           TAG="lib-v$VERSION"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists, nothing to publish."
@@ -57,8 +58,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
+      # --no-sources: build as PyPI users will, without the repo's git source
+      # for skel-mesh-parser.
       - name: Build sdist and wheel
-        run: uv build
+        run: uv build --package spine-atlas-toolkit --no-sources --out-dir dist
 
       - uses: actions/upload-artifact@v4
         with:

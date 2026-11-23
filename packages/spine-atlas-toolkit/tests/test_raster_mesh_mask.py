@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-# tests/python/test_raster_mesh_mask.py
+# packages/spine-atlas-toolkit/tests/test_raster_mesh_mask.py
 
 import pytest
 

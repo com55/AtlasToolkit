@@ -1,0 +1,41 @@
+name: Tests (library)
+
+# The library's tests, in an environment with only the library's own
+# dependencies (no app, pywebview or requests). Runs when the library changes,
+# and is called by publish_lib.yml and auto_tag.yml before they tag.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/spine-atlas-toolkit/**"
+      - "uv.lock"
+      - ".github/workflows/tests_lib.yml"
+  pull_request:
+    paths:
+      - "packages/spine-atlas-toolkit/**"
+      - "uv.lock"
+      - ".github/workflows/tests_lib.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/spine-atlas-toolkit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Tests
+        run: uv run --exact --package spine-atlas-toolkit pytest -q

@@ -7,7 +7,7 @@ from PIL import Image
 
 from spine_atlas_toolkit.api import SpineAtlas
 from spine_atlas_toolkit.packer import PackOptions
-from tests.python.pma_cases import GLOW_IN, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow
+from tests.pma_cases import GLOW_IN, PACKERS, fake_skeleton, mesh, premultiplied_pattern, with_glow
 
 TWO = (
     "pma.png\nsize: 32,8\npma: true\nG\n bounds: 0,0,16,8\nN\n bounds: 16,0,16,8\n"

@@ -2,13 +2,17 @@
 
 Technical notes for anyone working on AtlasToolkit: how the pieces fit, the
 rules that are easy to break, and decisions that look like bugs but are not.
-User-facing changes are in `CHANGELOG.md`.
+User-facing changes are in `CHANGELOG.md` (apps) and
+`packages/spine-atlas-toolkit/CHANGELOG.md` (library).
 
 ## Layout
 
-- `spine_atlas_toolkit/` is the atlas engine, in Python: `api.py` (`SpineAtlas`),
-  `packer.py` (`PackOptions`), `document.py`, and `domain/`, `engine/`,
-  `mesh/`, `raster/`. It is also usable as a library.
+- `packages/spine-atlas-toolkit/` is the atlas engine, the library
+  `spine_atlas_toolkit`: `api.py` (`SpineAtlas`), `packer.py`
+  (`PackOptions`), `document.py`, and `domain/`, `engine/`, `mesh/`,
+  `raster/`, with its own `pyproject.toml`, README (its PyPI page),
+  CHANGELOG, license files and `tests/`. Paths below that start with
+  `spine_atlas_toolkit/` are inside it.
 - `atlas_toolkit_app/host/` (`AppHost`) is the app's interface to the engine: the
   UI calls it with JSON arguments plus binary buffers.
 - `www/` is the UI. `scripts/build_web.py` builds it into `dist/web` (the web
@@ -29,8 +33,8 @@ User-facing changes are in `CHANGELOG.md`.
 - App release: bump `APP_VERSION`. A push to `main` that changes it runs
   `auto_tag.yml`, which tags `vX.Y.Z` and calls `build_release.yml` (Windows
   installer + portable zip).
-- Library release: bump `__version__` in `spine_atlas_toolkit/__init__.py` and
-  run `uv lock` in the same commit. A push to `main` runs `publish_lib.yml`,
+- Library release: bump `__version__` in `spine_atlas_toolkit/__init__.py`,
+  add its CHANGELOG entry and run `uv lock`, in the same commit. A push to `main` runs `publish_lib.yml`,
   which tags `lib-vX.Y.Z` and publishes to PyPI. See "Packaging and versions".
 - `deploy_pages.yml` builds the web app and deploys it to GitHub Pages.
 - Both workflows can be run by hand (`workflow_dispatch`) against any branch
@@ -110,7 +114,15 @@ each other.
 
 ## Tests
 
-- `uv run pytest tests/python -q` runs the Python suite.
+- `uv run pytest -q` runs every Python test: the app's (`tests/python`) and
+  the library's (`packages/spine-atlas-toolkit/tests`). The library's alone,
+  without the app's dependencies, as CI runs them: `cd
+  packages/spine-atlas-toolkit && uv run --exact --package spine-atlas-toolkit
+  pytest -q`. Library tests must not import the app
+  (`test_core_import_boundary.py`).
+- CI: `tests_app.yml` (app tests + `npm test`, every push and PR) and
+  `tests_lib.yml` (library tests, when the library changes). The release
+  workflows call them before tagging.
 - `npm test` runs the Node unit tests of the UI modules (`tests/*.test.js`).
 - `npm run test:browser` runs the browser suites (`verify-python-app.mjs`,
   `verify-desktop-app.mjs`, `verify-engine-transfer.mjs`) through
@@ -130,7 +142,7 @@ each other.
   from a saved copy (not `git checkout`, which drops uncommitted work). Vary
   both axes, use patterned images where every pixel is different, and pin
   split alpha per piece rather than only through a composite.
-- Pinned goldens (`tests/python/fixtures/packer_refactor_golden.json`,
+- Pinned goldens (`tests/fixtures/packer_refactor_golden.json` in the library,
   `pma_straight_baseline.json`, the hashes in
   `test_patch_in_place_equivalence.py`) guard layouts and pixels across
   refactors; re-pin one only for an intended output change.
@@ -146,7 +158,7 @@ each other.
 ## Python engine
 
 - **Package rule:** nothing under `spine_atlas_toolkit/domain/` imports
-  `spine_atlas_toolkit/engine/`. `tests/python/test_packing_import_boundary.py`
+  `spine_atlas_toolkit/engine/`. The library's `tests/test_packing_import_boundary.py`
   enforces it by AST, relative imports included; `domain/packing.py` gets the
   modifier helpers it needs by injection.
 - **Sessions:** `engine/session.py`'s `AtlasSession` has an immediate mode
@@ -175,29 +187,35 @@ each other.
   copy of `get_nest_options()`. The `ResolvedPack` is also the build cache
   key, so `packer="auto"` and the packer it picks are one entry, and a bleed
   left auto is resolved at this point rather than in `api.py`.
-  `tests/python/gen_packer_refactor_golden.py` pins the pre-refactor layouts
+  the library's `tests/gen_packer_refactor_golden.py` pins the pre-refactor layouts
   at the session layer.
 
 ## Packaging and versions
 
-- **Two packages, one repo.** `spine_atlas_toolkit` is the library, published
-  to PyPI as `spine-atlas-toolkit` (the only package in its wheel and sdist).
-  `atlas_toolkit_app` holds the apps: `host/` (what the UI calls), `app/`
-  (desktop shell), `update/` (self-updater). It is never published.
+- **Two projects, one repo (a uv workspace).** The root `pyproject.toml` is
+  the apps' project (`atlas-toolkit-app`, `package = false`: never built or
+  published; its `version = "0"` is a placeholder). It depends on the library
+  as the workspace member `packages/spine-atlas-toolkit`, published to PyPI as
+  `spine-atlas-toolkit`. `atlas_toolkit_app` holds the apps: `host/` (what
+  the UI calls), `app/` (desktop shell), `update/` (self-updater); it is
+  imported from the repo root (pytest's `pythonpath = ["."]`).
 - **Two versions.** The library's is `__version__` in
   `spine_atlas_toolkit/__init__.py` (hatch reads it for `pyproject.toml`);
   bumping it on `main` makes `publish_lib.yml` tag `lib-v<version>` and publish
   to PyPI (trusted publishing, environment `pypi`). The apps' is `APP_VERSION`;
   bumping it on `main` makes `auto_tag.yml` tag `v<version>` and run
-  `build_release.yml`. The About dialog shows both.
+  `build_release.yml`. The About dialog shows both, so `auto_tag.yml` refuses
+  an app release whose library code differs from the `lib-v*` tag of the
+  same version: release the library first.
 - **App-only methods** on `SpineAtlas` start with `_app_` (`_app_pack`,
   `_app_transaction`, `_app_region_views`, ...): the host needs the atlas's
   internals, but they are not public API.
 - The core engine needs only `numpy`, `pillow` (`>=10.0,<13`; the suite passes
   on 10.0.1 and 12.x) and `skel-mesh-parser` (`>=0.3.0,<0.4` from PyPI;
-  `[tool.uv.sources]` pins development to the `py-v0.3.0` git tag). The
-  desktop shell's `pywebview` and `requests` are the `app` dependency group:
-  `uv sync --group app`, and `uv export --group app` in the release workflow.
+  the library's `[tool.uv.sources]` pins development to the `py-v0.3.0` git
+  tag). The desktop shell's `pywebview` and `requests` are dependencies of the
+  app project only: `uv sync` installs everything, and the release workflow
+  installs `uv export --no-emit-project --no-editable`.
 - The web build: `build_web.py` builds wheels of the parser and the library
   plus a small wheel of `atlas_toolkit_app` (package + `host/`), ships them in
   `dist/web/wheels/`, and the Worker unpacks them before starting the host.

@@ -6,8 +6,7 @@ import pytest
 from spine_atlas_toolkit import api
 from spine_atlas_toolkit.api import PackOptions, SpineAtlas
 from atlas_toolkit_app.host import AppHost
-from .host_fixtures import all_pma, decode, mixed_pma, one_page, page_bytes
-from .test_api_app_read import MESH
+from .host_fixtures import MESH, all_pma, decode, mixed_pma, one_page, page_bytes
 
 
 def loaded(factory=one_page):

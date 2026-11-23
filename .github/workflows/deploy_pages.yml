@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "www/**"
-      - "spine_atlas_toolkit/**"
+      - "packages/spine-atlas-toolkit/**"
       - "atlas_toolkit_app/__init__.py"
       - "atlas_toolkit_app/host/**"
       - "APP_VERSION"

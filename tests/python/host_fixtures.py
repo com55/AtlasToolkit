@@ -47,3 +47,11 @@ def all_pma():
 
 def mixed_pma():
     return two_pages(True, False)
+
+
+# A quad mesh covering the middle half of a region (same as the library test
+# test_api_app_read.MESH).
+MESH = {
+    "type": "Mesh", "uvs": [0.25, 0, 0.75, 0, 0.75, 1, 0.25, 1],
+    "triangles": [0, 1, 2, 0, 2, 3], "hull_length": 4,
+}

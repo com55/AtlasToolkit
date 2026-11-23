@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-# tests/python/test_raster_crop_rotate.py
+# packages/spine-atlas-toolkit/tests/test_raster_crop_rotate.py
 from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
 
 

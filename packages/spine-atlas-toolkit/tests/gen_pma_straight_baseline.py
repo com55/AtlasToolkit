@@ -5,8 +5,8 @@
 mixed force_resize composite, and the straight piece of a mixed
 cross-page split under rect ownership. Regenerate ONLY from 54b9ace.
 
-    uv run python tests/python/gen_pma_straight_baseline.py          # write
-    uv run python tests/python/gen_pma_straight_baseline.py --check  # compare
+    uv run python packages/spine-atlas-toolkit/tests/gen_pma_straight_baseline.py          # write
+    uv run python packages/spine-atlas-toolkit/tests/gen_pma_straight_baseline.py --check  # compare
 
 Writing refuses to run unless spine_atlas_toolkit/ is identical to 54b9ace, so a
 failing baseline can never be "fixed" by regenerating it from new code.
@@ -31,7 +31,7 @@ from spine_atlas_toolkit.packer import PackOptions
 
 FIXTURE = Path(__file__).with_name("fixtures") / "pma_straight_baseline.json"
 BASELINE_COMMIT = "54b9ace"
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 QUAD = [0, 1, 2, 0, 2, 3]
 
 

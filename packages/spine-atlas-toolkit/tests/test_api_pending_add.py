@@ -7,7 +7,7 @@ import spine_atlas_toolkit.api as api
 
 from spine_atlas_toolkit.api import AtlasError, MixedAlphaGroup, SpineAtlas
 from spine_atlas_toolkit.packer import PackOptions
-from .host_fixtures import decode, one_page, two_pages, page_bytes
+from .page_fixtures import decode, one_page, two_pages, page_bytes
 
 
 def atlas_with_adds(*names, pma=False):

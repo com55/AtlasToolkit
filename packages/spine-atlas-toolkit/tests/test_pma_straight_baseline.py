@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from tests.python.gen_pma_straight_baseline import CASES, FIXTURE
+from tests.gen_pma_straight_baseline import CASES, FIXTURE
 
 WANT = json.loads(FIXTURE.read_text())
 

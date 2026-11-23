@@ -18,6 +18,7 @@ from urllib.request import urlretrieve
 from web_version import load_version, stamp_index_html
 
 ROOT = Path(__file__).resolve().parents[1]
+LIBRARY = ROOT / "packages" / "spine-atlas-toolkit"
 PYODIDE_VERSION = "314.0.7"
 PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
 PARSER_URL = "https://github.com/com55/skel-mesh-parser.git"
@@ -133,7 +134,7 @@ def build_project_wheels(cache: Path) -> dict[str, Path]:
              PARSER_URL, str(parser_source)], check=True,
         )
     return {
-        "spine_atlas_toolkit": build_wheel(ROOT, cache / "atlas-wheel"),
+        "spine_atlas_toolkit": build_wheel(LIBRARY, cache / "atlas-wheel"),
         "atlas_toolkit_app": build_app_wheel(cache / "app-wheel"),
         "skel_mesh_parser": build_wheel(parser_source, cache / "parser-wheel"),
     }

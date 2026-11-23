@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-# tests/python/test_modifier_mesh_masking.py
+# packages/spine-atlas-toolkit/tests/test_modifier_mesh_masking.py
 """Pixel-content tests for mask_raw_sprite/_mask_modded_sprites and their
 wiring into repack.
 Python-only (no JS oracle): these functions are pure composition of

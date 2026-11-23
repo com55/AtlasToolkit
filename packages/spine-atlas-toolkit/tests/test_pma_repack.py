@@ -8,7 +8,7 @@ from PIL import Image
 from spine_atlas_toolkit.document import AtlasDocument
 from spine_atlas_toolkit.engine.modifier import AtlasModifier, canvas_hash
 from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from tests.python.pma_cases import GLOW_IN, GLOW_OUT, mesh, premultiplied_pattern, with_glow
+from tests.pma_cases import GLOW_IN, GLOW_OUT, mesh, premultiplied_pattern, with_glow
 
 LEFT = mesh(0, 0, 0.5, 1)
 

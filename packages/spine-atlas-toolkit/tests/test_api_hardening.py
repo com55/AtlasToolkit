@@ -14,7 +14,7 @@ import spine_atlas_toolkit.api as api
 from spine_atlas_toolkit.api import DuplicatePage, SpineAtlas
 from spine_atlas_toolkit.packer import PackOptions
 from spine_atlas_toolkit.raster.pillow_backend import PillowRasterBackend
-from tests.python.pma_cases import mesh
+from tests.pma_cases import mesh
 
 CONFLICT = "p.png\nsize: 8,8\npma: true\nA\n bounds: 0,0,4,4\n\np.png\nsize: 8,8\nB\n bounds: 4,4,4,4\n"
 SAME = "p.png\nsize: 8,8\npma: true\nA\n bounds: 0,0,4,4\n\np.png\nsize: 8,8\npma: true\nB\n bounds: 4,4,4,4\n"

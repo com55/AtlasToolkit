@@ -1,58 +1,33 @@
-[build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
-
+# AtlasToolkit apps (web and desktop): never published, so no build system.
+# The library they run on is the workspace member packages/spine-atlas-toolkit
+# (on PyPI as spine-atlas-toolkit), with its own version and changelog. The
+# app version is APP_VERSION.
 [project]
-name = "spine-atlas-toolkit"
-dynamic = ["version"]
-description = "Read, extract, edit and repack Spine texture atlases (.atlas + page PNGs)."
-readme = "LIBRARY.md"
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+name = "atlas-toolkit-app"
+# Placeholder: uv requires one. The real app version is APP_VERSION.
+version = "0"
 requires-python = ">=3.11"
-keywords = ["spine", "atlas", "texture-atlas", "sprites", "texture-packer"]
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
-    "Topic :: Multimedia :: Graphics",
-]
 dependencies = [
-    "numpy>=2.4.6",
-    "pillow>=10.0,<13",
-    "skel-mesh-parser>=0.3.0,<0.4",
+    "spine-atlas-toolkit",
+    "pywebview==6.1",
+    "requests==2.32.5",
 ]
 
-[project.urls]
-Homepage = "https://github.com/com55/AtlasToolkit"
-Source = "https://github.com/com55/AtlasToolkit"
-Issues = "https://github.com/com55/AtlasToolkit/issues"
-Changelog = "https://github.com/com55/AtlasToolkit/blob/main/CHANGELOG.md"
+[tool.uv]
+package = false
 
+[tool.uv.workspace]
+members = ["packages/spine-atlas-toolkit"]
 
-[tool.hatch.version]
-path = "spine_atlas_toolkit/__init__.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["spine_atlas_toolkit"]
-
-[tool.hatch.build.targets.sdist]
-include = ["spine_atlas_toolkit", "LIBRARY.md", "README.md", "CHANGELOG.md"]
-
-# Development resolves the parser from its git tag; the published metadata
-# only says skel-mesh-parser>=0.3.0,<0.4 (from PyPI).
 [tool.uv.sources]
-skel-mesh-parser = { git = "https://github.com/com55/skel-mesh-parser.git", tag = "py-v0.3.0" }
+spine-atlas-toolkit = { workspace = true }
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
 ]
-# The desktop app (atlas_toolkit_app.app / .update), not the published
-# library: `uv sync --group app`.
-app = [
-    "pywebview==6.1",
-    "requests==2.32.5",
-]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/python"]
+testpaths = ["tests/python", "packages/spine-atlas-toolkit/tests"]
+# atlas_toolkit_app is not installed (package = false): import it from here.
+pythonpath = ["."]

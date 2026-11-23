@@ -6,8 +6,8 @@ Packs at the session layer -- the same setters + pack_pending the
 pre-refactor SpineAtlas._pack used -- so it runs both before and after the
 refactor; the fixture was written at the commit before the refactor.
 
-    uv run python tests/python/gen_packer_refactor_golden.py          # write
-    uv run python tests/python/gen_packer_refactor_golden.py --check  # compare
+    uv run python packages/spine-atlas-toolkit/tests/gen_packer_refactor_golden.py          # write
+    uv run python packages/spine-atlas-toolkit/tests/gen_packer_refactor_golden.py --check  # compare
 """
 from __future__ import annotations
 

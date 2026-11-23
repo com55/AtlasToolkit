@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
-"""Core modules must not depend on desktop UI or network packages."""
+"""The library must not depend on the app, desktop UI or network packages."""
 import ast
 from importlib.util import resolve_name
 from pathlib import Path
@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parents[2] / "spine_atlas_toolkit"
+PACKAGE = Path(__file__).resolve().parents[1] / "spine_atlas_toolkit"
 
 
 def _imported_modules(source, own_package):
@@ -27,16 +27,14 @@ def _imported_modules(source, own_package):
 
 
 def _forbidden(name):
-    return name.split(".")[0] in {"requests", "pywebview", "webview"}
+    return name.split(".")[0] in {"requests", "pywebview", "webview", "atlas_toolkit_app"}
 
 
-def test_core_modules_do_not_import_desktop_or_network_packages():
+def test_library_does_not_import_the_app_desktop_or_network_packages():
     offenders = {}
     inspected = []
     for path in sorted(PACKAGE.rglob("*.py")):
         relative = path.relative_to(PACKAGE)
-        if relative.parts[0] in {"app", "update"}:
-            continue
         inspected.append(relative.as_posix())
         package = ".".join(("spine_atlas_toolkit", *relative.parts[:-1]))
         bad = [name for name in _imported_modules(path.read_text(encoding="utf-8"), package) if _forbidden(name)]
@@ -61,7 +59,7 @@ def test_import_guard_resolves_every_import_form(source, package, expected):
     assert expected in _imported_modules(source, package)
 
 
-@pytest.mark.parametrize("name", ["requests", "requests.sessions", "pywebview", "webview.window"])
+@pytest.mark.parametrize("name", ["requests", "requests.sessions", "pywebview", "webview.window", "atlas_toolkit_app.host"])
 def test_import_guard_recognizes_forbidden_packages(name):
     assert _forbidden(name)
     assert not _forbidden(name + "_helpers") if "." not in name else True

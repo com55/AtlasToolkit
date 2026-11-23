@@ -3,8 +3,9 @@
 """Stamp the PWA index.html with the app version from APP_VERSION.
 
 APP_VERSION is the apps' version (exe builds copy it into VERSION); the
-library's own version lives in spine_atlas_toolkit/__init__.py. This module
-is stdlib-only so CI can run it without installing anything.
+library's own version lives in
+packages/spine-atlas-toolkit/spine_atlas_toolkit/__init__.py. This module is
+stdlib-only so CI can run it without installing anything.
 """
 from __future__ import annotations
 

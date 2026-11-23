@@ -29,8 +29,8 @@ from PIL import Image
 
 import spine_atlas_toolkit.api as api
 from spine_atlas_toolkit import PackOptions, SpineAtlas
-from tests.python import test_api_added_mesh as added_mesh
-from tests.python import test_api_patch_mode as patch_mode
+from tests import test_api_added_mesh as added_mesh
+from tests import test_api_patch_mode as patch_mode
 
 # patch_mode's test_shelf_patch_may_rotate_180 geometry, which it builds
 # inline: a 24x24 box whose lower-right triangle is free, in a 40x40 page

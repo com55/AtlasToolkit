@@ -12,7 +12,7 @@ from spine_atlas_toolkit import AlphaMode, MixedAlphaGroup
 from spine_atlas_toolkit.api import AtlasError, SpineAtlas
 from spine_atlas_toolkit.packer import PackOptions
 from spine_atlas_toolkit.raster.premultiplied import premultiply, unpremultiply
-from tests.python.pma_cases import GLOW_IN, premultiplied_pattern, with_glow
+from tests.pma_cases import GLOW_IN, premultiplied_pattern, with_glow
 
 PMA = "p.png\nsize: 16,8\npma: true\nA\n bounds: 0,0,8,8\nB\n bounds: 8,0,8,8\n"
 STRAIGHT = "s.png\nsize: 16,8\nA\n bounds: 0,0,8,8\nB\n bounds: 8,0,8,8\n"

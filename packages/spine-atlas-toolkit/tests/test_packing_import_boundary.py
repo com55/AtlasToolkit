@@ -9,7 +9,7 @@ import ast
 import pathlib
 import tempfile
 
-DOMAIN_DIR = pathlib.Path(__file__).resolve().parents[2] / "spine_atlas_toolkit" / "domain"
+DOMAIN_DIR = pathlib.Path(__file__).resolve().parents[1] / "spine_atlas_toolkit" / "domain"
 
 
 def _imported_modules(path: pathlib.Path) -> list[str]:
