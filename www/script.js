@@ -59,6 +59,15 @@ export async function handleConfirmClose() {
   finally { closePromptOpen = false; }
 }
 
+// Web: a refresh or a closed tab would drop pending edits without a word, so
+// ask the browser to confirm (it shows its own text). The desktop app asks
+// through its close prompt instead (handleConfirmClose).
+window.addEventListener('beforeunload', (event) => {
+  if (isPywebviewDesktop() || !AtlasAPI.has_pending_modifications()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
 function applyAppTitle(atlasFilename) {
   document.title = formatAppTitle(appVersion, atlasFilename);
 }
@@ -354,21 +363,29 @@ async function applyNativeModImageDrop(file) {
 
 async function extractSelected() {
   if (state.selectedIndices.size === 0) return;
-  const regions = getSelectedRegions();
-  document.getElementById('status-text').innerText = 'Extracting...';
-  const result = await AtlasAPI.extract_files(regions);
-  showToast(result, _extractToastType(result));
-  document.getElementById('status-text').innerText = 'Ready';
+  await _runExtract('Extracting...', getSelectedRegions());
 }
 
 async function extractAll() {
   if (document.getElementById('count').innerText === '0') return;
   const confirmed = await showConfirm('Are you sure you want to extract all regions?', 'Confirm Extraction');
   if (!confirmed) return;
-  document.getElementById('status-text').innerText = 'Extracting ALL...';
-  const result = await AtlasAPI.extract_files(null);
-  showToast(result, _extractToastType(result));
-  document.getElementById('status-text').innerText = 'Ready';
+  await _runExtract('Extracting ALL...', null);
+}
+
+/** Extract, report the result, and always put the status back. */
+async function _runExtract(status, regions) {
+  const statusText = document.getElementById('status-text');
+  statusText.innerText = status;
+  try {
+    const result = await AtlasAPI.extract_files(regions);
+    showToast(result, _extractToastType(result));
+  } catch (e) {
+    console.error(e);
+    await showAlert(`Could not extract: ${String(e?.message || e).split('\n')[0]}`, 'Extract failed');
+  } finally {
+    statusText.innerText = 'Ready';
+  }
 }
 
 function _extractToastType(result) {

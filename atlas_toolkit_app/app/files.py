@@ -105,20 +105,28 @@ class DesktopFiles:
 
     @staticmethod
     def _folder_target(folder: Path, name: str) -> Path:
+        """`name` inside `folder`: one file name, or '/'-separated folders
+        ending in one (head/face.png), each part a plain segment."""
         if not isinstance(name, str) or not name:
             raise ValueError("Output name must be a nonempty string")
-        if name in (".", ".."):
-            raise ValueError("Output name cannot be a dot segment")
-        if any(character in name for character in ("/", "\\", "\0")):
-            raise ValueError("Output name must be one path segment")
-        if ":" in name:
-            raise ValueError("Output name cannot contain a colon")
-        if name != name.rstrip(". "):
-            raise ValueError("Output name cannot end with a dot or space")
-        if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", name):
-            raise ValueError("Output name cannot be a Windows reserved device name")
-        candidate = folder / name
-        if candidate.resolve().parent != folder.resolve():
+        parts = name.split("/")
+        for part in parts:
+            if not part:
+                raise ValueError("Output name cannot have an empty path segment")
+            if part in (".", ".."):
+                raise ValueError("Output name cannot be a dot segment")
+            if any(character in part for character in ("\\", "\0")):
+                raise ValueError("Output name cannot contain a backslash or NUL")
+            if ":" in part:
+                raise ValueError("Output name cannot contain a colon")
+            if part != part.rstrip(". "):
+                raise ValueError("Output name cannot end with a dot or space")
+            if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", part):
+                raise ValueError("Output name cannot be a Windows reserved device name")
+        candidate = folder.joinpath(*parts)
+        root = folder.resolve()
+        resolved = candidate.resolve()
+        if resolved == root or not resolved.is_relative_to(root):
             raise ValueError("Output must stay within the granted folder")
         return candidate
 
@@ -148,6 +156,9 @@ class DesktopFiles:
                 targets = [self._folder_target(path, item["name"]) for item in files]
         # Large writes must not block asset lookups or drop registration on other threads.
         for target, item in zip(targets, files):
+            # Subfolders only: a granted folder that has gone stays an error.
+            if kind != "file" and target.parent != path and path.is_dir():
+                target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(bytes(item["data"]))
         with self._lock:
             self._grants.pop(grant, None)

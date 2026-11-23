@@ -648,34 +648,35 @@ export const AtlasAPI = {
    * the parser's atlasName field instead -- under which two regions
    * sharing a literal atlas name, e.g. 'dagger'/'dagger#2', already had
    * the same label with different keys and collided this exact way; see
-   * commit 6569241 for that incident.)
+   * commit 6569241 for that incident.) Keys can still map to one file name
+   * (head/face vs head_face, Head vs head); the host's export_paths keeps
+   * every path distinct.
    */
   async extract_files(regions) {
     if (!_state) return 'No atlas loaded.';
     const targets = regions || AtlasAPI.get_region_names();
     if (targets.length === 0) return 'No regions to extract.';
 
+    // Installed PWA / pywebview desktop, several regions: pick the folder
+    // before extracting. A browser opens a picker only shortly after a click,
+    // and extracting a large atlas can take longer than that.
+    let folder = null;
+    if (targets.length > 1 && _useFolderPicker()) {
+      folder = await platform.pickSaveFolder();
+      if (!folder) return 'Cancelled';
+    }
+
     const run = async () => {
       const results = await callHost('extract', [regions ? regions.map(r => r.key) : null, _meshMaskEnabled && _state.mesh.available, _state.settings.alpha]);
+      // filename is a relative path: a region named head/face is head/face.png.
       const extracted = results.map(({filename, png}) => ({filename, blob: new Blob([png], {type: 'image/png'})}));
       const count = extracted.length;
 
       if (extracted.length === 0) return 'No regions to extract.';
+      const baseName = path => path.split('/').pop();
 
       try {
-        // Single region, installed PWA / pywebview desktop: a native Save As
-        // dialog defaulting to "{region}.png" — matches the old Python engine's
-        // extract_files() single-file save flow (a folder picker for one file
-        // was a desktop-UX regression, found via parity audit 2026-08-23).
-        if (extracted.length === 1 && _useFolderPicker()) {
-          await _saveBlobWithDialog(extracted[0].filename, extracted[0].blob);
-          return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
-        }
-
-        // Installed PWA / pywebview desktop, multiple regions: pick a folder and write the PNGs into it.
-        if (_useFolderPicker()) {
-          const folder = await platform.pickSaveFolder();
-          if (!folder) return 'Cancelled';
+        if (folder) {
           await platform.writeFilesToFolder(
             folder,
             extracted.map(item => ({ name: item.filename, data: item.blob })),
@@ -684,13 +685,22 @@ export const AtlasAPI = {
           return `Saved ${count} image${count !== 1 ? 's' : ''} to selected folder.`;
         }
 
-        // Single image in a browser tab: a direct download beats a zip-of-one.
-        if (extracted.length === 1) {
-          await _downloadBlob(extracted[0].filename, extracted[0].blob);
+        // Single region, installed PWA / pywebview desktop: a native Save As
+        // dialog defaulting to "{region}.png" — matches the old Python engine's
+        // extract_files() single-file save flow (a folder picker for one file
+        // was a desktop-UX regression, found via parity audit 2026-08-23).
+        if (extracted.length === 1 && _useFolderPicker()) {
+          await _saveBlobWithDialog(baseName(extracted[0].filename), extracted[0].blob);
           return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
         }
 
-        // Browser tab, multiple images: bundle into a zip.
+        // Single image in a browser tab: a direct download beats a zip-of-one.
+        if (extracted.length === 1) {
+          await _downloadBlob(baseName(extracted[0].filename), extracted[0].blob);
+          return `Successfully extracted ${count} image${count !== 1 ? 's' : ''}.`;
+        }
+
+        // Browser tab, multiple images: bundle into a zip (folders included).
         const zipBlob = await createZip(
           extracted.map(item => ({ name: item.filename, data: item.blob })),
         );

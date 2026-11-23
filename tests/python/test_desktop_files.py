@@ -163,7 +163,8 @@ def test_folder_writes_and_existing_names(tmp_path):
 
 
 @pytest.mark.parametrize("name", [
-    None, 12, "", ".", "..", "a/b", "a\\b", "a\0b", "C:out.png", "z:out", "/out",
+    None, 12, "", ".", "..", "a\\b", "a\0b", "C:out.png", "z:out", "/out",
+    "a//b", "a/", "a/../b", "a/./b", "../b", "x:/b", "con/b.png", "a./b", "a /b",
     "NUL", "nul.png", "COM1", "con.atlas", "LPT9.png", "out:stream", ":stream",
     "out.png.", "out.png ",
 ])
@@ -174,6 +175,28 @@ def test_invalid_names_prevent_all_writes(tmp_path, name):
         registry.write_files(grant, [{"name": "valid.bin", "data": b"valid"}, {"name": name, "data": b"bad"}])
     assert list(tmp_path.iterdir()) == []
     assert registry.existing_output_names(grant, [name]) == []
+
+
+def test_writes_into_subfolders(tmp_path):
+    registry = DesktopFiles()
+    grant = registry.grant_folder(tmp_path)["grant"]
+    registry.write_files(grant, [{"name": "head/face.png", "data": b"f"}, {"name": "head/eye/l.png", "data": b"l"}])
+    assert (tmp_path / "head" / "face.png").read_bytes() == b"f"
+    assert (tmp_path / "head" / "eye" / "l.png").read_bytes() == b"l"
+    grant = registry.grant_folder(tmp_path)["grant"]
+    assert registry.existing_output_names(grant, ["head/face.png", "head/x.png", "head"]) == ["head/face.png", "head"]
+
+
+def test_symlinked_subfolder_cannot_escape(tmp_path):
+    folder = tmp_path / "output"
+    folder.mkdir()
+    (tmp_path / "outside").mkdir()
+    (folder / "sub").symlink_to(tmp_path / "outside")
+    registry = DesktopFiles()
+    grant = registry.grant_folder(folder)["grant"]
+    with pytest.raises(ValueError):
+        registry.write_files(grant, [{"name": "sub/x.png", "data": b"bad"}])
+    assert list((tmp_path / "outside").iterdir()) == []
 
 
 @pytest.mark.parametrize("name", ["CONSOLE.png", "nullable.png", "com10.png", "aux_region.png"])

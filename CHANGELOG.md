@@ -4,6 +4,28 @@ All notable changes to AtlasToolkit. Versions match the Git tags and the
 [GitHub Releases](https://github.com/com55/AtlasToolkit/releases), which carry
 the full notes and screenshots.
 
+## [Unreleased] - app 1.0.1
+
+App only; the library is unchanged.
+
+### Fixed
+- Extract no longer writes two regions to one file. A `/` in a region name
+  makes folders (`head/face` → `head/face.png`, as the atlas was packed from
+  subfolders), and names that still meet, ignoring case (`Head` and `head`),
+  get ` (2)`, ` (3)`, … A single region is saved as just `face.png`.
+- The web app asks before a refresh or closing the tab while there are
+  unsaved edits.
+- A failed Extract shows an error and puts the status back to Ready instead
+  of staying on "Extracting...". When several regions go to a folder, the
+  folder is picked before extracting, so a long extraction can no longer make
+  the browser refuse the picker.
+- GitHub Pages redeploys when the app's host code, `APP_VERSION` or the
+  license files change.
+
+### Changed
+- The Python and JavaScript tests run on every push and pull request, and
+  both release workflows wait for them before tagging.
+
 ## [1.0.0] - 2026-11-21 - Python engine
 
 App 1.0.0 and library `spine-atlas-toolkit` 1.0.0. From here on the two have

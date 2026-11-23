@@ -7,10 +7,12 @@ from PIL import Image
 
 from spine_atlas_toolkit.api import (
     AtlasError, InvalidRegionName, PackOptions, RegionNotFound, SpineAtlas,
-    _file_name, _from_page, _page_filenames,
+    _from_page, _page_filenames,
 )
 from spine_atlas_toolkit.alpha_mode import parse_alpha_mode
 from spine_atlas_toolkit.document import png_names_for_save
+
+from atlas_toolkit_app.host.export_paths import export_paths
 
 
 # View Mode exports (Extract, Save image) use zlib level 3: about 1.7x faster
@@ -328,10 +330,14 @@ class AppHost:
             names, mesh_crop=mesh_crop and atlas.mesh_unavailable_reason is None,
             alpha_mode=self._alpha_mode(alpha),
         )
-        return [
-            {"filename": _file_name(key), "png": _png(images[name], EXPORT_PNG_LEVEL)}
-            for key, name in zip(wanted, names)
+        kept = [
+            (key, name) for key, name in zip(wanted, names)
             if images[name].width > 0 and images[name].height > 0
+        ]
+        paths = export_paths([key for key, _ in kept])
+        return [
+            {"filename": path, "png": _png(images[name], EXPORT_PNG_LEVEL)}
+            for path, (_, name) in zip(paths, kept)
         ]
 
     def save_image(self, names, mesh_crop, force_resize, alpha) -> bytes | None:

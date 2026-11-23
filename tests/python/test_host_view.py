@@ -94,11 +94,21 @@ def test_load_reports_state():
 def test_extract_returns_png_named_by_the_key_rule():
     host, _ = loaded(lambda: one_page(first="folder/head"))
     result = host.extract(["b", "folder/head", "b"], False, "straight")
-    assert [r["filename"] for r in result] == ["b.png", "folder_head.png", "b.png"]
+    assert [r["filename"] for r in result] == ["b.png", "folder/head.png", "b (2).png"]
     assert decode(result[0]["png"]).size == (2, 3)
     assert decode(result[0]["png"]).getpixel((1, 2)) == pixel(6, 3)
     assert decode(result[1]["png"]).getpixel((2, 1)) == pixel(3, 3)
-    assert [r["filename"] for r in host.extract(None, False, "straight")] == ["folder_head.png", "b.png"]
+    assert [r["filename"] for r in host.extract(None, False, "straight")] == ["folder/head.png", "b.png"]
+
+
+def test_extract_never_gives_two_regions_one_file():
+    def page():
+        text, pages = one_page(first="head/face")
+        return text.replace("\nb\n", "\nhead_face\n"), pages
+
+    host, _ = loaded(page)
+    names = [r["filename"] for r in host.extract(None, False, "straight")]
+    assert names == ["head/face.png", "head_face.png"]
 
 
 def test_required_pages_unique_order_and_empty():

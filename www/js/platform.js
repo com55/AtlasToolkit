@@ -259,11 +259,12 @@ export async function existingOutputNames(target, names) {
     const found = [];
     for (const name of list) {
       try {
-        await target.getFileHandle(name, { create: false });
+        await _fileHandleAt(target, name, false);
         found.push(name);
       } catch (e) {
         if (e?.name === 'NotFoundError') continue;
-        // The name exists, but as a directory rather than a file.
+        // The name exists, but as a directory rather than a file (or a
+        // folder on its path is a file).
         if (e?.name === 'TypeMismatchError') {
           found.push(name);
           continue;
@@ -275,6 +276,15 @@ export async function existingOutputNames(target, names) {
   }
 
   return [];
+}
+
+/** The file handle for a '/'-separated path under a directory handle; with
+ * `create`, missing folders and the file are created. */
+async function _fileHandleAt(root, path, create) {
+  const parts = path.split('/');
+  let dir = root;
+  for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create });
+  return dir.getFileHandle(parts[parts.length - 1], { create });
 }
 
 function _saveCancelled() {
@@ -313,7 +323,7 @@ export async function writeFilesToFolder(target, files, confirm) {
         : typeof data === 'string'
           ? new Blob([data], { type: 'text/plain' })
           : new Blob([data]);
-      const fh = await target.getFileHandle(item.name, { create: true });
+      const fh = await _fileHandleAt(target, item.name, true);
       const writable = await fh.createWritable();
       await writable.write(blob);
       await writable.close();

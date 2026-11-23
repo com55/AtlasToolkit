@@ -99,3 +99,41 @@ test('writeFilesToFolder does not ask when no output name exists yet', async () 
   assert.equal(calls, 0);
   assert.deepEqual(dir.written, ['fresh.png']);
 });
+
+/** A directory tree: `files` are existing paths ('a/b.png'); writes recorded as full paths. */
+function fakeTree(files) {
+  const written = [];
+  const dirs = new Set(files.flatMap(path => path.split('/').slice(0, -1).map((_, i, parts) => parts.slice(0, i + 1).join('/'))));
+  const handle = (prefix) => ({
+    async getDirectoryHandle(name, opts = {}) {
+      const path = prefix + name;
+      if (files.includes(path)) throw missing('TypeMismatchError');
+      if (!dirs.has(path) && !opts.create) throw missing('NotFoundError');
+      dirs.add(path);
+      return handle(`${path}/`);
+    },
+    async getFileHandle(name, opts = {}) {
+      const path = prefix + name;
+      if (dirs.has(path)) throw missing('TypeMismatchError');
+      if (opts.create) {
+        written.push(path);
+        return { async createWritable() { return { async write() {}, async close() {} }; } };
+      }
+      if (files.includes(path)) return { kind: 'file' };
+      throw missing('NotFoundError');
+    },
+  });
+  return Object.assign(handle(''), { written });
+}
+
+test('existingOutputNames looks inside subfolders', async () => {
+  const dir = fakeTree(['head/face.png', 'body.png']);
+  const found = await existingOutputNames(dir, ['head/face.png', 'head/eye.png', 'arm/hand.png', 'body.png/x.png', 'head']);
+  assert.deepEqual(found, ['head/face.png', 'body.png/x.png', 'head']);
+});
+
+test('writeFilesToFolder creates subfolders for slashed names', async () => {
+  const dir = fakeTree([]);
+  await writeFilesToFolder(dir, [{ name: 'head/face.png', data: 'a' }, { name: 'head/eye/l.png', data: 'b' }], () => true);
+  assert.deepEqual(dir.written, ['head/face.png', 'head/eye/l.png']);
+});

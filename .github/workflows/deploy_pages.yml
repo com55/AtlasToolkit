@@ -7,6 +7,12 @@ on:
     paths:
       - "www/**"
       - "spine_atlas_toolkit/**"
+      - "atlas_toolkit_app/__init__.py"
+      - "atlas_toolkit_app/host/**"
+      - "APP_VERSION"
+      - "LICENSE"
+      - "NOTICE"
+      - "THIRD_PARTY_NOTICES.md"
       - "scripts/build_web.py"
       - "scripts/web_version.py"
       - "pyproject.toml"

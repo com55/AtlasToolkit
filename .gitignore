@@ -20,7 +20,7 @@ CLAUDE.md
 
 # Scratch test files (stray root-level test scripts), but not the real
 # committed test suite in /tests/
-test*
+/test*
 !/tests/
 !/tests/**
 tests/**/__pycache__/
