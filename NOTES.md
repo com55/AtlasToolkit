@@ -33,9 +33,25 @@ User-facing changes are in `CHANGELOG.md` (apps) and
 - App release: bump `APP_VERSION`. A push to `main` that changes it runs
   `auto_tag.yml`, which tags `vX.Y.Z` and calls `build_release.yml` (Windows
   installer + portable zip).
-- Library release: bump `__version__` in `spine_atlas_toolkit/__init__.py`,
-  add its CHANGELOG entry and run `uv lock`, in the same commit. A push to `main` runs `publish_lib.yml`,
-  which tags `lib-vX.Y.Z` and publishes to PyPI. See "Packaging and versions".
+- Library release: bump `__version__` in
+  `packages/spine-atlas-toolkit/spine_atlas_toolkit/__init__.py`, add its
+  CHANGELOG entry and run `uv lock`, in the same commit. A push to `main` runs
+  `publish_lib.yml`, which tags `lib-vX.Y.Z` and publishes to PyPI. See
+  "Packaging and versions".
+- **Which number to bump.** The library follows semantic versioning, by its
+  public API (what `spine_atlas_toolkit` exports and documents; `_app_*`
+  methods and `_`-names are not API): a fix is a patch (1.0.1), anything new
+  that existing code keeps working with is a minor (1.1.0), and anything that
+  can break existing code (a removed or renamed name, a changed default or
+  signature, different output for the same call) is a major (2.0.0). Other
+  projects pin `spine-atlas-toolkit` to 1.x, so a breaking change waits for
+  2.0.0. The app's number follows what users see: fixes are a patch, new
+  features a minor.
+- **Releasing both at once:** push the library bump first and wait for
+  `lib-v<version>`; then push the app bump. `auto_tag.yml` refuses an app
+  release while the library code differs from a `lib-v*` tag of the same
+  version, so both bumps in one push fail the app release (re-run it from
+  the Actions tab once the library tag exists).
 - `deploy_pages.yml` builds the web app and deploys it to GitHub Pages.
 - Both workflows can be run by hand (`workflow_dispatch`) against any branch
   for a test build; a manual `build_release.yml` run sets `DEV_BUILD`, which
