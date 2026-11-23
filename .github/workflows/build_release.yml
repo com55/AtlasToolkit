@@ -246,6 +246,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
+          name: AtlasToolkit ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
             installer/AtlasToolkit-Setup-x64.exe
