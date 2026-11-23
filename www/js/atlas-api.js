@@ -52,6 +52,7 @@ async function _extractRequiredPages(atlasText) {
 }
 
 function _isDesktopFsApiAvailable() {
+  if (platform.downloadSink()) return false;
   if (isPywebviewDesktop()) return true;
   return typeof window !== 'undefined'
     && window.isSecureContext
@@ -74,6 +75,7 @@ function _isInstalledPWA() {
  * the FS API — gets a zip download.
  */
 function _useFolderPicker() {
+  if (platform.downloadSink()) return false;
   return isPywebviewDesktop()
     || (_isInstalledPWA() && typeof window.showDirectoryPicker === 'function');
 }
@@ -210,6 +212,9 @@ async function _saveBlobWithDialog(filename, blob) {
  * @param {Blob} blob
  */
 async function _downloadBlob(filename, blob) {
+  // Host mode: the host page saves the file (a download inside a frame is unreliable).
+  const sink = platform.downloadSink();
+  if (sink) { sink(filename, blob); return; }
   // Desktop browser: prefer Save As dialog (File System Access API).
   if (_isDesktopFsApiAvailable()) {
     await _saveBlobWithDialog(filename, blob);
@@ -381,6 +386,27 @@ async function _captureSiblingSkel(atlasFile, sourceDir, extraFiles) {
 /** Save the skeleton captured when the atlas was loaded or attached. */
 async function _skelForSave() {
   return await AtlasAPI.get_pref('copySkel', true) ? _currentSkel : null;
+}
+
+let _saveSink = null;
+
+/**
+ * Host mode: Save hands the outputs to `sink.deliver(outputs)` instead of a
+ * folder or zip. `null` restores the normal Save.
+ * @param {{deliver: (outputs: {name: string, data: Blob|string}[]) => Promise<{ok: boolean, message?: string}>,
+ *          afterSaved?: (outputs: object[]) => Promise<void>} | null} sink
+ */
+export function setSaveSink(sink) { _saveSink = sink || null; }
+
+/** Deliver to a save sink; the edits count as saved only once the host accepted them. */
+export async function runSaveSink(sink, outputs, markSaved) {
+  let result;
+  try { result = await sink.deliver(outputs); }
+  catch (e) { return 'Error: ' + (e?.message || String(e)); }
+  if (!result?.ok) return 'Error: ' + (result?.message || 'The host did not accept the save.');
+  await markSaved();
+  await sink.afterSaved?.(outputs);
+  return result.message || 'Saved.';
 }
 
 export const AtlasAPI = {
@@ -793,6 +819,14 @@ export const AtlasAPI = {
       outputs.push({name: _currentAtlasFilename, data: output.text});
       const skel = await _skelForSave();
       if (skel) outputs.push({name: skel.name, data: skel.blob});
+      if (_saveSink) {
+        let pendingNote = '';
+        const message = await runSaveSink(_saveSink, outputs, async () => {
+          _state = await callHost('mark_saved', [output.revision]);
+          if (_state.hasPending) pendingNote = ' (edits made during the save were not included)';
+        });
+        return message.startsWith('Error: ') ? message : message + pendingNote;
+      }
       if (_useFolderPicker()) {
         const folder = await platform.pickSaveFolder();
         if (!folder) return 'Cancelled';

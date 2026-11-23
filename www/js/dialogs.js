@@ -7,7 +7,7 @@ import { AtlasAPI } from './atlas-api.js';
 import { isBusy, isModalOverlayOpen, queueBusyError, hideBusyStatus } from './busy-overlay.js';
 import { removeOverlay } from './overlay-motion.js';
 
-export function showConfirm(message, title = 'Confirm') {
+export function showConfirm(message, title = 'Confirm', {confirmLabel, cancelLabel} = {}) {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-overlay');
     document.getElementById('modal-title').innerText = title;
@@ -15,9 +15,14 @@ export function showConfirm(message, title = 'Confirm') {
     overlay.classList.remove('hidden');
     const btnConfirm = document.getElementById('btn-modal-confirm');
     const btnCancel  = document.getElementById('btn-modal-cancel');
+    // Labels for this dialog only; the default text comes back on close.
+    const labels = [btnConfirm.textContent, btnCancel.textContent];
+    if (confirmLabel) btnConfirm.textContent = confirmLabel;
+    if (cancelLabel) btnCancel.textContent = cancelLabel;
     if (document.activeElement) document.activeElement.blur();
     btnConfirm.focus();
     function cleanup() {
+      [btnConfirm.textContent, btnCancel.textContent] = labels;
       overlay.classList.add('hidden');
       btnConfirm.removeEventListener('click', onConfirm);
       btnCancel.removeEventListener('click', onCancel);

@@ -277,6 +277,8 @@ export async function savePreviewImageAs() {
     if (!blob) { showToast('Error: No image to save.', 'error'); return; }
 
     const filename = previewSaveDefaultName(getSelectedLabels());
+    const sink = platform.downloadSink();
+    if (sink) { sink(filename, blob); showToast('Image saved.', 'success'); return; }
 
     // platform.js branches browser (File System Access API) vs pywebview
     // (native save dialog and grant write) — see D1's revised split.

@@ -210,6 +210,12 @@ export async function pickAtlasFile() {
  * `{path, grant}` write grant). Browser: File System Access API (returns a
  * FileSystemDirectoryHandle). Returns null if unsupported or cancelled.
  */
+let _downloadSink = null;
+
+/** Host mode: files the app would download go to `fn(filename, blob)` instead. `null` restores downloads. */
+export function setDownloadSink(fn) { _downloadSink = typeof fn === 'function' ? fn : null; }
+export function downloadSink() { return _downloadSink; }
+
 export async function pickSaveFolder() {
   if (isPywebviewDesktop()) return await desktopCall('pick_save_folder') || null;
   if (typeof window.showDirectoryPicker !== 'function') return null;
@@ -437,6 +443,7 @@ export const platform = {
   pickAtlasFile,
   pickSaveFolder,
   writeFilesToFolder,
+  downloadSink,
   saveFileWithDialog,
   loadPref,
   savePref,
