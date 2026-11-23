@@ -101,7 +101,10 @@ async function scenario(label, atlas, check, extra = []) {
     page.on('response', response => {
       if (new URL(response.url()).pathname.endsWith('/api/rpc') &&
           decodeFrame(response.request().postDataBuffer()).header.method === 'startup') {
-        startupResponses.push(response.body().then(body => JSON.parse(decodeFrame(body).header.json)));
+        const parsed = response.body().then(body => JSON.parse(decodeFrame(body).header.json));
+        // A scenario may end before the body is read; only case 7 awaits these.
+        parsed.catch(() => {});
+        startupResponses.push(parsed);
       }
     });
     await page.goto(url);
