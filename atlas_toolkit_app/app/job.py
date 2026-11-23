@@ -24,6 +24,13 @@ class ReturnJob:
         self._message: str | None = None
         self._code: int | None = None
 
+    def clear_previous(self) -> None:
+        """Remove a result.json left by an earlier run, so a crash never reads as its result."""
+        try:
+            (self.dir / "result.json").unlink()
+        except OSError:  # missing, or a folder we cannot write: write_result reports that
+            pass
+
     def record_saved(self, names: list[str]) -> None:
         self._status, self._names, self._message = "saved", [str(n) for n in names], None
 
@@ -35,13 +42,14 @@ class ReturnJob:
         half of it) and return the exit code: 0 for saved, else 1."""
         if self._code is not None:
             return self._code
-        self._code = 0 if self._status == "saved" else 1
+        code = 0 if self._status == "saved" else 1
         self.dir.mkdir(parents=True, exist_ok=True)
         payload = {"protocol": PROTOCOL, "status": self._status, "files": self._names, "message": self._message}
         temporary = self.dir / "result.json.tmp"
         temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         os.replace(temporary, self.dir / "result.json")
-        return self._code
+        self._code = code
+        return code
 
 
 def parse_job_args(argv: list[str]) -> tuple[list[str], ReturnJob | None]:

@@ -54,6 +54,8 @@ class DesktopCommands:
         self._updates = updates
         self._argv = list(argv)
         self._job = job
+        if job is not None:
+            job.clear_previous()
         self._update_thread = None
         self._is_unsaved = is_unsaved
         self._file_dialog = file_dialog

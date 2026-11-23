@@ -88,3 +88,63 @@ test('the download sink is unset by default and can be set and cleared', () => {
   setDownloadSink(null);
   assert.equal(downloadSink(), null);
 });
+
+// initWebHost with a hand-built window: the host's replies drive it.
+function webHarness(t) {
+  const posted = [], listeners = [];
+  const parent = { postMessage: (data, target) => posted.push({ data, target }) };
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const el = () => ({ textContent: '', dataset: {}, classList: { add() {}, remove() {} }, childNodes: [], querySelector: () => el() });
+  const nodes = new Map();
+  globalThis.window = { parent, addEventListener: (type, fn) => type === 'message' && listeners.push(fn) };
+  globalThis.document = {
+    body: { classList: { add() {} } },
+    getElementById: id => { if (!nodes.has(id)) nodes.set(id, el()); return nodes.get(id); },
+    querySelectorAll: () => [],
+  };
+  t.after(() => { globalThis.window = saved.window; globalThis.document = saved.document; setHostContext(null); });
+  let sink = null;
+  const confirms = [];
+  return {
+    posted, nodes,
+    deps: {
+      appVersion: '1', engineReady: Promise.resolve(), loadFiles: async () => true, hasPending: () => true,
+      showConfirm: async (...args) => { confirms.push(args); return false; }, confirms,
+      withBusy: async (_label, fn) => fn(), setSaveSink: s => { sink = s; }, setDownloadSink() {},
+    },
+    sink: () => sink,
+    send: (data, source = parent, origin = 'https://h.example') =>
+      listeners.forEach(fn => fn({ origin, source, data: { atlasToolkitHost: 1, ...data } })),
+  };
+}
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('a web save resolves on the matching id, even sent back as a string', async t => {
+  const { initWebHost } = await import('../www/js/host-mode.js');
+  const h = webHarness(t);
+  initWebHost('https://h.example', h.deps);
+  h.send({ type: 'open', files: [], hostName: 'Example Host' });
+  await tick();
+  const delivered = h.sink().deliver([{ name: 'a.atlas', data: 'text' }]);
+  const save = h.posted.find(p => p.data.type === 'save').data;
+  assert.equal(h.posted.every(p => p.target === 'https://h.example'), true);
+  h.send({ type: 'saved', id: String(save.id), ok: true });
+  assert.deepEqual(await delivered, { ok: true, message: 'Sent to Example Host.' });
+});
+
+test('a web save from another window or origin is ignored; close-request cancels a pending save', async t => {
+  const { initWebHost } = await import('../www/js/host-mode.js');
+  const h = webHarness(t);
+  initWebHost('https://h.example', h.deps);
+  let done = null;
+  h.sink().deliver([{ name: 'a.atlas', data: 'text' }]).then(r => { done = r; });
+  const id = h.posted.find(p => p.data.type === 'save').data.id;
+  h.send({ type: 'saved', id, ok: true }, {});
+  h.send({ type: 'saved', id, ok: true }, undefined, 'https://other.example');
+  await tick();
+  assert.equal(done, null);
+  h.send({ type: 'close-request' });
+  await tick(); await tick();
+  assert.deepEqual(done, { ok: false, message: 'Cancelled' });
+  assert.equal(h.posted.at(-1).data.type, 'close');
+});

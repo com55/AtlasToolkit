@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 com55
 # SPDX-License-Identifier: Apache-2.0
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -167,3 +168,57 @@ def test_launch_passes_the_job_and_exits_with_its_code(tmp_path, monkeypatch):
     assert seen["argv"] == ["app", "a.atlas"]
     assert seen["job"].host_name == "Example Host"
     assert seen["job"].files == [Path("a.atlas")]
+
+
+def test_a_previous_result_is_removed_when_the_job_starts(tmp_path, monkeypatch):
+    (tmp_path / "ret").mkdir()
+    (tmp_path / "ret" / "result.json").write_text('{"status": "saved"}', encoding="utf-8")
+    commands, _ = _commands(tmp_path, monkeypatch, ReturnJob(tmp_path / "ret", "", []))
+    assert not (tmp_path / "ret" / "result.json").exists()
+    assert commands.on_closed() == 1
+
+
+def test_a_failed_result_write_raises_and_can_be_retried(tmp_path, monkeypatch):
+    job = ReturnJob(tmp_path, "", [])
+    job.record_saved(["a.atlas"])
+    real = os.replace
+    monkeypatch.setattr("atlas_toolkit_app.app.job.os.replace", lambda *a: (_ for _ in ()).throw(PermissionError("busy")))
+    with pytest.raises(PermissionError):
+        job.write_result()
+    monkeypatch.setattr("atlas_toolkit_app.app.job.os.replace", real)
+    assert job.write_result() == 0
+    assert _result(tmp_path)["status"] == "saved"
+
+
+def test_launch_exits_1_and_stops_the_server_when_the_result_cannot_be_written(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from atlas_toolkit_app.app import launch
+    monkeypatch.setattr(launch, "configure_stdio", lambda: None)
+    monkeypatch.setattr(launch, "start_session_log", lambda **kwargs: None)
+    monkeypatch.setattr(launch, "install_excepthooks", lambda: None)
+    monkeypatch.setattr(launch, "is_source_run", lambda: False)
+    monkeypatch.setattr(launch.sys, "argv", ["app", "--return", str(tmp_path / "ret")])
+    monkeypatch.setattr(launch.sys, "platform", "linux")
+    (tmp_path / "index.html").write_text("test")
+    monkeypatch.setattr(launch, "desktop_site", lambda: tmp_path)
+    monkeypatch.setattr(launch.webview, "screens", [SimpleNamespace(width=1920, height=1080)])
+
+    class Hooks(list):
+        def __iadd__(self, handler):
+            self.append(handler)
+            return self
+
+    window = SimpleNamespace(events=SimpleNamespace(closing=Hooks(), closed=Hooks(), loaded=Hooks()))
+    server, commands = MagicMock(), MagicMock()
+    commands.on_closed.side_effect = PermissionError("busy")
+    monkeypatch.setattr(launch, "build_desktop", lambda *a, job=None: (server, commands, window))
+
+    def start(**kwargs):
+        for handler in window.events.closed:
+            with pytest.raises(PermissionError):
+                handler()
+    monkeypatch.setattr(launch.webview, "start", start)
+    with pytest.raises(SystemExit) as exit_info:
+        launch.run()
+    assert exit_info.value.code == 1
+    server.stop.assert_called_once()

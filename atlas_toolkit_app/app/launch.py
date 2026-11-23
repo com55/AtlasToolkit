@@ -154,13 +154,16 @@ def run() -> None:
     )
     window.events.closing += commands.on_closing
 
-    exit_code = 0
+    # Job mode: 1 until result.json is written, so a failed write never exits 0.
+    exit_code = 0 if job is None else 1
 
     def on_closed():
         nonlocal exit_code
         commands.set_window(None)
-        exit_code = commands.on_closed()
-        server.stop()
+        try:
+            exit_code = commands.on_closed()
+        finally:
+            server.stop()
 
     window.events.closed += on_closed
     window.events.loaded += lambda: setup_drop(window, commands)

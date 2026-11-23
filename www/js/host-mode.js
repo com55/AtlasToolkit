@@ -146,6 +146,10 @@ export function initWebHost(origin, deps) {
   }
 
   async function closeRequest() {
+    // A host that never answered a save would leave the frame busy: give up on it.
+    for (const resolve of pendingSaves.values()) resolve({ok: false, message: 'Cancelled'});
+    pendingSaves.clear();
+    await Promise.resolve();
     let ok = true;
     if (hasPending()) {
       const question = discardQuestion(ctx);
@@ -162,9 +166,12 @@ export function initWebHost(origin, deps) {
       const label = document.getElementById('busy-label');
       if (label && pendingSaves.size) label.textContent = cleanText(message.text);
     } else if (message.type === 'saved') {
-      const resolve = pendingSaves.get(message.id);
-      pendingSaves.delete(message.id);
-      resolve?.({ok: message.ok === true, message: message.message == null ? '' : cleanText(message.message)});
+      // The id may come back as a string after the host serialised it.
+      const id = Number(message.id);
+      const resolve = pendingSaves.get(id);
+      pendingSaves.delete(id);
+      const text = message.message == null ? '' : cleanText(message.message);
+      resolve?.({ok: message.ok === true, message: text || (message.ok === true ? `Sent to ${ctx.hostName}.` : '')});
     } else if (message.type === 'close-request') closeRequest().catch(console.error);
   });
 
