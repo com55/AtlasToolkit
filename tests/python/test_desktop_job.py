@@ -222,3 +222,21 @@ def test_launch_exits_1_and_stops_the_server_when_the_result_cannot_be_written(t
         launch.run()
     assert exit_info.value.code == 1
     server.stop.assert_called_once()
+
+
+def test_capabilities_writes_json_and_opens_no_window(tmp_path, monkeypatch):
+    from atlas_toolkit_app.app import launch
+    from atlas_toolkit_app.update.updater import get_current_version
+    out = tmp_path / "sub" / "caps.json"
+    monkeypatch.setattr(launch, "configure_stdio", lambda: None)
+    monkeypatch.setattr(launch.sys, "argv", ["app", "--capabilities", str(out)])
+    touched = []
+    monkeypatch.setattr(launch, "start_session_log", lambda **kwargs: touched.append("log"))
+    monkeypatch.setattr(launch, "build_desktop", lambda *a, **k: touched.append("build"))
+    monkeypatch.setattr(launch.webview, "start", lambda **k: touched.append("start"))
+    launch.run()
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        "version": get_current_version(), "host": {"protocol": 1, "return": True},
+    }
+    assert touched == []
+    assert not (tmp_path / "sub" / "caps.json.tmp").exists()

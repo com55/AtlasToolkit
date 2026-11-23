@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import sys
 from typing import Any, Optional
 
@@ -13,10 +14,11 @@ import webview
 from atlas_toolkit_app.app.desktop import build_desktop, desktop_site
 from atlas_toolkit_app.app import build_info
 from atlas_toolkit_app.app.desktop_commands import DesktopCommands, window_title
-from atlas_toolkit_app.app.job import parse_job_args
+from atlas_toolkit_app.app.job import parse_job_args, write_capabilities
 from atlas_toolkit_app.app.paths import is_source_run
 from atlas_toolkit_app.app.logs import start_session_log, install_excepthooks
 from atlas_toolkit_app.update.controller import get_update_dir, read_install_result
+from atlas_toolkit_app.update.updater import get_current_version
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +105,10 @@ def setup_drop(window: webview.Window, commands: DesktopCommands) -> None:
 
 def run() -> None:
     configure_stdio()
+    # --capabilities <file>: report what this build supports and exit, no window.
+    if len(sys.argv) > 2 and sys.argv[1] == "--capabilities":
+        write_capabilities(Path(sys.argv[2]), get_current_version())
+        return
 
     clean_argv, pending_failure, debug_requested, relaunched = _consume_launch_flags(sys.argv[1:])
     clean_argv, job = parse_job_args(clean_argv)

@@ -52,6 +52,21 @@ class ReturnJob:
         return code
 
 
+def capabilities(version: str) -> dict:
+    """What a calling program can rely on in this build (`--capabilities <file>`)."""
+    return {"version": version, "host": {"protocol": PROTOCOL, "return": True}}
+
+
+def write_capabilities(path: Path, version: str) -> None:
+    """Write capabilities() as JSON to `path` (temp file + rename). The exe has
+    no console, so a caller reads this file instead of stdout."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(capabilities(version), indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+
+
 def parse_job_args(argv: list[str]) -> tuple[list[str], ReturnJob | None]:
     """Take `--return <dir>` and `--host-name <name>` out of `argv` (without
     the program name). The job's files are the remaining non-option args."""

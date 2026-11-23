@@ -15,6 +15,9 @@ has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
   (`?host=<origin>`) and get the edited files back over `postMessage`; a
   desktop program can do the same with `--return <dir>`, which writes the
   outputs and a `result.json`. See "Embedding" in the README.
+- Desktop: `--capabilities <file>` writes the app version and the host-mode
+  protocol it supports to `<file>` and exits, so a calling program can check
+  before it relies on `--return`.
 
 ### Changed
 - The .skel opened together with an atlas is used even when its name differs

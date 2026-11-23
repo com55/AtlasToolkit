@@ -149,6 +149,16 @@ then `result.json`, then closes the app. Closing without it writes
 and 1 otherwise. Wait for the process to exit, then read `result.json`. In
 this mode the app does not check for updates.
 
+To check first whether the installed app supports this, run
+`AtlasToolkit --capabilities <file>`: it writes the JSON below to `<file>` and
+exits without opening a window (the exe has no console, so it writes a file
+rather than printing). Older versions open their window instead, so read the
+`VERSION` file next to the exe first.
+
+```json
+{"version": "1.1.0", "host": {"protocol": 1, "return": true}}
+```
+
 ## Python library
 
 The engine is available on PyPI as
