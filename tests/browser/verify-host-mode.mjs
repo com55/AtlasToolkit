@@ -153,6 +153,26 @@ try {
   if (!await frame.locator('#chk-mesh-hull').isEnabled()) throw new Error('the .skel with another name was not used');
   // In a frame the host page's viewport applies: the preview must keep pinch and pan for itself.
   if (await frame.locator('#preview-container').evaluate(el => getComputedStyle(el).touchAction) !== 'none') throw new Error('preview touch-action is not none');
+  // A real two-finger gesture in the frame: moving both fingers pans, then spreading zooms.
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 5});
+  const box = await page.locator('#atk').boundingBox();
+  const inner = await frame.locator('#preview-container').evaluate(el => { const r = el.getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2}; });
+  const cx = box.x + inner.x, cy = box.y + inner.y;
+  const view = () => frame.evaluate(async () => { const {state} = await window.__appModule('state'); return {...state.viewState}; });
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', {type, touchPoints: points.map(([x, y], id) => ({x, y, id}))});
+  const before = await view();
+  await touch('touchStart', [[cx - 50, cy], [cx + 50, cy]]);
+  for (let step = 1; step <= 4; step++) await touch('touchMove', [[cx - 50 + 10 * step, cy + 5 * step], [cx + 50 + 10 * step, cy + 5 * step]]);
+  const panned = await view();
+  // The browser may hold back the first move (touch slop), so expect most of the 40/20 px.
+  const dx = panned.x - before.x, dy = panned.y - before.y;
+  if (dx < 25 || dx > 41 || Math.abs(dy - dx / 2) > 1 || Math.abs(panned.scale - before.scale) > 1e-6) throw new Error('two-finger pan: ' + JSON.stringify({before, panned}));
+  for (let step = 1; step <= 4; step++) await touch('touchMove', [[cx - 10 - 25 * step, cy + 20], [cx + 90 + 25 * step, cy + 20]]);
+  const zoomed = await view();
+  if (!(zoomed.scale > panned.scale * 1.4)) throw new Error('two-finger spread did not zoom: ' + JSON.stringify({panned, zoomed}));
+  await touch('touchEnd', []);
+  pass('1c two fingers pan and zoom the preview inside the frame');
   pass('1b open before engine ready waits under the busy overlay, loads atlas, page and differently named .skel; badge and Save label');
 
   // Edit, then Save: the host refuses once, then accepts.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AtlasAPI } from './atlas-api.js';
 import { state, getSelectedRegions } from './state.js';
-import { isPortrait, previewImageTopLeft, previewTopAnchoredY, previewZoomOriginY } from './platform.js';
+import { isPortrait, previewImageTopLeft, previewTopAnchoredY, previewZoomOriginY, pinchView } from './platform.js';
 
 export const previewContainer = document.getElementById('preview-container');
 export const previewImg       = document.getElementById('preview-img');
@@ -424,45 +424,43 @@ window.addEventListener('mousemove', (e) => {
 let _lastTouchDist = null;
 let _lastTouchMid  = null;
 
+function touchPair(touches) {
+  return {
+    dist: Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY),
+    mid: {x: (touches[0].clientX + touches[1].clientX) / 2, y: (touches[0].clientY + touches[1].clientY) / 2},
+  };
+}
+function startOneFingerDrag(touch) {
+  state.viewState.isDragging = true;
+  state.viewState.startX = touch.clientX - state.viewState.x;
+  state.viewState.startY = touch.clientY - state.viewState.y;
+}
+
 previewContainer.addEventListener('touchstart', (e) => {
   if (e.touches.length === 2) {
-    _lastTouchDist = Math.hypot(
-      e.touches[1].clientX - e.touches[0].clientX,
-      e.touches[1].clientY - e.touches[0].clientY,
-    );
-    _lastTouchMid = {
-      x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-      y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
-    };
+    state.viewState.isDragging = false;
+    const pair = touchPair(e.touches);
+    _lastTouchDist = pair.dist;
+    _lastTouchMid = pair.mid;
   } else if (e.touches.length === 1) {
-    state.viewState.isDragging = true;
-    state.viewState.startX = e.touches[0].clientX - state.viewState.x;
-    state.viewState.startY = e.touches[0].clientY - state.viewState.y;
+    startOneFingerDrag(e.touches[0]);
   }
 }, { passive: true });
 
 previewContainer.addEventListener('touchmove', (e) => {
   if (e.touches.length === 2) {
-    const dist = Math.hypot(
-      e.touches[1].clientX - e.touches[0].clientX,
-      e.touches[1].clientY - e.touches[0].clientY,
-    );
-    if (_lastTouchDist) {
-      const factor   = dist / _lastTouchDist;
-      const newScale = Math.min(50, Math.max(0.1, state.viewState.scale * factor));
+    const pair = touchPair(e.touches);
+    if (_lastTouchDist && _lastTouchMid) {
+      // Pinch zooms around the fingers and moving both fingers pans.
       const rect = previewContainer.getBoundingClientRect();
-      const mid  = {
-        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
-      };
-      const cx = rect.width / 2, cy = previewZoomOriginY(rect.height, isPortrait());
-      const mx = mid.x - rect.left - cx, my = mid.y - rect.top - cy;
-      state.viewState.x     = mx - (mx - state.viewState.x) * (newScale / state.viewState.scale);
-      state.viewState.y     = my - (my - state.viewState.y) * (newScale / state.viewState.scale);
-      state.viewState.scale = newScale;
+      const cx = rect.left + rect.width / 2, cy = rect.top + previewZoomOriginY(rect.height, isPortrait());
+      const rel = p => ({x: p.x - cx, y: p.y - cy});
+      Object.assign(state.viewState, pinchView(state.viewState,
+        {dist: _lastTouchDist, mid: rel(_lastTouchMid)}, {dist: pair.dist, mid: rel(pair.mid)}));
       applyTransform();
     }
-    _lastTouchDist = dist;
+    _lastTouchDist = pair.dist;
+    _lastTouchMid = pair.mid;
   } else if (e.touches.length === 1 && state.viewState.isDragging) {
     state.viewState.x = e.touches[0].clientX - state.viewState.startX;
     state.viewState.y = e.touches[0].clientY - state.viewState.startY;
@@ -470,8 +468,10 @@ previewContainer.addEventListener('touchmove', (e) => {
   }
 }, { passive: true });
 
-previewContainer.addEventListener('touchend', () => {
+previewContainer.addEventListener('touchend', (e) => {
   _lastTouchDist = null;
   _lastTouchMid  = null;
-  state.viewState.isDragging = false;
+  // One finger left after a pinch: keep panning with it from where it is.
+  if (e.touches.length === 1) startOneFingerDrag(e.touches[0]);
+  else state.viewState.isDragging = false;
 }, { passive: true });

@@ -66,6 +66,21 @@ export function previewZoomOriginY(containerH, topAnchored) {
   return topAnchored ? 0 : containerH / 2;
 }
 
+/**
+ * One step of a two-finger gesture. `prev`/`next` are {dist, mid} with `mid`
+ * relative to the zoom origin. The image point under the previous midpoint
+ * ends up under the new one: spreading zooms, moving both fingers pans.
+ */
+export function pinchView(view, prev, next) {
+  const scale = Math.min(50, Math.max(0.1, view.scale * (next.dist / prev.dist)));
+  const ratio = scale / view.scale;
+  return {
+    x: next.mid.x - (prev.mid.x - view.x) * ratio,
+    y: next.mid.y - (prev.mid.y - view.y) * ratio,
+    scale,
+  };
+}
+
 
 /** Last path segment of a native OS path (Windows or POSIX). */
 export function nativePathBasename(path) {
