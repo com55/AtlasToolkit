@@ -13,6 +13,7 @@ import webview
 from atlas_toolkit_app.app.desktop import build_desktop, desktop_site
 from atlas_toolkit_app.app import build_info
 from atlas_toolkit_app.app.desktop_commands import DesktopCommands, window_title
+from atlas_toolkit_app.app.job import parse_job_args
 from atlas_toolkit_app.app.paths import is_source_run
 from atlas_toolkit_app.app.logs import start_session_log, install_excepthooks
 from atlas_toolkit_app.update.controller import get_update_dir, read_install_result
@@ -104,6 +105,7 @@ def run() -> None:
     configure_stdio()
 
     clean_argv, pending_failure, debug_requested, relaunched = _consume_launch_flags(sys.argv[1:])
+    clean_argv, job = parse_job_args(clean_argv)
     sys.argv = [sys.argv[0], *clean_argv]
 
     webview_debug = debug_requested and (is_source_run() or build_info.DEV_BUILD)
@@ -148,12 +150,16 @@ def run() -> None:
         )
 
     server, commands, window = build_desktop(
-        site, sys.argv, pending_failure, window_factory, webview.FileDialog,
+        site, sys.argv, pending_failure, window_factory, webview.FileDialog, job=job,
     )
     window.events.closing += commands.on_closing
 
+    exit_code = 0
+
     def on_closed():
+        nonlocal exit_code
         commands.set_window(None)
+        exit_code = commands.on_closed()
         server.stop()
 
     window.events.closed += on_closed
@@ -162,3 +168,6 @@ def run() -> None:
         # Started by the hidden update watcher, which cannot hand us the foreground.
         window.events.loaded += commands.raise_once
     webview.start(debug=webview_debug)
+    if job is not None:
+        # The calling program reads result.json; the code is a convenience.
+        sys.exit(exit_code)

@@ -4,7 +4,7 @@ from atlas_toolkit_app.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
-    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster'.split())
+    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster return_folder finish_return'.split())
 
 
 def test_rpc_allowlist_on_class_and_instance(commands):
@@ -243,7 +243,8 @@ def test_update_failure_logged_and_startup_shape(commands, caplog):
     assert not thread.is_alive()
     assert result["atlas"] is None and result["atlasError"] is None
     assert result["updateFailure"] == {"error": "previous"}
-    assert set(result) == {"version", "devBuild", "atlas", "atlasError", "updateFailure"}
+    assert set(result) == {"version", "devBuild", "atlas", "atlasError", "updateFailure", "job"}
+    assert result["job"] is None
     assert commands.startup() == result
     assert commands._update_thread is thread
     assert "check failed" in caplog.text
@@ -544,7 +545,8 @@ def test_launch_build_title_and_debug_without_sockets(tmp_path, monkeypatch, dev
     def create_window(title, **kwargs):
         titles.append(title)
         return window
-    def assemble(site, argv, failure, factory, dialog):
+    def assemble(site, argv, failure, factory, dialog, job=None):
+        assert job is None
         assert factory("http://localhost/test") is window
         return MagicMock(), MagicMock(), window
     monkeypatch.setattr(launch.webview, "create_window", create_window)

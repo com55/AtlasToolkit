@@ -26,6 +26,7 @@ startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
 restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster
+return_folder finish_return
 """.split())
 
 
@@ -40,7 +41,8 @@ def window_title():
 class DesktopCommands:
     RPC_METHODS = RPC_METHODS
 
-    def __init__(self, window, files, events, config, updates, argv, is_unsaved, file_dialog, *, clock=time.monotonic):
+    def __init__(self, window, files, events, config, updates, argv, is_unsaved, file_dialog, *,
+                 clock=time.monotonic, job=None):
         self._clock = clock
         self._page_log_lock = threading.Lock()
         self._page_log_start = clock()
@@ -51,6 +53,8 @@ class DesktopCommands:
         self._config = config
         self._updates = updates
         self._argv = list(argv)
+        self._job = job
+        self._update_thread = None
         self._is_unsaved = is_unsaved
         self._file_dialog = file_dialog
         self._startup_result = None
@@ -113,17 +117,59 @@ class DesktopCommands:
             if self._startup_result is not None:
                 return {**self._startup_result, "atlas": None, "atlasError": None}
             atlas, error = None, None
-            if len(self._argv) > 1 and self._argv[1].lower().endswith(".atlas"):
+            job = self._job
+            if job is not None:
+                atlas, error = self._job_atlas(job)
+            elif len(self._argv) > 1 and self._argv[1].lower().endswith(".atlas"):
                 try:
                     atlas = self._files.atlas_bundle(Path(self._argv[1]))
                 except (OSError, UnicodeDecodeError) as exc:
                     error = str(exc)
             self._startup_result = dict(version=get_current_version(), devBuild=build_info.DEV_BUILD,
                                         atlas=atlas, atlasError=error,
-                                        updateFailure=self._updates.pending_failure)
-            self._update_thread = threading.Thread(target=self._run_update_check, daemon=True)
-            self._update_thread.start()
+                                        updateFailure=self._updates.pending_failure,
+                                        job={"hostName": job.host_name} if job is not None else None)
+            if job is None:
+                # Job mode never checks, offers or installs updates.
+                self._update_thread = threading.Thread(target=self._run_update_check, daemon=True)
+                self._update_thread.start()
             return dict(self._startup_result)
+
+    def _job_atlas(self, job):
+        """The atlas among the job's files, opened with the files given with it."""
+        path = given_atlas(job.files)
+        if path is None:
+            error = "No atlas among the files given to --return."
+            job.record_error(error)
+            return None, error
+        try:
+            return self._files.atlas_bundle(path, job.files), None
+        except (OSError, UnicodeDecodeError) as exc:
+            job.record_error(str(exc))
+            return None, str(exc)
+
+    def _require_job(self):
+        if self._job is None:
+            raise RuntimeError("Not opened with --return")
+        return self._job
+
+    def return_folder(self):
+        job = self._require_job()
+        job.dir.mkdir(parents=True, exist_ok=True)
+        return self._files.grant_folder(job.dir)
+
+    def finish_return(self, names):
+        """Save & Return wrote the outputs: record them and close without the discard question."""
+        job = self._require_job()
+        job.record_saved(list(names))
+        with self._close_lock:
+            self._closing_confirmed = True
+        if self._window is not None:
+            self._window.destroy()
+
+    def on_closed(self):
+        """Window gone: write the job's result.json. Returns the exit code."""
+        return self._job.write_result() if self._job is not None else 0
 
     def _run_update_check(self):
         try:

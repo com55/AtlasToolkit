@@ -20,7 +20,7 @@ def desktop_site() -> Path:
 
 def build_desktop(
     site: Path, argv: list[str], pending_failure: dict | None,
-    window_factory, file_dialog,
+    window_factory, file_dialog, job=None,
 ) -> tuple[DesktopServer, DesktopCommands, Any]:
     files = DesktopFiles()
     events = EventBroker()
@@ -29,7 +29,7 @@ def build_desktop(
     updates = UpdateController(pending_failure=pending_failure)
     commands = DesktopCommands(
         None, files, events, config, updates, argv,
-        is_unsaved=lambda: server.unsaved, file_dialog=file_dialog,
+        is_unsaved=lambda: server.unsaved, file_dialog=file_dialog, job=job,
     )
     server = DesktopServer(site, host, commands, files, events)
     url = server.start()

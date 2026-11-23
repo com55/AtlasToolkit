@@ -16,6 +16,7 @@ class FakeWindow:
         self.confirmations = deque()
         self.calls = []
         self.on_top = False
+        self.on_destroy = None
 
     def create_file_dialog(self, kind, **kwargs):
         self.calls.append((kind, kwargs))
@@ -30,6 +31,8 @@ class FakeWindow:
 
     def destroy(self):
         self.calls.append(("destroy",))
+        if self.on_destroy is not None:
+            self.on_destroy()
         sys.stdout.write("destroyed\n")
         sys.stdout.flush()
 
@@ -71,6 +74,8 @@ def main():
     parser.add_argument("--no-update-check", action="store_true")
     parser.add_argument("--fail-startup", action="store_true")
     parser.add_argument("--make-fixture", type=Path)
+    parser.add_argument("--launch-arg", action="append", default=[],
+                        help="an app argument such as --return (repeat for each)")
     args = parser.parse_args()
     if args.make_fixture:
         make_fixture(args.make_fixture)
@@ -81,6 +86,8 @@ def main():
     from atlas_toolkit_app.app import config
     config.CONFIG_PATH = args.config / "config.json"
     from atlas_toolkit_app.app.desktop import build_desktop
+    from atlas_toolkit_app.app.job import parse_job_args
+    launch_args, job = parse_job_args(args.launch_arg)
     window = FakeWindow()
     urls = []
 
@@ -89,8 +96,9 @@ def main():
         return window
 
     server, commands, _ = build_desktop(
-        args.site, ["app"] + ([args.atlas] if args.atlas else []), None,
-        factory, SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30))
+        args.site, ["app"] + ([args.atlas] if args.atlas else []) + launch_args, None,
+        factory, SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30), job=job)
+    window.on_destroy = commands.on_closed
     if args.no_update_check:
         commands._updates.check_for_notification = lambda: None
     if args.fail_startup:
@@ -121,7 +129,11 @@ def main():
                 commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": path}]},
                                   "clientX": x, "clientY": y})
             elif line == "close":
-                print("vetoed" if commands.on_closing() is False else "closed", flush=True)
+                if commands.on_closing() is False:
+                    print("vetoed", flush=True)
+                else:
+                    commands.on_closed()
+                    print("closed", flush=True)
                 continue
             elif line == "unsaved":
                 print(str(server.unsaved).lower(), flush=True)
