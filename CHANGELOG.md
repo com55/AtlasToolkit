@@ -4,7 +4,7 @@ All notable changes to AtlasToolkit. Versions match the Git tags and the
 [GitHub Releases](https://github.com/com55/AtlasToolkit/releases), which carry
 the full notes and screenshots.
 
-## [Unreleased] - app 1.0.1
+## [1.0.1] - 2026-11-23 - app
 
 App only; the library is unchanged.
 
