@@ -302,19 +302,15 @@ try {
     assert.equal(result(returnCancelled).status, 'cancelled');
   }, returnArgs(returnCancelled));
   const returnPrompt = path.join(temp, 'return-prompt');
-  await scenario('13 --return: close prompt names the host', null, async ({page,regions,edit,command,frames}) => {
+  await scenario('13 --return: close prompt names the host', null, async ({page,regions,edit,command}) => {
     await regions(['a','b']); await edit();
     assert.equal(await command('close', null), 'vetoed');
     await page.locator('#modal-overlay:not(.hidden)').waitFor();
-    // The window stays on top until the user's first click or key in it.
-    assert(!frames.some(frame => frame.method === 'release_on_top'), 'released before any interaction');
     assert.match(await page.locator('#modal-message').textContent(), /not been sent to Example Host/);
     assert.equal((await page.locator('#btn-modal-cancel').textContent()).trim(), 'Keep editing');
     assert.equal((await page.locator('#btn-modal-confirm').textContent()).trim(), 'Discard');
     await page.locator('#btn-modal-cancel').click();
     await page.locator('#modal-overlay.hidden').waitFor({state: 'attached'});
-    for (let i = 0; i < 50 && !frames.some(frame => frame.method === 'release_on_top'); i++) await new Promise(r => setTimeout(r, 100));
-    assert.equal(frames.filter(frame => frame.method === 'release_on_top').length, 1, 'one release_on_top after the click');
     // The closing dialog fades out with its own labels.
     assert.equal((await page.locator('#btn-modal-cancel').textContent()).trim(), 'Keep editing');
     const plain = page.evaluate(() => window.showConfirm('x', 'y'));

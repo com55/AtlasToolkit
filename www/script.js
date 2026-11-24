@@ -46,17 +46,7 @@ if (new URLSearchParams(window.location?.search).has('test-hooks')) {
 let appVersion = '';
 let closePromptOpen = false;
 
-// The desktop close question raises the window and keeps it on top; the
-// user's first click or key in it lets go (desktop_commands.release_on_top).
-let releaseOnTopPending = false;
-function releaseOnTopOnInteraction() {
-  if (!releaseOnTopPending) return;
-  releaseOnTopPending = false;
-  desktopCall('release_on_top').catch(console.error);
-}
-
 export async function handleConfirmClose() {
-  releaseOnTopPending = true;
   if (closePromptOpen) return;
   if (isModalOverlayOpen()) {
     await desktopCall('close_answer', [false]);
@@ -114,7 +104,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
     onDesktopEvent('drop', e => handleDesktopDrop(e, actions).catch(console.error));
     onDesktopEvent('confirm-close', handleConfirmClose);
-    for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, releaseOnTopOnInteraction, true);
     onDesktopEvent('update-available', e => window.showUpdateNotification(e.payload));
     // Desktop-only buttons are created here so the web build carries none.
     const installButton = document.createElement('button');

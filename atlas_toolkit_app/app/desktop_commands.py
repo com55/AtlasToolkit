@@ -26,7 +26,7 @@ startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
 restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster
-return_folder finish_return release_on_top
+return_folder finish_return
 """.split())
 
 
@@ -64,7 +64,6 @@ class DesktopCommands:
         self._close_lock = threading.Lock()
         self._closing_confirmed = False
         self._raised_after_update = False
-        self._pinned = False
         self._close_check_in_progress = False
         self._close_event = None
         self._close_proceed = False
@@ -294,14 +293,13 @@ class DesktopCommands:
         with self._close_lock:
             if self._closing_confirmed or not self._is_unsaved():
                 return True
+            # Bring the window forward (or flash its taskbar button) so the
+            # question is seen, also when the user closes again while it is open.
+            self._raise_window()
             if not self._close_check_in_progress:
                 self._close_check_in_progress = True
                 self._close_event = threading.Event()
                 self._close_proceed = False
-                # Raise and keep on top so the in-app question is seen; the
-                # page lets go (release_on_top) at the user's first click or
-                # key, so the window does not cover their other apps for good.
-                self._raise_window()
                 self._close_thread = threading.Thread(target=self._check_and_close, daemon=True)
                 self._close_thread.start()
             elif self._events.has_subscriber:
@@ -328,8 +326,6 @@ class DesktopCommands:
             if use_native:
                 proceed = self._window is not None and self._window.create_confirmation_dialog(
                     "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
-                # Answering the native question was the user's interaction.
-                self.release_on_top()
             if proceed and self._window is not None:
                 self._closing_confirmed = True
                 self._window.destroy()
@@ -413,15 +409,11 @@ class DesktopCommands:
             return None
 
     def _raise_window(self) -> None:
-        """Bring the app forward and keep it on top while the close question
-        is open, so it is seen after the user closes from the taskbar while
-        another app is focused. Runs in pywebview's closing handler, on the
-        GUI thread, so setting on_top (WinForms Form.TopMost) here is safe;
-        `release_on_top()` lets go on the GUI thread too. TopMost is kept in
-        WinForms only: a raw SetWindowPos topmost leaves Form.TopMost out of
-        step. The foreground is asked for, not forced: AttachThreadInput can
-        hang (Raymond Chen, "The dangers of attaching input queues"), and a
-        topmost window is visible anyway."""
+        """Bring the app forward the ordinary way so the close question is
+        seen after the user closes it from the taskbar while another app is
+        focused. No topmost pin and no forced foreground: Windows decides, and
+        when it refuses, the taskbar button flashes (AttachThreadInput tricks
+        can hang: Raymond Chen, "The dangers of attaching input queues")."""
         window = self._window
         if not window:
             return
@@ -430,46 +422,7 @@ class DesktopCommands:
                 action()
             except Exception:
                 pass
-        try:
-            window.on_top = True
-            self._pinned = True
-        except Exception:
-            pass
         self._ask_foreground()
-
-    def release_on_top(self):
-        """Let go of the pin from `_raise_window()`; the page calls this at the
-        user's first click or key. Any thread: the change runs on the GUI thread."""
-        if not self._pinned:
-            return
-        self._pinned = False
-        window = self._window
-        if window is None:
-            return
-
-        def unpin():
-            try:
-                window.on_top = False
-            except Exception as e:
-                log.debug("unpin window failed: %s", e)
-        self._on_gui_thread(unpin)
-
-    def _on_gui_thread(self, fn) -> None:
-        """Run `fn` on the window's GUI thread without waiting for it.
-        pywebview sets on_top without marshalling, so a call from another
-        thread goes through the WinForms form's BeginInvoke."""
-        native = getattr(self._window, "native", None) if self._window else None
-        if sys.platform == "win32" and native is not None:
-            try:
-                from System import Func, Type  # pythonnet, as pywebview's WinForms backend
-
-                def run():
-                    fn()
-                native.BeginInvoke(Func[Type](run))
-                return
-            except Exception as e:
-                log.debug("BeginInvoke failed, running inline: %s", e)
-        fn()
 
     def _ask_foreground(self) -> None:
         if sys.platform != "win32":
@@ -480,10 +433,20 @@ class DesktopCommands:
         try:
             import ctypes
 
-            if not ctypes.windll.user32.SetForegroundWindow(hwnd):
-                log.debug("SetForegroundWindow was refused; the window is topmost anyway")
+            user32 = ctypes.windll.user32
+            if user32.GetForegroundWindow() == hwnd or user32.SetForegroundWindow(hwnd):
+                return
+            log.debug("SetForegroundWindow was refused; flashing the taskbar button")
+
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [("cbSize", ctypes.c_uint), ("hwnd", ctypes.c_void_p), ("dwFlags", ctypes.c_uint),
+                            ("uCount", ctypes.c_uint), ("dwTimeout", ctypes.c_uint)]
+
+            # FLASHW_ALL | FLASHW_TIMERNOFG: caption and taskbar button, until the window comes forward.
+            info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, 0x3 | 0xC, 0, 0)
+            user32.FlashWindowEx(ctypes.byref(info))
         except Exception as e:
-            log.debug("SetForegroundWindow failed: %s", e)
+            log.debug("bring forward failed: %s", e)
 
     def _win32_to_front(self, *, pin: bool) -> bool:
         """Update relaunch only (`_bring_to_front`): forces the foreground,
