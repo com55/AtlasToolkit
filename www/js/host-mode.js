@@ -102,7 +102,7 @@ export function initDesktopHost(job, {desktopCall, writeFilesToFolder, setSaveSi
  * `deps` are the app pieces this needs, passed in so the module stays testable.
  */
 export function initWebHost(origin, deps) {
-  const {appVersion, engineReady, loadFiles, hasPending, showConfirm, withBusy, setSaveSink, setDownloadSink} = deps;
+  const {appVersion, waitForEngine, loadFiles, hasPending, showConfirm, withBusy, setSaveSink, setDownloadSink} = deps;
   const parent = window.parent;
   const post = message => parent.postMessage({atlasToolkitHost: PROTOCOL, ...message}, origin);
   const pendingSaves = new Map();
@@ -135,8 +135,9 @@ export function initWebHost(origin, deps) {
       return;
     }
     // Hosts send files right after "ready", usually while the engine is still
-    // starting: wait under the busy overlay, as a normal early open does.
-    await withBusy('Preparing AtlasToolkit engine...', () => engineReady);
+    // starting: wait under the busy overlay with its progress ring, as a
+    // normal early open does.
+    await waitForEngine();
     let result = false;
     try { result = await loadFiles(files); } catch (e) { console.error(e); }
     if (result === true) {

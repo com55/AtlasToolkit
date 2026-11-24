@@ -65,9 +65,22 @@ function pump(state) {
   }
 }
 
+const progressListeners = new Set();
+
+/** The latest start progress (0..1) while the engine is starting, otherwise null. */
+export function engineProgress() {
+  return engine && !engine.ready ? engine.progress : null;
+}
+
+/** Call `fn(progress)` on each start progress report; returns the unsubscribe. */
+export function onEngineProgress(fn) {
+  progressListeners.add(fn);
+  return () => progressListeners.delete(fn);
+}
+
 export function startEngine(onStatus, options = {}) {
   if (engine) return engine.promise;
-  const state = { ready: false, running: null, queue: [], worker: null };
+  const state = { ready: false, running: null, queue: [], worker: null, progress: 0 };
   state.promise = new Promise((resolve, reject) => {
     state.resolveStart = resolve;
     state.rejectStart = reject;
@@ -80,6 +93,10 @@ export function startEngine(onStatus, options = {}) {
     state.worker.onmessage = ({ data }) => {
       if (engine !== state) return;
       if (data.type === 'status') {
+        if (typeof data.progress === 'number') {
+          state.progress = data.progress;
+          for (const fn of progressListeners) fn(data.progress);
+        }
         onStatus?.(data.message, data.progress);
       } else if (data.type === 'ready') {
         state.ready = true;

@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
 import { desktopCall } from './desktop.js';
-import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine, engineStarting } from './engine-client.js';
+import { callHost as engineCallHost, HostError, onEngineDied, startEngine, stopEngine, engineStarting, engineProgress, onEngineProgress } from './engine-client.js';
 import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
-import { withBusy, withLock, BUSY_LABEL } from './busy-overlay.js';
+import { withBusy, withLock, BUSY_LABEL, setBusyProgress } from './busy-overlay.js';
 import { PreviewCache, viewPreviewKey } from './preview-cache.js';
 let engineStartupError = null;
 export function setEngineStartupError(error) { engineStartupError = error; }
@@ -16,9 +16,15 @@ function callHost(...args) {
 }
 /** A file opened while the engine is still starting waits under the busy
  * overlay, so the app does not look idle while nothing appears to happen. */
-async function _awaitEngineReady() {
+export async function awaitEngineReady() {
   const starting = engineStarting();
-  if (starting) await withBusy(ENGINE_STARTING_LABEL, () => starting.catch(() => {}));
+  if (!starting) return;
+  await withBusy(ENGINE_STARTING_LABEL, async () => {
+    // The real start progress, as a ring with its percentage.
+    setBusyProgress(engineProgress() ?? 0);
+    const off = onEngineProgress(setBusyProgress);
+    try { await starting.catch(() => {}); } finally { off(); setBusyProgress(null); }
+  });
 }
 const ENGINE_STARTING_LABEL = 'Preparing AtlasToolkit engine...';
 export const LOAD_CANCELLED = 'cancelled';
@@ -175,7 +181,7 @@ async function _findAtlasTextFile(files) {
 async function _loadAtlasFromFileList(files, options = {}) {
   const list = Array.isArray(files) ? files : Array.from(files || []);
   if (list.length === 0) return false;
-  await _awaitEngineReady();
+  await awaitEngineReady();
 
   const atlasFile = await _findAtlasTextFile(list);
   if (!atlasFile) {
@@ -289,7 +295,7 @@ function _pickFiles({ accept = '', multiple = false } = {}) {
  */
 async function _loadAtlasFiles(atlasFile, imageFileMap, sourceDir = '', extraFiles = []) {
   try {
-    await _awaitEngineReady();
+    await awaitEngineReady();
     const rawText = await _readFileAsText(atlasFile);
     const convertedText = rawText;
     const requiredPages = await _extractRequiredPages(convertedText);

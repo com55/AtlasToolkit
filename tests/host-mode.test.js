@@ -108,7 +108,7 @@ function webHarness(t) {
   return {
     posted, nodes,
     deps: {
-      appVersion: '1', engineReady: Promise.resolve(), loadFiles: async () => true, hasPending: () => true,
+      appVersion: '1', waitForEngine: async () => {}, loadFiles: async () => true, hasPending: () => true,
       showConfirm: async (...args) => { confirms.push(args); return false; }, confirms,
       withBusy: async (_label, fn) => fn(), setSaveSink: s => { sink = s; }, setDownloadSink() {},
     },

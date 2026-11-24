@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { desktopCall, onDesktopEvent, installDesktopLogging, logStage } from './js/desktop.js';
 import { startEngine } from './js/engine-client.js';
-import { AtlasAPI, setEngineStartupError, setSaveSink } from './js/atlas-api.js';
+import { AtlasAPI, setEngineStartupError, setSaveSink, awaitEngineReady } from './js/atlas-api.js';
 import { hostContext, initDesktopHost, initWebHost, webHostOrigin, discardQuestion } from './js/host-mode.js';
 import { state, getSelectedKeys, getSelectedRegions } from './js/state.js';
 import { showToast, showAlert, showConfirm, showMissingAtlasImagesDialog, showUpdateToast } from './js/dialogs.js';
@@ -199,7 +199,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (hostOrigin) {
     initWebHost(hostOrigin, {
-      appVersion, engineReady, setSaveSink, setDownloadSink, withBusy,
+      appVersion, setSaveSink, setDownloadSink, withBusy,
+      waitForEngine: async () => { await awaitEngineReady(); await engineReady; },
       hasPending: () => AtlasAPI.has_pending_modifications(),
       showConfirm,
       loadFiles: async files => {

@@ -528,14 +528,21 @@ try {
     await new Promise(resolve => setTimeout(resolve, 50));
     const overlay = document.getElementById('busy-overlay');
     const busy = !overlay.classList.contains('hidden') && document.getElementById('busy-label').textContent;
+    const ring = document.getElementById('busy-progress');
+    const ringShown = !!ring && !ring.classList.contains('hidden') && /^\d+%$/.test(ring.textContent.trim())
+      && document.getElementById('busy-spinner').classList.contains('hidden');
     const loaded = await loading;
     await (await window.__appModule('region-list')).loadRegions();
     (await window.__appModule('modify-mode')).updateMeshCroppingUI();
-    return {preparing, busy, loaded};
+    const ringAfter = document.getElementById('busy-progress');
+    const spinnerBack = !document.getElementById('busy-spinner').classList.contains('hidden') && (!ringAfter || ringAfter.classList.contains('hidden'));
+    return {preparing, busy, loaded, ringShown, spinnerBack};
   });
   if (!early.preparing) throw new Error('Engine was ready before the early load; the check proves nothing');
   if (early.busy !== 'Preparing AtlasToolkit engine...') throw new Error('No busy overlay while the engine starts: ' + early.busy);
   if (!early.loaded) throw new Error('Early load failed');
+  if (!early.ringShown) throw new Error('Engine start shows no progress ring with a percentage');
+  if (!early.spinnerBack) throw new Error('Spinner not restored after the engine wait');
   if (!await earlyApp.locator('#btn-pick-skel').isEnabled() || !(await earlyApp.locator('#btn-pick-skel').innerText()).includes('Add .skel')) throw new Error('Skeleton button without a .skel');
   if (await earlyApp.locator('[title]').count()) throw new Error('Native title tooltips remain');
   // Disabled buttons still show their help (Save Image needs a selection).

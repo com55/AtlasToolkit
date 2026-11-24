@@ -143,7 +143,9 @@ try {
   }, skelBytes);
   // The engine is still starting: the frame shows the busy overlay, not an idle app.
   await waitInFrame(frame, () => !document.getElementById('busy-overlay').classList.contains('hidden')
-    && document.getElementById('busy-label').textContent === 'Preparing AtlasToolkit engine...', 30000);
+    && document.getElementById('busy-label').textContent === 'Preparing AtlasToolkit engine...'
+    && !document.getElementById('busy-progress').classList.contains('hidden')
+    && /^\d+%$/.test(document.getElementById('busy-progress').textContent.trim()), 30000);
   await page.waitForFunction(() => window.got('opened').length === 1 || window.got('open-failed').length > 0, null, {polling: 500, timeout: 120000});
   const opened = await page.evaluate(() => window.got('opened')[0]);
   if (!opened || opened.atlas !== 'hero.atlas') throw new Error('open failed: ' + JSON.stringify(await page.evaluate(() => window.__msgs)));

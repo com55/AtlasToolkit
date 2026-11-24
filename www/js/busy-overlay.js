@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 com55
 // SPDX-License-Identifier: Apache-2.0
+import { setProgressRing } from './progress-ring.js';
 /**
  * Busy overlay + re-entrant lock. Paint (withBusy) is separate from the
  * mutex (withLock): confirm stays at z-index 4500 during a silent lock.
@@ -75,6 +76,7 @@ function paintOverlay(show, label) {
     setHidden(overlay, false);
   } else if (_paintCount <= 0) {
     setHidden(overlay, true);
+    setBusyProgress(null);
     const reject = el('busy-reject');
     if (reject) reject.textContent = '';
   }
@@ -106,6 +108,21 @@ async function runLocked(fn) {
       flushStickyErrors();
     }
   }
+}
+
+/**
+ * A known fraction (0..1) shows a progress ring with its percentage in place
+ * of the spinner (the engine start reports one); null brings the spinner back.
+ * The overlay closing restores the spinner by itself.
+ */
+export function setBusyProgress(progress) {
+  const spinner = el('busy-spinner');
+  const ring = el('busy-progress');
+  if (!spinner || !ring) return;
+  const known = typeof progress === 'number' && Number.isFinite(progress);
+  setHidden(spinner, known);
+  setHidden(ring, !known);
+  if (known) setProgressRing(ring, progress);
 }
 
 /** Refcount only — does not paint #busy-overlay. */

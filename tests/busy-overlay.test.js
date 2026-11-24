@@ -15,6 +15,7 @@ import {
   lastBusyMessage,
   BUSY_LABEL,
   BUSY_LOADING_LABEL,
+  setBusyProgress,
 } from '../www/js/busy-overlay.js';
 
 function installBusyDom() {
@@ -180,4 +181,32 @@ test('queueBusyError during withBusy flushes to window.showAlert after unlock', 
   assert.equal(isBusy(), false);
   await new Promise((r) => queueMicrotask(r));
   assert.deepEqual(alerts, [{ message: 'Failed to update Nest Regions.', title: 'Error' }]);
+});
+
+test('busy progress swaps the spinner for a ring with the percentage, and back', async () => {
+  const dom = installBusyDom();
+  const spinner = { classList: { _h: false, add(n) { if (n === 'hidden') this._h = true; }, remove(n) { if (n === 'hidden') this._h = false; }, contains(n) { return n === 'hidden' && this._h; } } };
+  const ring = {
+    hidden: true, offset: null, text: '',
+    classList: { add(n) { if (n === 'hidden') ring.hidden = true; }, remove(n) { if (n === 'hidden') ring.hidden = false; }, contains: () => false },
+    querySelector: sel => sel === '.progress-ring-bar' ? { style: { set strokeDashoffset(v) { ring.offset = Number(v); } } } : { set textContent(v) { ring.text = v; } },
+  };
+  const get = globalThis.document.getElementById;
+  globalThis.document.getElementById = id => id === 'busy-spinner' ? spinner : id === 'busy-progress' ? ring : get(id);
+  await withBusy('Preparing AtlasToolkit engine...', async () => {
+    setBusyProgress(0.5);
+    assert.equal(spinner.classList.contains('hidden'), true);
+    assert.equal(ring.hidden, false);
+    assert.equal(ring.text, '50%');
+    setBusyProgress(0.904);
+    assert.equal(ring.text, '90%');
+    setBusyProgress(null);
+    assert.equal(spinner.classList.contains('hidden'), false);
+    assert.equal(ring.hidden, true);
+    setBusyProgress(0.2);
+  });
+  // The overlay closing puts the spinner back for the next busy wait.
+  assert.equal(dom.overlay.classList.contains('hidden'), true);
+  assert.equal(spinner.classList.contains('hidden'), false);
+  assert.equal(ring.hidden, true);
 });

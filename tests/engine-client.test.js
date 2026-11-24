@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine, callHost, stopEngine, onEngineDied, HostError } from '../www/js/engine-client.js';
+import { startEngine, callHost, stopEngine, onEngineDied, HostError, engineProgress, onEngineProgress } from '../www/js/engine-client.js';
 
 class FakeWorker {
   posts = [];
@@ -234,4 +234,22 @@ test('an encoding failure rejects that call and lets the next call run', async (
   const next = callHost('next', []);
   worker.result('ok');
   assert.equal(await next, 'ok');
+});
+
+test('start progress is remembered and reported until the engine is ready', async () => {
+  assert.equal(engineProgress(), null);
+  const { worker, promise } = boot(false);
+  assert.equal(engineProgress(), 0);
+  const seen = [];
+  const off = onEngineProgress(p => seen.push(p));
+  worker.emit({ type: 'status', message: 'numpy', progress: 0.5 });
+  worker.emit({ type: 'status', message: 'no number' });
+  worker.emit({ type: 'status', message: 'engine', progress: 0.65 });
+  assert.equal(engineProgress(), 0.65);
+  off();
+  worker.emit({ type: 'status', message: 'app', progress: 0.9 });
+  assert.deepEqual(seen, [0.5, 0.65]);
+  worker.emit({ type: 'ready' });
+  await promise;
+  assert.equal(engineProgress(), null);
 });
