@@ -26,7 +26,7 @@ startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel
 pick_page_image pick_save_folder pick_save_file existing_output_names write_files
 open_url open_update_log get_update_download_progress download_update
 restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster
-return_folder finish_return
+return_folder finish_return release_on_top
 """.split())
 
 
@@ -64,6 +64,7 @@ class DesktopCommands:
         self._close_lock = threading.Lock()
         self._closing_confirmed = False
         self._raised_after_update = False
+        self._pinned = False
         self._close_check_in_progress = False
         self._close_event = None
         self._close_proceed = False
@@ -297,9 +298,9 @@ class DesktopCommands:
                 self._close_check_in_progress = True
                 self._close_event = threading.Event()
                 self._close_proceed = False
-                # Raise once so the in-app question is seen, then let go: a
-                # pinned (topmost) window would cover the user's other apps,
-                # and unpinning later had to touch pywebview from a worker.
+                # Raise and keep on top so the in-app question is seen; the
+                # page lets go (release_on_top) at the user's first click or
+                # key, so the window does not cover their other apps for good.
                 self._raise_window()
                 self._close_thread = threading.Thread(target=self._check_and_close, daemon=True)
                 self._close_thread.start()
@@ -327,6 +328,8 @@ class DesktopCommands:
             if use_native:
                 proceed = self._window is not None and self._window.create_confirmation_dialog(
                     "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
+                # Answering the native question was the user's interaction.
+                self.release_on_top()
             if proceed and self._window is not None:
                 self._closing_confirmed = True
                 self._window.destroy()
@@ -410,10 +413,12 @@ class DesktopCommands:
             return None
 
     def _raise_window(self) -> None:
-        """Bring the app in front of other windows once, so an in-app confirm
-        is visible after the user clicks Close / Alt+F4 while another app is
-        focused (otherwise the vetoed close looks like a hang). Runs on the
-        thread that handles the close (pywebview's GUI thread)."""
+        """Bring the app in front of other windows and keep it topmost, so an
+        in-app confirm is visible after the user clicks Close / Alt+F4 while
+        another app is focused (otherwise the vetoed close looks like a hang,
+        and letting go at once drops it straight behind again). Runs on the
+        thread that handles the close (pywebview's GUI thread);
+        `release_on_top()` lets go."""
         window = self._window
         if not window:
             return
@@ -430,17 +435,39 @@ class DesktopCommands:
             window.on_top = False
         except Exception:
             pass
-        self._win32_to_front(pin=False)
+        if self._win32_to_front(pin=True):
+            self._pinned = True
 
-    def _win32_to_front(self, *, pin: bool) -> None:
-        if sys.platform != "win32":
+    def release_on_top(self):
+        """Let go of the topmost pin from `_raise_window()` (the page calls this
+        at the user's first click or key). Win32 only: pywebview's on_top is
+        not marshalled to the GUI thread, and setting it from here hung."""
+        if self._pinned:
+            self._pinned = False
+            self._win32_unpin()
+
+    def _win32_unpin(self) -> None:
+        hwnd = self._native_hwnd()
+        if not hwnd:
             return
+        try:
+            import ctypes
+
+            flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+            ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)  # HWND_NOTOPMOST
+        except Exception as e:
+            log.debug("unpin window failed: %s", e)
+
+    def _win32_to_front(self, *, pin: bool) -> bool:
+        """True when the window was brought forward (and pinned, with `pin`)."""
+        if sys.platform != "win32":
+            return False
         try:
             import ctypes
 
             hwnd = self._native_hwnd()
             if not hwnd:
-                return
+                return False
             user32 = ctypes.windll.user32
             flags = 0x0001 | 0x0002 | 0x0040  # NOSIZE | NOMOVE | SHOWWINDOW
             user32.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -448,8 +475,10 @@ class DesktopCommands:
             if not pin:
                 user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)  # HWND_NOTOPMOST
             self._take_foreground(user32, hwnd)
+            return True
         except Exception as e:
             log.debug("bring-to-front failed: %s", e)
+            return False
 
     @staticmethod
     def _take_foreground(user32, hwnd) -> None:

@@ -4,7 +4,7 @@ from atlas_toolkit_app.app.desktop_commands import DesktopCommands, RPC_METHODS
 
 
 def test_rpc_boundary():
-    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster return_folder finish_return'.split())
+    assert RPC_METHODS == frozenset('startup get_pref set_pref set_window_title pick_atlas pick_mod_image pick_skel pick_page_image pick_save_folder pick_save_file existing_output_names write_files open_url open_update_log get_update_download_progress download_update restart_and_install_update install_update_from_file close_answer log open_log_folder copy_image copy_raster return_folder finish_return release_on_top'.split())
 
 
 def test_rpc_allowlist_on_class_and_instance(commands):
@@ -672,3 +672,41 @@ def test_files_opened_together_bring_their_skel(commands, tmp_path):
     commands.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(atlas)}]}})
     assert sub.get(timeout=2)["bundle"]["skel"] is None
     sub.close()
+
+
+def _record_win32(commands, monkeypatch):
+    calls = []
+    monkeypatch.setattr(commands, "_win32_to_front", lambda *, pin: calls.append(("front", pin)) or True)
+    monkeypatch.setattr(commands, "_win32_unpin", lambda: calls.append(("unpin",)))
+    return calls
+
+
+def test_close_question_keeps_the_window_on_top_until_the_user_interacts(commands, monkeypatch):
+    calls = _record_win32(commands, monkeypatch)
+    commands._is_unsaved = lambda: True
+    sub = commands._events.subscribe()
+    assert commands.on_closing() is False
+    assert next(sub)["kind"] == "confirm-close"
+    assert calls == [("front", True)]
+    commands.release_on_top()          # first click or key in the page
+    commands.release_on_top()          # later ones do nothing
+    assert calls == [("front", True), ("unpin",)]
+    commands.close_answer(False)
+    commands._close_thread.join(2)
+    assert calls == [("front", True), ("unpin",)]
+    sub.close()
+
+
+def test_native_close_question_lets_go_once_answered(commands, monkeypatch):
+    calls = _record_win32(commands, monkeypatch)
+    commands._is_unsaved = lambda: True
+    commands._window.confirm = False
+    assert commands.on_closing() is False
+    commands._close_thread.join(2)
+    assert calls == [("front", True), ("unpin",)]
+
+
+def test_release_on_top_without_a_pin_does_nothing(commands, monkeypatch):
+    calls = _record_win32(commands, monkeypatch)
+    commands.release_on_top()
+    assert calls == []
