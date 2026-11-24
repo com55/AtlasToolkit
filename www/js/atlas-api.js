@@ -6,7 +6,7 @@ import { rasterToUrl } from './raster-url.js';
 import { getSelectedKeys } from './state.js';
 import { platform, isTouchDevice, fileMatchesAccept, isPywebviewDesktop, fileFromUrl, siblingSkelFilename, pickSiblingSkelFile, isSkelFilename } from './platform.js';
 import { createZip } from './zip.js';
-import { withBusy, withLock, BUSY_LABEL, setBusyProgress } from './busy-overlay.js';
+import { withBusy, withLock, BUSY_LABEL, setBusyProgress, isOverlayPainted } from './busy-overlay.js';
 import { PreviewCache, viewPreviewKey } from './preview-cache.js';
 let engineStartupError = null;
 export function setEngineStartupError(error) { engineStartupError = error; }
@@ -19,8 +19,11 @@ function callHost(...args) {
 export async function awaitEngineReady() {
   const starting = engineStarting();
   if (!starting) return;
+  // The real start progress, as a ring with its percentage: in place before
+  // the overlay first paints, so the spinner never flashes (unless another
+  // busy job already owns the overlay).
+  if (!isOverlayPainted()) setBusyProgress(engineProgress() ?? 0);
   await withBusy(ENGINE_STARTING_LABEL, async () => {
-    // The real start progress, as a ring with its percentage.
     setBusyProgress(engineProgress() ?? 0);
     const off = onEngineProgress(setBusyProgress);
     try { await starting.catch(() => {}); } finally { off(); setBusyProgress(null); }

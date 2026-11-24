@@ -120,12 +120,18 @@ async function save() {
   const keys = changedKeys();
   if (!keys.length) { closeSettingsPanel(); return; }
   const partial = Object.fromEntries(keys.map(key => [key, draft[key]]));
+  // Out of the way before the repack's busy overlay paints; it comes back
+  // with the draft only if the engine refuses the settings.
+  panel()?.classList.add('hidden');
+  syncBackdrop();
   try {
     const result = await AtlasAPI.set_settings(partial);
     if (result?.state && !result.unchanged) await (await import('./modify-mode.js')).onModPreviewReceived(result);
     closeSettingsPanel();
   } catch (e) {
-    if (!(e instanceof HostError)) throw e;
+    if (!(e instanceof HostError)) { closeSettingsPanel(); throw e; }
+    panel()?.classList.remove('hidden');
+    syncBackdrop();
     await window.showAlert(e.message, 'Cannot apply setting');
   }
 }

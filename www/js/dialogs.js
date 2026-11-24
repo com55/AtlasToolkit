@@ -15,14 +15,14 @@ export function showConfirm(message, title = 'Confirm', {confirmLabel, cancelLab
     overlay.classList.remove('hidden');
     const btnConfirm = document.getElementById('btn-modal-confirm');
     const btnCancel  = document.getElementById('btn-modal-cancel');
-    // Labels for this dialog only; the default text comes back on close.
-    const labels = [btnConfirm.textContent, btnCancel.textContent];
-    if (confirmLabel) btnConfirm.textContent = confirmLabel;
-    if (cancelLabel) btnCancel.textContent = cancelLabel;
+    // Each dialog sets its own labels when it opens and leaves them while it
+    // fades out (overlay-motion.js keeps it drawn), so they never flip early.
+    btnConfirm.textContent = confirmLabel || 'Confirm';
+    btnCancel.textContent = cancelLabel || 'Cancel';
+    btnCancel.classList.remove('hidden');
     if (document.activeElement) document.activeElement.blur();
     btnConfirm.focus();
     function cleanup() {
-      [btnConfirm.textContent, btnCancel.textContent] = labels;
       overlay.classList.add('hidden');
       btnConfirm.removeEventListener('click', onConfirm);
       btnCancel.removeEventListener('click', onCancel);
@@ -55,7 +55,6 @@ export function showAlert(message, title = 'Notice') {
     document.getElementById('modal-message').innerText = message;
     const btnConfirm = document.getElementById('btn-modal-confirm');
     const btnCancel  = document.getElementById('btn-modal-cancel');
-    const confirmLabel = btnConfirm.innerText;
     btnConfirm.innerText = 'OK';
     btnCancel.classList.add('hidden');
     overlay.classList.remove('hidden');
@@ -63,8 +62,6 @@ export function showAlert(message, title = 'Notice') {
     btnConfirm.focus();
     function cleanup() {
       overlay.classList.add('hidden');
-      btnConfirm.innerText = confirmLabel;
-      btnCancel.classList.remove('hidden');
       btnConfirm.removeEventListener('click', onOk);
       window.removeEventListener('keydown', onKey);
       hideBusyStatus();

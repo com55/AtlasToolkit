@@ -157,6 +157,7 @@ body {
   background-color: #3c3c3c;
   color: #888;
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .mode-toggle-btn + .mode-toggle-btn {
@@ -1990,7 +1991,9 @@ body.host-mode #btn-save-menu {
   color: #cfd6dd;
   font-size: 12px;
   white-space: nowrap;
-  flex: none;
+  /* Shrinks (ellipsis) before the View/Edit toggle has to wrap. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 #host-badge.hidden { display: none; }
 #host-badge .btn-icon { width: 14px; height: 14px; fill: #1a8ad4; flex: none; }

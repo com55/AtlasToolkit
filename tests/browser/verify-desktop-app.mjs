@@ -280,6 +280,10 @@ try {
   await scenario('11 --return: host UI and Save & Return', null, async ({page,regions,edit,nextLine}) => {
     await regions(['a','b']);
     assert.equal((await page.locator('#host-badge').textContent()).trim(), 'From Example Host');
+    for (const id of ['#mode-extract', '#mode-modify']) {
+      const lines = await page.locator(id).evaluate(el => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; });
+      assert.equal(lines, 1, id + ' wraps next to the host badge');
+    }
     for (const hidden of ['.btn-open', '#start-card', '#btn-save-menu']) {
       assert.equal(await page.locator(hidden).isVisible(), false, hidden + ' visible');
     }
@@ -307,7 +311,14 @@ try {
     assert.equal((await page.locator('#btn-modal-confirm').textContent()).trim(), 'Discard');
     await page.locator('#btn-modal-cancel').click();
     await page.locator('#modal-overlay.hidden').waitFor({state: 'attached'});
+    // The closing dialog fades out with its own labels.
+    assert.equal((await page.locator('#btn-modal-cancel').textContent()).trim(), 'Keep editing');
+    const plain = page.evaluate(() => window.showConfirm('x', 'y'));
+    await page.locator('#modal-overlay:not(.hidden)').waitFor();
     assert.equal((await page.locator('#btn-modal-confirm').textContent()).trim(), 'Confirm');
+    assert.equal((await page.locator('#btn-modal-cancel').textContent()).trim(), 'Cancel');
+    await page.locator('#btn-modal-cancel').click();
+    assert.equal(await plain, false);
     assert.equal(fs.existsSync(path.join(returnPrompt, 'result.json')), false);
   }, returnArgs(returnPrompt));
 } finally {

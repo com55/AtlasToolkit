@@ -969,9 +969,17 @@ try {
   }
   await pendingPage.locator('[data-packer="polygons"]').click();
   await pendingPage.waitForFunction(() => document.querySelector('[data-setting="meshAware"]')?.disabled && document.querySelector('[data-setting="meshAware"]')?.checked, null, {polling:500});
+  await pendingPage.evaluate(() => {
+    window.panelUnderBusy = false;
+    const busy = document.getElementById('busy-overlay');
+    new MutationObserver(() => {
+      if (!busy.classList.contains('hidden') && !document.getElementById('pack-panel').classList.contains('hidden')) window.panelUnderBusy = true;
+    }).observe(busy, {attributes: true, attributeFilter: ['class']});
+  });
   await pendingPage.locator('#pack-save').click();
   await pendingPage.locator('#pack-panel').waitFor({state:'hidden'});
   await waitForEdit(pendingPage);
+  if (await pendingPage.evaluate(() => window.panelUnderBusy)) throw new Error('Settings panel stayed open behind the busy overlay');
   await returnPendingToView();
   await loadPendingFixture(false);
   await pendingPage.locator('#mode-modify').click();
