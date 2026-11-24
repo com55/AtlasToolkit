@@ -105,17 +105,19 @@ function webHarness(t) {
   t.after(() => { globalThis.window = saved.window; globalThis.document = saved.document; setHostContext(null); });
   let sink = null;
   const confirms = [];
-  return {
+  const h = { answer: false, discarded: 0 };
+  return Object.assign(h, {
     posted, nodes,
     deps: {
       appVersion: '1', waitForEngine: async () => {}, loadFiles: async () => true, hasPending: () => true,
-      showConfirm: async (...args) => { confirms.push(args); return false; }, confirms,
+      showConfirm: async (...args) => { confirms.push(args); return h.answer; }, confirms,
+      discardEdits: async () => { h.discarded++; },
       withBusy: async (_label, fn) => fn(), setSaveSink: s => { sink = s; }, setDownloadSink() {},
     },
     sink: () => sink,
     send: (data, source = parent, origin = 'https://h.example') =>
       listeners.forEach(fn => fn({ origin, source, data: { atlasToolkitHost: 1, ...data } })),
-  };
+  });
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -147,4 +149,19 @@ test('a web save from another window or origin is ignored; close-request cancels
   await tick(); await tick();
   assert.deepEqual(done, { ok: false, message: 'Cancelled' });
   assert.equal(h.posted.at(-1).data.type, 'close');
+});
+
+test('close-request: Discard throws the edits away so the same frame can open the next atlas', async t => {
+  const { initWebHost } = await import('../www/js/host-mode.js');
+  const h = webHarness(t);
+  initWebHost('https://h.example', h.deps);
+  h.send({ type: 'close-request' });
+  await tick(); await tick();
+  assert.equal(h.discarded, 0);
+  assert.deepEqual(h.posted.at(-1).data, { atlasToolkitHost: 1, type: 'close', ok: false });
+  h.answer = true;
+  h.send({ type: 'close-request' });
+  await tick(); await tick();
+  assert.equal(h.discarded, 1);
+  assert.deepEqual(h.posted.at(-1).data, { atlasToolkitHost: 1, type: 'close', ok: true });
 });

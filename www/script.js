@@ -203,6 +203,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       waitForEngine: async () => { await awaitEngineReady(); await engineReady; },
       hasPending: () => AtlasAPI.has_pending_modifications(),
       showConfirm,
+      discardEdits: () => exitEditMode({confirm: false}),
       loadFiles: async files => {
         const ok = await AtlasAPI.load_from_files(files, {showNoAtlasToast: true});
         if (ok === true) await _resetUiAfterFreshLoad();

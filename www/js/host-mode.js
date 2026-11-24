@@ -102,7 +102,7 @@ export function initDesktopHost(job, {desktopCall, writeFilesToFolder, setSaveSi
  * `deps` are the app pieces this needs, passed in so the module stays testable.
  */
 export function initWebHost(origin, deps) {
-  const {appVersion, waitForEngine, loadFiles, hasPending, showConfirm, withBusy, setSaveSink, setDownloadSink} = deps;
+  const {appVersion, waitForEngine, loadFiles, hasPending, showConfirm, discardEdits, withBusy, setSaveSink, setDownloadSink} = deps;
   const parent = window.parent;
   const post = message => parent.postMessage({atlasToolkitHost: PROTOCOL, ...message}, origin);
   const pendingSaves = new Map();
@@ -157,6 +157,9 @@ export function initWebHost(origin, deps) {
     if (hasPending()) {
       const question = discardQuestion(ctx);
       ok = await showConfirm(question.message, question.title, question.labels);
+      // A host may keep this frame for the next atlas: drop the edits now,
+      // so its next "open" does not ask about them again.
+      if (ok) await discardEdits();
     }
     post({type: 'close', ok});
   }

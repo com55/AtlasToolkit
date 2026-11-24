@@ -126,6 +126,13 @@ listener before you set the iframe's `src`: `ready` is sent once.
 | app → host | `close {ok}` | `ok: false`: the user kept editing. |
 | app → host | `download {filename, blob}` | A file the user saved from inside the frame (Save Image, Extract). |
 
+Starting the engine takes a few seconds in every new frame. To skip that on
+the next atlas, keep the iframe: after `close {ok: true}` hide it instead of
+removing it, and send the next `open` to the same frame. A Discard on close has
+already dropped the edits, so that `open` loads straight away. You can also
+create the frame hidden ahead of time so the engine is ready before the user
+asks for it. The frame holds a few hundred MB while it lives.
+
 Inside an iframe on another site, the browser keeps AtlasToolkit's storage
 separate from a normal visit, so the engine downloads once more (about 17 MB)
 and preferences start fresh.

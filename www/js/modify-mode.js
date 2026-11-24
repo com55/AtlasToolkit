@@ -118,13 +118,15 @@ export async function enterEditMode() {
   }
 }
 
-export async function exitEditMode() {
+/** Leave Edit Mode, asking before pending edits are dropped; `confirm: false`
+ *  drops them without asking (the caller already asked, e.g. host mode's close). */
+export async function exitEditMode({confirm = true} = {}) {
   if (isBusy()) { noteBusyConflict(); return; }
   // Captured before anything below rebuilds state.regionsData, so the
   // reconcile-by-key inside refreshStructuralUi() carries the selection
   // across into View Mode instead of dropping it.
   const prevSelectedKeys = getSelectedKeys();
-  if (AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
+  if (confirm && AtlasAPI.has_pending_modifications && AtlasAPI.has_pending_modifications()) {
     const ok = await showConfirm(
       // matches old Python engine's ui/js/ui.js DISCARD_MOD_MESSAGE exactly
       'You have unsaved atlas modifications.\nContinue and discard them?',

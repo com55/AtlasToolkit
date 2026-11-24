@@ -239,6 +239,34 @@ try {
   if (await frame.locator('[title]').count() !== 0) throw new Error('a [title] attribute in the frame');
   pass('5 Save Image goes to the host as a PNG download; no [title]');
 
+  // The host keeps the frame: Discard on close drops the edits, and the next
+  // open in the same frame loads at once, with no engine wait and no question.
+  await frame.locator('#mode-modify').click();
+  await waitInFrame(frame, async () => document.body.classList.contains('mode-modify') && !(await window.__appModule('busy-overlay')).isBusy());
+  await frame.evaluate(async bytes => {
+    const {AtlasAPI} = await window.__appModule('atlas-api');
+    const {onModPreviewReceived} = await window.__appModule('modify-mode');
+    await onModPreviewReceived(await AtlasAPI.process_mod_image(new File([new Uint8Array(bytes)], 'edit.png'), ['mesh_a']));
+  }, editBytes);
+  await waitInFrame(frame, async () => (await window.__appModule('atlas-api')).AtlasAPI.has_pending_modifications());
+  await page.evaluate(() => window.send({type: 'close-request'}));
+  await frame.locator('#modal-overlay:not(.hidden)').waitFor();
+  await frame.locator('#btn-modal-confirm').click();
+  await page.waitForFunction(() => window.got('close').length === 2, null, {polling: 500});
+  if (await page.evaluate(() => window.got('close')[1].ok) !== true) throw new Error('close ok after Discard');
+  await waitInFrame(frame, async () => !(await window.__appModule('atlas-api')).AtlasAPI.has_pending_modifications()
+    && document.body.classList.contains('mode-extract'));
+  await page.evaluate(async () => {
+    const text = 'q.png\nsize: 32,32\nsecond\n bounds: 0,0,8,8\n';
+    const png = new Blob([new Uint8Array(window.editPNG)], {type: 'image/png'});
+    window.send({type: 'open', hostName: 'Example Host', files: [new File([text], 'second.atlas'), new File([png], 'q.png', {type: 'image/png'})]});
+  });
+  await page.waitForFunction(() => window.got('opened').length === 2 || window.got('open-failed').length > 0, null, {polling: 500, timeout: 60000});
+  if (await page.evaluate(() => window.got('opened')[1]?.atlas) !== 'second.atlas') throw new Error('second open: ' + JSON.stringify(await page.evaluate(() => window.__msgs.slice(-3))));
+  await frame.locator('.region-item[data-label="second"]').waitFor();
+  if (await frame.locator('#modal-overlay:not(.hidden)').count()) throw new Error('second open asked a question');
+  pass('7 Discard on close drops the edits; the same frame opens the next atlas without asking');
+
   // Without ?host the framed app is the normal app.
   const plain = await context.newPage();
   await plain.goto(`${hostOrigin}/?nohost=1&app=${encodeURIComponent(appOrigin)}`);
