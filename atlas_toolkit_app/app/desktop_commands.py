@@ -413,53 +413,81 @@ class DesktopCommands:
             return None
 
     def _raise_window(self) -> None:
-        """Bring the app in front of other windows and keep it topmost, so an
-        in-app confirm is visible after the user clicks Close / Alt+F4 while
-        another app is focused (otherwise the vetoed close looks like a hang,
-        and letting go at once drops it straight behind again). Runs on the
-        thread that handles the close (pywebview's GUI thread);
-        `release_on_top()` lets go."""
+        """Bring the app forward and keep it on top while the close question
+        is open, so it is seen after the user closes from the taskbar while
+        another app is focused. Runs in pywebview's closing handler, on the
+        GUI thread, so setting on_top (WinForms Form.TopMost) here is safe;
+        `release_on_top()` lets go on the GUI thread too. TopMost is kept in
+        WinForms only: a raw SetWindowPos topmost leaves Form.TopMost out of
+        step. The foreground is asked for, not forced: AttachThreadInput can
+        hang (Raymond Chen, "The dangers of attaching input queues"), and a
+        topmost window is visible anyway."""
         window = self._window
         if not window:
             return
-        try:
-            window.restore()
-        except Exception:
-            pass
-        try:
-            window.show()
-        except Exception:
-            pass
+        for action in (window.restore, window.show):
+            try:
+                action()
+            except Exception:
+                pass
         try:
             window.on_top = True
-            window.on_top = False
+            self._pinned = True
         except Exception:
             pass
-        if self._win32_to_front(pin=True):
-            self._pinned = True
+        self._ask_foreground()
 
     def release_on_top(self):
-        """Let go of the topmost pin from `_raise_window()` (the page calls this
-        at the user's first click or key). Win32 only: pywebview's on_top is
-        not marshalled to the GUI thread, and setting it from here hung."""
-        if self._pinned:
-            self._pinned = False
-            self._win32_unpin()
+        """Let go of the pin from `_raise_window()`; the page calls this at the
+        user's first click or key. Any thread: the change runs on the GUI thread."""
+        if not self._pinned:
+            return
+        self._pinned = False
+        window = self._window
+        if window is None:
+            return
 
-    def _win32_unpin(self) -> None:
+        def unpin():
+            try:
+                window.on_top = False
+            except Exception as e:
+                log.debug("unpin window failed: %s", e)
+        self._on_gui_thread(unpin)
+
+    def _on_gui_thread(self, fn) -> None:
+        """Run `fn` on the window's GUI thread without waiting for it.
+        pywebview sets on_top without marshalling, so a call from another
+        thread goes through the WinForms form's BeginInvoke."""
+        native = getattr(self._window, "native", None) if self._window else None
+        if sys.platform == "win32" and native is not None:
+            try:
+                from System import Func, Type  # pythonnet, as pywebview's WinForms backend
+
+                def run():
+                    fn()
+                native.BeginInvoke(Func[Type](run))
+                return
+            except Exception as e:
+                log.debug("BeginInvoke failed, running inline: %s", e)
+        fn()
+
+    def _ask_foreground(self) -> None:
+        if sys.platform != "win32":
+            return
         hwnd = self._native_hwnd()
         if not hwnd:
             return
         try:
             import ctypes
 
-            flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
-            ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)  # HWND_NOTOPMOST
+            if not ctypes.windll.user32.SetForegroundWindow(hwnd):
+                log.debug("SetForegroundWindow was refused; the window is topmost anyway")
         except Exception as e:
-            log.debug("unpin window failed: %s", e)
+            log.debug("SetForegroundWindow failed: %s", e)
 
     def _win32_to_front(self, *, pin: bool) -> bool:
-        """True when the window was brought forward (and pinned, with `pin`)."""
+        """Update relaunch only (`_bring_to_front`): forces the foreground,
+        since the hidden watcher that started us cannot hand it over."""
         if sys.platform != "win32":
             return False
         try:

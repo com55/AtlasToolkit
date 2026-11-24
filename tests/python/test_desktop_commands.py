@@ -61,8 +61,8 @@ class FakeWindow:
         self.destroyed += 1
 
     def create_confirmation_dialog(self, title, message):
-        # Raised once, never pinned: the window does not stay topmost.
-        assert self.on_top is False
+        # Pinned (Form.TopMost) while the native question is open.
+        assert self.on_top is True
         self.calls.append((title, message))
         return self.confirm
 
@@ -133,15 +133,18 @@ def test_closing(commands, subscriber, answer):
     commands._close_thread.join(2)
     assert not commands._close_thread.is_alive()
     assert window.destroyed == int(answer)
-    assert not window.on_top
+    assert window.calls[:3] == [("restore",), ("show",), ("on_top", True)]
     if not subscriber:
         assert ("Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?") in window.calls
-        assert window.calls[:4] == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
-    # Only the closing (GUI) thread touches on_top; the worker that waits for
-    # the answer never does (pywebview sets on_top without marshalling).
-    assert [c for c in window.calls if c[0] == "on_top"] == [("on_top", True), ("on_top", False)]
+        # Answering the native question is the interaction that lets go.
+        assert not window.on_top
+    else:
+        # The in-app question lets go at the page's first click or key.
+        assert window.on_top
+        commands.release_on_top()
+        assert not window.on_top
     if answer:
-        assert ("destroy", False) in window.calls
+        assert any(call[0] == "destroy" for call in window.calls)
     commands.close_answer(True)
     if subscriber:
         sub.close()
@@ -478,14 +481,14 @@ def test_close_raises_synchronously_before_worker(commands, monkeypatch):
     commands._is_unsaved = lambda: True
     starts = []
     def start(thread):
-        assert commands._window.calls == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
+        assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
         starts.append(thread)
     monkeypatch.setattr(threading.Thread, "start", start)
     assert commands.on_closing() is False
     assert len(starts) == 1
     assert commands.on_closing() is False
     assert len(starts) == 1
-    assert commands._window.calls == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
+    assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
 
 
 @pytest.mark.parametrize("dev", [False, True])
@@ -674,39 +677,42 @@ def test_files_opened_together_bring_their_skel(commands, tmp_path):
     sub.close()
 
 
-def _record_win32(commands, monkeypatch):
-    calls = []
-    monkeypatch.setattr(commands, "_win32_to_front", lambda *, pin: calls.append(("front", pin)) or True)
-    monkeypatch.setattr(commands, "_win32_unpin", lambda: calls.append(("unpin",)))
-    return calls
+def _gui_calls(commands, monkeypatch):
+    """Record what is sent to the GUI thread (run at once in tests)."""
+    sent = []
+    monkeypatch.setattr(commands, "_on_gui_thread", lambda fn: (sent.append(fn), fn()))
+    return sent
 
 
 def test_close_question_keeps_the_window_on_top_until_the_user_interacts(commands, monkeypatch):
-    calls = _record_win32(commands, monkeypatch)
+    sent = _gui_calls(commands, monkeypatch)
     commands._is_unsaved = lambda: True
     sub = commands._events.subscribe()
     assert commands.on_closing() is False
     assert next(sub)["kind"] == "confirm-close"
-    assert calls == [("front", True)]
-    commands.release_on_top()          # first click or key in the page
-    commands.release_on_top()          # later ones do nothing
-    assert calls == [("front", True), ("unpin",)]
+    window = commands._window
+    assert window.on_top is True and sent == []
     commands.close_answer(False)
     commands._close_thread.join(2)
-    assert calls == [("front", True), ("unpin",)]
+    assert window.on_top is True          # still pinned: no click or key yet
+    commands.release_on_top()             # first click or key in the page
+    commands.release_on_top()             # later ones do nothing
+    assert window.on_top is False
+    assert len(sent) == 1                 # let go on the GUI thread, once
+    assert [c for c in window.calls if c[0] == "on_top"] == [("on_top", True), ("on_top", False)]
     sub.close()
 
 
 def test_native_close_question_lets_go_once_answered(commands, monkeypatch):
-    calls = _record_win32(commands, monkeypatch)
+    sent = _gui_calls(commands, monkeypatch)
     commands._is_unsaved = lambda: True
     commands._window.confirm = False
     assert commands.on_closing() is False
     commands._close_thread.join(2)
-    assert calls == [("front", True), ("unpin",)]
+    assert commands._window.on_top is False and len(sent) == 1
 
 
 def test_release_on_top_without_a_pin_does_nothing(commands, monkeypatch):
-    calls = _record_win32(commands, monkeypatch)
+    sent = _gui_calls(commands, monkeypatch)
     commands.release_on_top()
-    assert calls == []
+    assert sent == [] and commands._window.calls == []
