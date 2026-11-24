@@ -61,7 +61,8 @@ class FakeWindow:
         self.destroyed += 1
 
     def create_confirmation_dialog(self, title, message):
-        assert self.on_top is True
+        # Raised once, never pinned: the window does not stay topmost.
+        assert self.on_top is False
         self.calls.append((title, message))
         return self.confirm
 
@@ -135,7 +136,10 @@ def test_closing(commands, subscriber, answer):
     assert not window.on_top
     if not subscriber:
         assert ("Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?") in window.calls
-        assert window.calls[:3] == [("restore",), ("show",), ("on_top", True)]
+        assert window.calls[:4] == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
+    # Only the closing (GUI) thread touches on_top; the worker that waits for
+    # the answer never does (pywebview sets on_top without marshalling).
+    assert [c for c in window.calls if c[0] == "on_top"] == [("on_top", True), ("on_top", False)]
     if answer:
         assert ("destroy", False) in window.calls
     commands.close_answer(True)
@@ -474,14 +478,14 @@ def test_close_raises_synchronously_before_worker(commands, monkeypatch):
     commands._is_unsaved = lambda: True
     starts = []
     def start(thread):
-        assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
+        assert commands._window.calls == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
         starts.append(thread)
     monkeypatch.setattr(threading.Thread, "start", start)
     assert commands.on_closing() is False
     assert len(starts) == 1
     assert commands.on_closing() is False
     assert len(starts) == 1
-    assert commands._window.calls == [("restore",), ("show",), ("on_top", True)]
+    assert commands._window.calls == [("restore",), ("show",), ("on_top", True), ("on_top", False)]
 
 
 @pytest.mark.parametrize("dev", [False, True])

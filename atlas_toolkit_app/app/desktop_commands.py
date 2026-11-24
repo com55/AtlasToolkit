@@ -297,7 +297,10 @@ class DesktopCommands:
                 self._close_check_in_progress = True
                 self._close_event = threading.Event()
                 self._close_proceed = False
-                self._raise_window(pin=True)
+                # Raise once so the in-app question is seen, then let go: a
+                # pinned (topmost) window would cover the user's other apps,
+                # and unpinning later had to touch pywebview from a worker.
+                self._raise_window()
                 self._close_thread = threading.Thread(target=self._check_and_close, daemon=True)
                 self._close_thread.start()
             elif self._events.has_subscriber:
@@ -312,21 +315,18 @@ class DesktopCommands:
 
     def _check_and_close(self):
         try:
-            try:
-                proceed = False
-                use_native = not self._events.has_subscriber
-                if not use_native:
-                    self._events.publish("confirm-close")
-                    while not self._close_event.wait(1.0):
-                        if not self._events.has_subscriber:
-                            use_native = not self._close_event.is_set()
-                            break
-                    proceed = self._close_proceed
-                if use_native:
-                    proceed = self._window is not None and self._window.create_confirmation_dialog(
-                        "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
-            finally:
-                self._unpin_window()
+            proceed = False
+            use_native = not self._events.has_subscriber
+            if not use_native:
+                self._events.publish("confirm-close")
+                while not self._close_event.wait(1.0):
+                    if not self._events.has_subscriber:
+                        use_native = not self._close_event.is_set()
+                        break
+                proceed = self._close_proceed
+            if use_native:
+                proceed = self._window is not None and self._window.create_confirmation_dialog(
+                    "Discard modifications?", "You have unsaved atlas modifications.\nContinue and discard them?")
             if proceed and self._window is not None:
                 self._closing_confirmed = True
                 self._window.destroy()
@@ -409,15 +409,11 @@ class DesktopCommands:
         except Exception:
             return None
 
-    def _raise_window(self, *, pin: bool = False) -> None:
-        """Bring the app in front of other windows so an in-app confirm is
-        visible after the user clicks Close / Alt+F4 while another app is
-        focused (otherwise the vetoed close looks like a hang).
-
-        `pin=True` leaves the window topmost until `_unpin_window()`.
-        Explorer keeps the foreground lock, so dropping topmost (or any
-        later focus change, e.g. the confirm button) lets it cover us
-        again — stay pinned for the life of that modal."""
+    def _raise_window(self) -> None:
+        """Bring the app in front of other windows once, so an in-app confirm
+        is visible after the user clicks Close / Alt+F4 while another app is
+        focused (otherwise the vetoed close looks like a hang). Runs on the
+        thread that handles the close (pywebview's GUI thread)."""
         window = self._window
         if not window:
             return
@@ -431,11 +427,10 @@ class DesktopCommands:
             pass
         try:
             window.on_top = True
-            if not pin:
-                window.on_top = False
+            window.on_top = False
         except Exception:
             pass
-        self._win32_to_front(pin=pin)
+        self._win32_to_front(pin=False)
 
     def _win32_to_front(self, *, pin: bool) -> None:
         if sys.platform != "win32":
@@ -472,31 +467,6 @@ class DesktopCommands:
         finally:
             if attached:
                 user32.AttachThreadInput(current, owner, False)
-
-    def _unpin_window(self) -> None:
-        """Drop the temporary always-on-top from `_raise_window(pin=True)`.
-
-        Call only after the user has clicked the in-app confirm — that
-        click gives us the foreground lock, so Explorer stays behind."""
-        window = self._window
-        if not window:
-            return
-        try:
-            window.on_top = False
-        except Exception:
-            pass
-        hwnd = self._native_hwnd()
-        if not hwnd:
-            return
-        try:
-            import ctypes
-
-            flags = 0x0001 | 0x0002 | 0x0040  # NOSIZE | NOMOVE | SHOWWINDOW
-            ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-        except Exception as e:
-            log.debug("unpin window failed: %s", e)
-
 
     def open_update_log(self) -> dict[str, Any]:
         try:
