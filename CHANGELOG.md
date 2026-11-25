@@ -5,7 +5,9 @@ tags and the [GitHub Releases](https://github.com/com55/AtlasToolkit/releases),
 which carry the full notes and screenshots. The `spine-atlas-toolkit` library
 has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-25 - app
+
+App only; the library is unchanged.
 
 ### Added
 - Before an atlas is open, a card in the preview area says which files to
@@ -18,6 +20,8 @@ has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
 - Desktop: `--capabilities <file>` writes the app version and the host-mode
   protocol it supports to `<file>` and exits, so a calling program can check
   before it relies on `--return`.
+- While a file waits for the engine to start, the busy overlay shows the
+  real progress as a ring with the percentage in its centre.
 
 ### Changed
 - The .skel opened together with an atlas is used even when its name differs
@@ -26,6 +30,20 @@ has its own [changelog](packages/spine-atlas-toolkit/CHANGELOG.md).
 - Desktop: Open can select the atlas, its images and its .skel together
   (default filter `*.atlas`; also `*.atlas;*.png;*.skel` and All files), and a
   drop of several files opens the atlas among them with its .skel.
+- Phones, portrait: the splitter opens just tall enough for the start card,
+  cannot squeeze the card, and is no longer remembered between visits (it
+  stays put when an atlas opens).
+- Desktop: closing with unsaved edits brings the window forward (or flashes
+  its taskbar button) each time, including a second close while the question
+  is open; it no longer stays on top.
+
+### Fixed
+- Two fingers on the preview pan while they zoom, and one finger keeps
+  panning after a pinch.
+- Installed PWA on Android: the end of the region list is no longer hidden
+  behind the navigation bar.
+- Saving settings closes the panel before the busy overlay appears.
+- Dialog buttons keep their labels while the dialog fades out.
 
 ## [1.0.1] - 2026-11-23 - app
 
